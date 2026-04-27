@@ -1,5 +1,11 @@
 # Red Hat AI Inference Server (RHAIIS) — OpenAI-compatible inference endpoint
 #
+# Demo-grade Deployment. Hardening (STIG, FIPS, restricted-v2 overrides,
+# readOnlyRootFilesystem) is intentionally NOT applied here — booth demo
+# values simplicity. OCP applies its baseline restricted-v2 SCC by default
+# which is sufficient for the demo. Production deployments should re-add
+# explicit hardening; see docs/architecture.md.
+#
 # Verified to expose:
 #   POST /v1/chat/completions   (with tools / tool_choice for tool-calling)
 #   POST /v1/completions
@@ -13,9 +19,6 @@
 #   --tool-call-parser mistral       (Mistral / Mixtral Instruct)
 #   --tool-call-parser deepseek      (DeepSeek-V3 / DeepSeek-Coder-V2.5+)
 #
-# CPU-only sizing below works for Granite-3.1-8B at low concurrency (booth /
-# dev). Use a GPU node and scale request resources for production loads.
-#
 # Pull-secret expectation: a `redhat-pull-secret` of type
 # kubernetes.io/dockerconfigjson exists in this namespace, sourced from your
 # Red Hat subscription (registry.redhat.io). Create it with:
@@ -25,6 +28,10 @@
 #     --docker-username='<RH_USERNAME>' \
 #     --docker-password='<RH_TOKEN>' \
 #     --namespace=ocp-ai
+#
+# Sizing: CPU defaults below run Granite-3.1-8B-Instruct at low concurrency
+# (booth use). For production GPU serving, replace image with vllm-cuda-rhel9
+# and add `nvidia.com/gpu: 1` to limits + a node selector for the GPU pool.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -50,16 +57,13 @@ spec:
     spec:
       imagePullSecrets:
         - name: redhat-pull-secret
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
       containers:
         - name: vllm
-          # TODO: pin to a specific tag from registry.redhat.io after verifying
-          # tool-call parser support in your target RHAIIS version.
+          # `latest` per RH Summit 2026 demo preference. For production, pin
+          # to a specific tag from registry.redhat.io after verifying tool-call
+          # parser support in your target RHAIIS version.
           image: registry.redhat.io/rhoai/vllm-cpu-rhel9:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           args:
             - --model
             - ibm-granite/granite-3.1-8b-instruct
@@ -70,10 +74,8 @@ spec:
             - 0.0.0.0
             - --port
             - "8000"
-            # Modest context for booth demos; tune for production.
             - --max-model-len
             - "8192"
-            # Single-tenant booth — disable telemetry.
             - --disable-log-requests
           ports:
             - name: http
@@ -81,9 +83,6 @@ spec:
           env:
             - name: HF_HOME
               value: /tmp/hf-cache
-            # If the model is not pre-baked into the image, vLLM will download
-            # from Hugging Face on first start. For air-gap / production,
-            # bake or sideload the model into a PVC and point HF_HOME there.
             - name: HF_HUB_OFFLINE
               value: "0"
           resources:
@@ -109,11 +108,6 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 4
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            readOnlyRootFilesystem: false   # vLLM writes to HF cache; volume below
           volumeMounts:
             - name: hf-cache
               mountPath: /tmp/hf-cache

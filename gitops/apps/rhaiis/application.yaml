@@ -1,0 +1,39 @@
+# RHAIIS / vLLM — managed by Argo CD from manifests/rhaiis/ in this repo.
+#
+# Sync waves: this lands AFTER Coder so AI Gateway has somewhere to point at
+# (Coder is sync-wave 1, this is sync-wave 2).
+#
+# Pre-requisite: the `redhat-pull-secret` must exist in the `ocp-ai`
+# namespace before the Deployment can pull the RHAIIS image. Argo CD won't
+# create that for you — do it once manually:
+#   oc create namespace ocp-ai 2>/dev/null || true
+#   oc create secret docker-registry redhat-pull-secret \
+#     --docker-server=registry.redhat.io \
+#     --docker-username='<RH_USERNAME>' \
+#     --docker-password='<RH_TOKEN>' \
+#     --namespace=ocp-ai
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rhaiis
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/rhaiis
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ocp-ai
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true

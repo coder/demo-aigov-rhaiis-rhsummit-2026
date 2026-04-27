@@ -1,0 +1,39 @@
+# Argo CD root Application (app-of-apps pattern)
+#
+# Points Argo CD at gitops/apps/ in this repo. Argo discovers every
+# Application manifest under that directory and creates them, fanning out
+# to Coder, RHAIIS, and Agent Firewalls. Adding a new app is a one-file
+# commit — drop a new Application YAML under gitops/apps/<name>/ and
+# Argo picks it up on the next sync.
+#
+# Apply with: oc apply -f root-app.yaml
+#
+# After apply, watch with:
+#   oc get applications -n openshift-gitops -w
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: gitops/apps
+    directory:
+      recurse: true
+      include: "*/application.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openshift-gitops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

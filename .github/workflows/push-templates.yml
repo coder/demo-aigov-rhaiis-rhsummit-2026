@@ -1,0 +1,64 @@
+name: Push templates to Coder
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "coder-templates/**"
+      - ".github/workflows/push-templates.yml"
+  workflow_dispatch:
+    inputs:
+      template:
+        description: "Template directory under coder-templates/ to push (e.g., openshift-ai-gov)"
+        required: true
+        default: "openshift-ai-gov"
+
+permissions:
+  contents: read
+
+jobs:
+  push:
+    name: coder templates push
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        template: ${{ fromJSON(inputs.template && format('["{0}"]', inputs.template) || '["openshift-ai-gov"]') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install coder CLI
+        run: |
+          curl -L https://coder.com/install.sh | sh -s -- --version 2.34.0-rc.0
+          coder --version
+
+      - name: coder login
+        env:
+          CODER_URL: ${{ secrets.CODER_URL }}
+          CODER_SESSION_TOKEN: ${{ secrets.CODER_SESSION_TOKEN }}
+        run: |
+          coder login "$CODER_URL" --token "$CODER_SESSION_TOKEN"
+          coder users show me
+
+      - name: coder templates push
+        env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          AI_GATEWAY_URL: ${{ secrets.AI_GATEWAY_URL }}
+          NAMESPACE: ${{ vars.WORKSPACE_NAMESPACE || 'coder-workspaces' }}
+        run: |
+          cd coder-templates/${{ matrix.template }}
+          coder templates push ${{ matrix.template }} \
+            --directory . \
+            --variable namespace="$NAMESPACE" \
+            --variable ecr_registry="$ECR_REGISTRY" \
+            --variable ai_gateway_url="$AI_GATEWAY_URL" \
+            --yes \
+            --message "GH Actions push from ${{ github.sha }}"
+
+      - name: Summary
+        run: |
+          echo "## Pushed template" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ matrix.template }}\` → ${{ secrets.CODER_URL }}/templates" >> $GITHUB_STEP_SUMMARY
+          echo "- Source commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY

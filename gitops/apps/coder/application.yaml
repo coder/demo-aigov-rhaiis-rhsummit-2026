@@ -1,0 +1,94 @@
+# Coder — installed via the upstream Helm chart, latest RC for full Coder
+# Agents Early Access functionality.
+#
+# Values are inline below. For the demo we accept a few simplifications vs.
+# production:
+#   - Postgres URL is set via a secret created out-of-band (see Notes below)
+#   - `restricted-v2` SCC defaults are NOT overridden (no STIG/FIPS posture)
+#   - Wildcard route is created via the Coder chart's ingress.openshift section
+#
+# NOTES:
+#   - Before this Application can sync, create the DB-URL secret:
+#       oc create namespace coder
+#       oc create secret generic coder-db-url \
+#         -n coder \
+#         --from-literal=url='postgres://coder:<RDS_PASSWORD>@<RDS_ENDPOINT>:5432/coder?sslmode=require'
+#     The Terraform RDS password is in Terraform state — bring it across with:
+#       cd terraform && terraform output -raw rds_endpoint   # then add to URL
+#   - The chart version + image tag track Coder release-candidate releases.
+#     Bump as new RCs ship. Linear: project `0e26deb1` (Coder Agents) —
+#     verify the May Beta milestone before booth.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coder
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://helm.coder.com/v2
+    chart: coder
+    targetRevision: 2.34.0-rc.0       # latest RC at repo seed time; bump as new RCs ship
+    helm:
+      releaseName: coder
+      values: |
+        coder:
+          image:
+            repo: ghcr.io/coder/coder
+            tag: v2.34.0-rc.0          # match chart targetRevision
+            pullPolicy: IfNotPresent
+
+          env:
+            - name: CODER_ACCESS_URL
+              value: "https://coder.apps.rhsummit-demo.aws.example.com"   # update to your cluster_fqdn
+            - name: CODER_WILDCARD_ACCESS_URL
+              value: "*.coder.apps.rhsummit-demo.aws.example.com"
+            - name: CODER_PG_CONNECTION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: coder-db-url
+                  key: url
+            - name: CODER_PROMETHEUS_ENABLE
+              value: "true"
+            # Coder Agents Early Access flag
+            - name: CODER_EXPERIMENTS
+              value: "agents"
+            # Disable telemetry / direct connections for demo network
+            - name: CODER_DISABLE_DIRECT_CONNECTIONS
+              value: "true"
+            - name: CODER_DISABLE_NETWORK_TELEMETRY
+              value: "true"
+            - name: CODER_DISABLE_USAGE_STATS
+              value: "true"
+
+          replicaCount: 1     # demo — bump to 3 for HA
+
+          # Use OpenShift Routes via the chart's built-in support
+          ingress:
+            enable: false      # We'll create OpenShift Route separately if needed
+
+          serviceAccount:
+            workspacePerms: true
+            enableDeployments: true
+
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: coder
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

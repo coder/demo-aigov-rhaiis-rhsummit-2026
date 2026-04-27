@@ -1,0 +1,280 @@
+###############################################################################
+# OpenShift IPI install + supporting AWS infra (Aurora Postgres, ECR, GHA OIDC)
+#
+# Flow:
+#   1. Read pull secret + ssh public key
+#   2. Create RDS Aurora Postgres (Coder DB) — independent of cluster
+#   3. Create ECR repos for workspace base images
+#   4. Optionally create IAM role + OIDC provider for GitHub Actions
+#   5. Render install-config.yaml from template into <install_dir>
+#   6. Run `openshift-install create cluster --dir=<install_dir>` (~30–45 min)
+#   7. Install OpenShift GitOps operator + bootstrap Argo CD root Application
+#
+# `terraform destroy` runs `openshift-install destroy cluster` first, then
+# tears down RDS / ECR / IAM. The cluster install dir is preserved on disk
+# for debugging — wipe it manually after destroy if you need a clean slate.
+#
+# IMPORTANT: openshift-install creates its own VPC / subnets / IAM by default.
+# We do NOT pre-provision a VPC here; the installer owns that. If you need to
+# install into an existing VPC ("BYO-VPC"), edit install-config.yaml.tftpl
+# accordingly per the OCP IPI docs.
+###############################################################################
+
+###############################################################################
+# Data sources
+###############################################################################
+
+data "aws_caller_identity" "current" {}
+
+data "aws_region" "current" {}
+
+data "aws_route53_zone" "base" {
+  name         = var.base_domain
+  private_zone = false
+}
+
+data "local_file" "pull_secret" {
+  filename = pathexpand(var.pull_secret_path)
+}
+
+data "local_file" "ssh_pubkey" {
+  filename = pathexpand(var.ssh_pubkey_path)
+}
+
+###############################################################################
+# RDS Aurora Postgres for Coder
+###############################################################################
+
+resource "random_password" "rds" {
+  length  = 24
+  special = false
+}
+
+resource "aws_rds_cluster" "coder" {
+  cluster_identifier      = "${var.cluster_name}-coder-db"
+  engine                  = "aurora-postgresql"
+  engine_mode             = "provisioned"
+  engine_version          = var.rds_engine_version
+  database_name           = "coder"
+  master_username         = "coder"
+  master_password         = random_password.rds.result
+  backup_retention_period = 1
+  skip_final_snapshot     = true # demo only — DON'T do this in prod
+  storage_encrypted       = true
+
+  serverlessv2_scaling_configuration {
+    min_capacity = 0.5
+    max_capacity = 4.0
+  }
+
+  # NOTE: by default lives in the default VPC. For demo simplicity we accept
+  # this. Production: pin to a specific subnet group inside your OCP VPC.
+}
+
+resource "aws_rds_cluster_instance" "coder" {
+  cluster_identifier = aws_rds_cluster.coder.id
+  identifier         = "${var.cluster_name}-coder-db-1"
+  instance_class     = "db.serverless"
+  engine             = aws_rds_cluster.coder.engine
+  engine_version     = aws_rds_cluster.coder.engine_version
+  publicly_accessible = true # demo only — Argo CD bootstrap reaches RDS from outside cluster
+}
+
+###############################################################################
+# ECR repos for workspace base images
+###############################################################################
+
+resource "aws_ecr_repository" "workspace" {
+  for_each             = toset(var.ecr_repos)
+  name                 = "demo-aigov/${each.key}"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "workspace" {
+  for_each   = aws_ecr_repository.workspace
+  repository = each.value.name
+
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep last 10 images"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 10
+      }
+      action = { type = "expire" }
+    }]
+  })
+}
+
+###############################################################################
+# IAM role + OIDC provider for GitHub Actions (optional)
+###############################################################################
+
+resource "aws_iam_openid_connect_provider" "github" {
+  count           = var.github_actions_oidc_role_create ? 1 : 0
+  url             = "https://token.actions.githubusercontent.com"
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+}
+
+data "aws_iam_policy_document" "gha_assume" {
+  count = var.github_actions_oidc_role_create ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github[0].arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repo}:*"]
+    }
+  }
+}
+
+resource "aws_iam_role" "gha" {
+  count              = var.github_actions_oidc_role_create ? 1 : 0
+  name               = "${var.cluster_name}-gha-ecr"
+  assume_role_policy = data.aws_iam_policy_document.gha_assume[0].json
+}
+
+resource "aws_iam_role_policy" "gha_ecr" {
+  count = var.github_actions_oidc_role_create ? 1 : 0
+  name  = "ecr-push"
+  role  = aws_iam_role.gha[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:CompleteLayerUpload",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart",
+          "ecr:BatchGetImage",
+          "ecr:DescribeRepositories",
+          "ecr:ListImages",
+        ]
+        Resource = [for r in aws_ecr_repository.workspace : r.arn]
+      },
+    ]
+  })
+}
+
+###############################################################################
+# Render install-config.yaml from template
+###############################################################################
+
+resource "local_sensitive_file" "install_config" {
+  filename = "${var.install_dir}/install-config.yaml"
+  content = templatefile("${path.module}/install-config.yaml.tftpl", {
+    cluster_name                = var.cluster_name
+    base_domain                 = var.base_domain
+    aws_region                  = var.aws_region
+    control_plane_count         = var.control_plane_count
+    control_plane_instance_type = var.control_plane_instance_type
+    worker_count                = local.effective_worker_count
+    worker_instance_type        = var.worker_instance_type
+    pull_secret                 = trimspace(data.local_file.pull_secret.content)
+    ssh_pubkey                  = trimspace(data.local_file.ssh_pubkey.content)
+  })
+  file_permission      = "0600"
+  directory_permission = "0700"
+}
+
+###############################################################################
+# Run openshift-install
+###############################################################################
+
+resource "null_resource" "openshift_install" {
+  depends_on = [local_sensitive_file.install_config]
+
+  triggers = {
+    install_dir       = var.install_dir
+    install_binary    = var.openshift_install_binary
+    install_config_md5 = local_sensitive_file.install_config.content_md5
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -euo pipefail
+      echo "Running openshift-install create cluster (this takes 30–45 min)..."
+      ${var.openshift_install_binary} create cluster \
+        --dir="${var.install_dir}" \
+        --log-level=info
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      set -euo pipefail
+      echo "Running openshift-install destroy cluster..."
+      ${self.triggers.install_binary} destroy cluster \
+        --dir="${self.triggers.install_dir}" \
+        --log-level=info || true
+    EOT
+  }
+}
+
+###############################################################################
+# Bootstrap OpenShift GitOps operator + Argo CD root Application
+###############################################################################
+
+resource "null_resource" "gitops_bootstrap" {
+  depends_on = [null_resource.openshift_install]
+
+  triggers = {
+    cluster_id = null_resource.openshift_install.id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -euo pipefail
+      export KUBECONFIG="${var.install_dir}/auth/kubeconfig"
+
+      echo "==> Installing OpenShift GitOps operator..."
+      ${var.oc_binary} apply -f ${path.module}/../gitops/operator/subscription.yaml
+
+      echo "==> Waiting for openshift-gitops Argo CD server to be Ready..."
+      for i in $(seq 1 60); do
+        if ${var.oc_binary} get pods -n openshift-gitops -l app.kubernetes.io/name=openshift-gitops-server 2>/dev/null | grep -q "Running"; then
+          break
+        fi
+        echo "    ...waiting ($i/60)"
+        sleep 10
+      done
+
+      ${var.oc_binary} wait --for=condition=Ready pod \
+        -l app.kubernetes.io/name=openshift-gitops-server \
+        -n openshift-gitops --timeout=600s
+
+      echo "==> Bootstrapping Argo CD root Application (app-of-apps)..."
+      ${var.oc_binary} apply -f ${path.module}/../gitops/bootstrap/root-app.yaml
+
+      echo "==> GitOps bootstrap complete. Watch sync with:"
+      echo "       oc get applications -n openshift-gitops -w"
+    EOT
+  }
+}

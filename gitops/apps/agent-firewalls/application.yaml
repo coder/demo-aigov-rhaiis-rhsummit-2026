@@ -1,0 +1,30 @@
+# Coder Agent Firewalls — example rules ConfigMap, mounted into Coder
+# workspace templates.
+#
+# Sync wave 3: lands after Coder (1) and RHAIIS (2). Coder workspace
+# templates can reference this ConfigMap by name to apply the egress
+# allowlist to autonomous agents.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-firewalls
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/agent-firewalls
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: coder
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

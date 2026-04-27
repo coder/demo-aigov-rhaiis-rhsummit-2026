@@ -1,0 +1,64 @@
+# Copy this file to terraform.tfvars and fill in your values.
+
+###############################################################################
+# AWS / project basics
+###############################################################################
+
+aws_region   = "us-east-2"
+aws_profile  = null            # null = default credential chain
+owner_email  = "austen@coder.com"
+
+###############################################################################
+# OpenShift cluster
+###############################################################################
+
+cluster_name             = "rhsummit-demo"
+base_domain              = "aws.example.com"   # YOUR public Route 53 zone
+openshift_version        = "stable-4.20"
+openshift_install_binary = "openshift-install" # path to 4.20+ binary
+oc_binary                = "oc"
+install_dir              = "./.cluster"
+
+pull_secret_path  = "~/.openshift/pull-secret.json"
+ssh_pubkey_path   = "~/.ssh/id_ed25519.pub"
+
+# 3 control-plane HA cluster (recommended for demo realism):
+control_plane_count         = 3
+control_plane_instance_type = "m6i.xlarge"
+worker_count                = 3
+worker_instance_type        = "m6i.2xlarge"
+
+# Single-Node OpenShift (cheapest demo, ~$0.40-0.80/hr):
+# control_plane_count         = 1
+# control_plane_instance_type = "m6i.4xlarge"   # 16 vCPU / 64 GiB — fits Coder + RHAIIS + GitOps
+# worker_count                = 0
+
+###############################################################################
+# Coder
+###############################################################################
+
+# Latest RC for full Coder Agents EA functionality. Bump as new RCs ship.
+coder_chart_version = "2.34.0-rc.0"
+coder_image_tag     = "v2.34.0-rc.0"
+coder_subdomain     = "coder"
+coder_oidc_provider_url = ""     # leave empty to use built-in user/pass for the booth
+
+###############################################################################
+# Postgres (Coder DB)
+###############################################################################
+
+rds_instance_class  = "db.serverless"
+rds_engine_version  = "16.4"
+
+###############################################################################
+# ECR (workspace base images)
+###############################################################################
+
+ecr_repos = ["openshift-ai-gov-base"]
+
+###############################################################################
+# GitHub Actions OIDC
+###############################################################################
+
+github_actions_oidc_role_create = true
+github_repo                     = "coder/demo-aigov-rhaiis-rhsummit-2026"
