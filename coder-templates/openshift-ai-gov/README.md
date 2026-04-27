@@ -19,7 +19,7 @@ Rule format reference:
 - `"method=POST domain=api.example.com path=/users,/posts"` — method + path
 - `"path=/api/v1/*,/api/v2/*"` — path-only allow
 
-Jail type is `nsjail` (default; strong bypass resistance, needs `CAP_NET_ADMIN` via OCP SCC). `landjail` requires kernel ≥ 6.7 — RHEL 9 / OCP 4.20 nodes are kernel 5.14, so it will fail at runtime.
+Jail type is `nsjail` (default; strong bypass resistance, needs `CAP_NET_ADMIN` via OCP SCC). `landjail` requires kernel ≥ 6.7 — RHEL 9 / OCP 4.21 nodes are kernel 5.14, so it will fail at runtime.
 
 ## Parameters
 

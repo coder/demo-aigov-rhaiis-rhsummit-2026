@@ -36,13 +36,13 @@ variable "base_domain" {
 }
 
 variable "openshift_version" {
-  description = "OpenShift release channel. Use 'stable-4.20' for latest 4.20.x, or pin to a specific 'X.Y.Z'. The openshift-install binary on PATH must match."
+  description = "OpenShift release channel. Use 'stable-4.21' for latest 4.21.x, or pin to a specific 'X.Y.Z'. The openshift-install binary on PATH must match."
   type        = string
-  default     = "stable-4.20"
+  default     = "stable-4.21"
 }
 
 variable "openshift_install_binary" {
-  description = "Path to the openshift-install binary (4.20+). Defaults to PATH lookup."
+  description = "Path to the openshift-install binary (4.21+). Defaults to PATH lookup."
   type        = string
   default     = "openshift-install"
 }

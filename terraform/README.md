@@ -1,9 +1,9 @@
-# Terraform — OpenShift 4.20 IPI on AWS + supporting infra
+# Terraform — OpenShift 4.21 IPI on AWS + supporting infra
 
 Provisions:
 - BYO-VPC (3 AZs) for the OCP cluster
 - AWS IAM users for cert-manager (Route 53 DNS-01) and Coder → Bedrock
-- OpenShift 4.20+ cluster via **Installer-Provisioned Infrastructure** (`openshift-install create cluster`)
+- OpenShift 4.21+ cluster via **Installer-Provisioned Infrastructure** (`openshift-install create cluster`)
 - Operator subscriptions: OpenShift GitOps + cert-manager (RH-supported) + CloudNativePG (community-operators, documented exception)
 - Cluster Secrets bootstrapped from this Terraform run: `route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`
 - Argo CD root Application (app-of-apps bootstrap)
@@ -17,7 +17,7 @@ After `terraform apply` finishes, Argo CD takes over and syncs the cluster apps 
 - A **public Route 53 hosted zone** for the cluster's parent domain (e.g., `rh.coderdemo.io`)
 - Red Hat **pull secret** at `~/.openshift/pull-secret.json` — download from <https://console.redhat.com/openshift/install/pull-secret>
 - An **SSH public key** for OCP node access (e.g., `~/.ssh/id_ed25519.pub`)
-- **`openshift-install`** binary (4.20+) on `PATH` — download from <https://mirror.openshift.com/pub/openshift-v4/clients/ocp/>
+- **`openshift-install`** binary (4.21+) on `PATH` — download from <https://mirror.openshift.com/pub/openshift-v4/clients/ocp/>
 - **`oc`** binary on `PATH`
 - Terraform ≥ 1.7 or OpenTofu ≥ 1.7
 

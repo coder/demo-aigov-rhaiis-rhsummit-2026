@@ -50,7 +50,7 @@ allowlist:
 
 # nsjail uses Linux network namespaces; requires CAP_NET_ADMIN on the pod
 # (configurable via OCP SCC). Strong bypass resistance.
-# Switch to landjail only if you're on a kernel ≥ 6.7 (RHEL 9 / OCP 4.20
+# Switch to landjail only if you're on a kernel ≥ 6.7 (RHEL 9 / OCP 4.21
 # nodes are 5.14 — landjail will fail at runtime).
 jail_type: nsjail
 

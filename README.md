@@ -13,7 +13,7 @@ Reference architecture and deployable demo for the **Coder + Red Hat** booth at 
 
 ## What this repo is
 
-End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenShift 4.20+ (IPI install in your AWS account)** — combining:
+End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenShift 4.21+ (IPI install in your AWS account)** — combining:
 
 - **Coder Workspaces** — Terraform-defined cloud development environments on OpenShift (latest RC for full Coder Agents EA functionality)
 - **Coder AI Governance Add-On** — AI Gateway (centralized LLM gateway) + Agent Firewalls (process-level egress policy) + audit trails
@@ -23,7 +23,7 @@ End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenS
 - **CloudNativePG** — in-cluster, multi-AZ Postgres for Coder via the `cloudnative-pg` operator. No RDS — the demo stays on-prem-portable.
 - **Red Hat OpenShift GitOps** (Argo CD) — manages all cluster apps via app-of-apps pattern
 - **cert-manager Operator for Red Hat OpenShift** — wildcard TLS for `*.coder.apps.<fqdn>` via Let's Encrypt + Route 53 DNS-01
-- **OpenShift Container Platform 4.20+** — self-managed via Installer-Provisioned Infrastructure (IPI) on AWS
+- **OpenShift Container Platform 4.21+** — self-managed via Installer-Provisioned Infrastructure (IPI) on AWS
 
 ### Operator policy
 
@@ -47,7 +47,7 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │  │   VPC + subnets + NAT/IGW                                            │ │
 │  │   IAM users (cert-manager → R53; Coder → Bedrock)                    │ │
 │  │   Route 53 records (you supply hosted zone)                          │ │
-│  │   OpenShift 4.20 IPI install (openshift-install via local-exec)      │ │
+│  │   OpenShift 4.21 IPI install (openshift-install via local-exec)      │ │
 │  │   Operator subscriptions: GitOps + cert-manager + CloudNativePG      │ │
 │  │   Cluster Secrets bootstrap (route53, bedrock, redhat-pull-secret)   │ │
 │  │   Argo CD root Application (app-of-apps bootstrap)                   │ │
@@ -222,7 +222,7 @@ Subsequent booth-week rebuilds skip the one-time rows and land in **~50–60 min
 - `awscli` configured with your account / profile
 - A Red Hat **partner pull secret** → grab from <https://console.redhat.com/openshift/install/pull-secret>
 - An **SSH public key** for OpenShift node access (`~/.ssh/id_ed25519.pub` or similar)
-- The **`openshift-install`** binary (4.20+) on your `PATH` — download from <https://mirror.openshift.com/pub/openshift-v4/clients/ocp/>
+- The **`openshift-install`** binary (4.21+) on your `PATH` — download from <https://mirror.openshift.com/pub/openshift-v4/clients/ocp/>
 - The **`oc`** binary on your `PATH` (same mirror)
 - `terraform` ≥ 1.7 or `tofu` ≥ 1.7
 - `gh` CLI authenticated (you've already done this)
@@ -266,7 +266,7 @@ This will:
 7. Apply the Argo CD root Application (app-of-apps bootstrap)
 
 After `apply` finishes you'll have:
-- A live OCP 4.20 cluster with three operators installed (GitOps + cert-manager + CNPG)
+- A live OCP 4.21 cluster with three operators installed (GitOps + cert-manager + CNPG)
 - Argo CD running, with Applications for `postgres` (CNPG Cluster) + cert-manager (ClusterIssuers) + Coder + RHAIIS + coder-routing
 - Coder using a CNPG-generated `coder-app` Secret for its DB connection — no manual DB-URL plumbing
 - Wildcard TLS cert in flight for `*.coder.apps.<fqdn>` (Let's Encrypt prod, DNS-01 over Route 53)
