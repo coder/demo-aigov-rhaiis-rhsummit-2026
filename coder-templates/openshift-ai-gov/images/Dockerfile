@@ -1,6 +1,6 @@
 # Workspace base image for the openshift-ai-gov template.
 #
-# Built and pushed to ECR by .github/workflows/build-images.yml on every
+# Built and pushed to GHCR by .github/workflows/build-images.yml on every
 # change under coder-templates/**/Dockerfile or coder-templates/**/images/**.
 #
 # Base image: RHEL UBI9 — gives the booth audience the "RHEL inside OpenShift"
@@ -13,10 +13,11 @@ ARG USER=coder
 ARG UID=1000
 ARG GID=1000
 
-# Core dev tooling
+# Core dev tooling.
+# `curl` is intentionally NOT in this list — UBI9 ships `curl-minimal` which
+# provides the `curl` binary and conflicts with the full `curl` package.
 RUN dnf install -y --nodocs \
         git \
-        curl \
         wget \
         jq \
         unzip \
