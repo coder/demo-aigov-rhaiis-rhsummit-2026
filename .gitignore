@@ -8,13 +8,18 @@ crash.log
 override.tf
 override.tf.json
 
-# Secrets
+# Secrets / credentials
+# NOTE: with ESO + AWS Secrets Manager, no actual secret values land in Git —
+# only ExternalSecret manifests that reference AWS SM. Don't re-add the
+# overly-broad `*-secret.yaml` pattern; it caught legit ExternalSecret
+# manifests like manifests/rhaiis/external-secret-pull-secret.yaml.
 *.pem
 *.key
-*-secret.yaml
 .env
 .env.*
 !.env.example
+secrets-data.yaml
+secret-data.yaml
 
 # OS / editor
 .DS_Store
