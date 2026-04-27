@@ -1,0 +1,31 @@
+# Wildcard cert for Coder, issued by Let's Encrypt via DNS-01.
+#
+# Covers:
+#   coder.apps.<cluster_fqdn>          (main UI / API)
+#   *.coder.apps.<cluster_fqdn>        (workspace subdomain apps — VS Code,
+#                                       JetBrains Gateway, etc.)
+#
+# cert-manager creates a Secret named `coder-tls` in the `coder` namespace.
+# The OpenShift Routes in this directory reference that Secret via
+# `tls.externalCertificate`.
+#
+# IMPORTANT: replace the `<cluster_fqdn>` placeholders before committing for
+# a real cluster. The cluster TF can do this via a kustomize overlay or a
+# templating step — for now, edit by hand or via sed during bootstrap.
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: coder-tls
+  namespace: coder
+spec:
+  secretName: coder-tls
+  duration: 2160h    # 90d (Let's Encrypt max)
+  renewBefore: 720h  # 30d
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: coder.apps.rhsummit-demo.aws.example.com
+  dnsNames:
+    - coder.apps.rhsummit-demo.aws.example.com
+    - "*.coder.apps.rhsummit-demo.aws.example.com"

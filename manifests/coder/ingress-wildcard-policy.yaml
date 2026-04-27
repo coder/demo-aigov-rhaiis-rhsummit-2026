@@ -1,0 +1,17 @@
+# Enable wildcard Routes on the default OpenShift ingress controller.
+#
+# OCP defaults to wildcardPolicy: WildcardsDisallowed. We need
+# WildcardsAllowed so the `coder-wildcard` Route can match every workspace
+# subdomain app under *.coder.apps.<fqdn>.
+#
+# Argo CD applies this via the cert-manager / coder-routing app. Sync wave
+# is ordered to land before the wildcard Route itself.
+
+apiVersion: operator.openshift.io/v1
+kind: IngressController
+metadata:
+  name: default
+  namespace: openshift-ingress-operator
+spec:
+  routeAdmission:
+    wildcardPolicy: WildcardsAllowed

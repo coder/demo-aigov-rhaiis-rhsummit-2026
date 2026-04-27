@@ -15,7 +15,18 @@ End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenS
 - **Coder Tasks** — background agent execution interface for Claude Code, Aider, Goose, Amazon Q, and custom agents
 - **Red Hat AI Inference Server (RHAIIS)** — enterprise vLLM serving an OpenAI-compatible endpoint, latest image
 - **Red Hat OpenShift GitOps** (Argo CD) — manages all cluster apps via app-of-apps pattern
+- **cert-manager Operator for Red Hat OpenShift** — wildcard TLS for `*.coder.apps.<fqdn>` via Let's Encrypt + Route 53 DNS-01
 - **OpenShift Container Platform 4.20+** — self-managed via Installer-Provisioned Infrastructure (IPI) on AWS
+
+### Operator policy
+
+This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat ships one. Coder is a Red Hat partner and pulls all RH-distributed images through the partner pull-secret. Specifically:
+
+| Component | Operator | Source |
+|---|---|---|
+| Argo CD | `openshift-gitops-operator` | Red Hat (NOT upstream Argo CD operator) |
+| cert-manager | `openshift-cert-manager-operator` | Red Hat (NOT upstream jetstack/cert-manager) |
+| RHAIIS | `registry.redhat.io/rhoai/vllm-cpu-rhel9` | Red Hat AI Inference Server (NOT community vLLM build) |
 
 > **Demo simplicity over hardening.** This is a booth demo, not an ATO baseline. STIG/FIPS posture, OCP `restricted-v2` SCC overrides, and air-gap config are intentionally **not** applied — they overcomplicate setup. Production architectures keep them; see [`docs/architecture.md`](docs/architecture.md) for the production narrative arc.
 
@@ -123,18 +134,35 @@ End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenS
 
 - An AWS account with admin perms (or scoped enough for OCP IPI)
 - `awscli` configured with your account / profile
-- A **public Route 53 hosted zone** for the cluster's parent domain (e.g., `aws.example.com`)
-- A Red Hat account → grab your **pull secret** from <https://console.redhat.com/openshift/install/pull-secret>
+- A Red Hat **partner pull secret** → grab from <https://console.redhat.com/openshift/install/pull-secret>
 - An **SSH public key** for OpenShift node access (`~/.ssh/id_ed25519.pub` or similar)
 - The **`openshift-install`** binary (4.20+) on your `PATH` — download from <https://mirror.openshift.com/pub/openshift-v4/clients/ocp/>
 - The **`oc`** binary on your `PATH` (same mirror)
 - `terraform` ≥ 1.7 or `tofu` ≥ 1.7
 - `gh` CLI authenticated (you've already done this)
 
-### 1. Provision the cluster
+### 1. Provision account-level prereqs (run once per AWS account)
 
 ```bash
-cd terraform/
+cd terraform/prereqs/
+cp terraform.tfvars.example terraform.tfvars
+# edit: base_domain, owner_email, cluster_name, instance types
+terraform init
+terraform apply
+```
+
+This will:
+- Validate AWS service quotas (EC2 vCPU, EIPs, VPCs, IGWs, hosted zones); **hard-fail if any is below the computed need**
+- Optionally file quota-increase requests via the Service Quotas API (`request_quota_increases = true`)
+- Create the public Route 53 hosted zone for `base_domain` (or import an existing one)
+- Create a dedicated IAM user `ocp-installer-<cluster_name>` with admin perms + access keys (or skip and use your own creds)
+
+If you created a new hosted zone, **delegate the printed NS records at your registrar** before continuing. Verify with `dig +short NS <base_domain>`.
+
+### 2. Provision the cluster
+
+```bash
+cd terraform/   # not prereqs/ — the parent root
 cp terraform.tfvars.example terraform.tfvars
 # edit terraform.tfvars: aws_region, cluster_name, base_domain, pull_secret_path, ssh_pubkey_path
 terraform init
@@ -143,16 +171,19 @@ terraform apply
 ```
 
 This will:
-1. Create the VPC, subnets, IAM, Route 53 records, RDS Aurora Postgres, ECR repos
+1. Create RDS Aurora Postgres (Coder DB) + ECR repos + GHA OIDC role + cert-manager Route 53 IAM user
 2. Generate `install-config.yaml` from the template
 3. Run `openshift-install create cluster` (~30–45 min)
-4. Install the OpenShift GitOps operator
-5. Apply the Argo CD root Application (app-of-apps bootstrap)
+4. Apply both RH-supported operator subscriptions (OpenShift GitOps + cert-manager)
+5. Wait for the `cert-manager` namespace + CRDs to come up
+6. Inject the Route 53 access keys into Secret `route53-credentials` in `cert-manager` namespace
+7. Apply the Argo CD root Application (app-of-apps bootstrap)
 
 After `apply` finishes you'll have:
-- A live OCP 4.20 cluster
-- Argo CD running, with Applications for Coder + RHAIIS + Agent Firewalls
-- Coder reachable at `https://coder.<cluster-domain>`
+- A live OCP 4.20 cluster with two RH-supported operators installed
+- Argo CD running, with Applications for cert-manager (ClusterIssuers) + Coder + RHAIIS + Agent Firewalls + coder-routing
+- Wildcard TLS cert in flight for `*.coder.apps.<fqdn>` (Let's Encrypt prod, DNS-01 over Route 53)
+- Coder reachable at `https://coder.apps.<cluster-domain>`
 - RHAIIS reachable cluster-internally at `http://vllm.ocp-ai.svc:8000`
 
 ### 2. Configure Coder providers (one-time)

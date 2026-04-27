@@ -49,6 +49,17 @@ output "github_actions_role_arn" {
   value       = var.github_actions_oidc_role_create ? aws_iam_role.gha[0].arn : null
 }
 
+output "cert_manager_iam_user_name" {
+  description = "Name of the IAM user used by cert-manager to perform Route 53 DNS-01 challenges."
+  value       = aws_iam_user.cert_manager.name
+}
+
+output "cert_manager_access_key_id" {
+  description = "AWS access key ID for cert-manager's Route 53 access. Already injected into the Kubernetes Secret `route53-credentials` in the `cert-manager` namespace by the bootstrap step."
+  value       = aws_iam_access_key.cert_manager.id
+  sensitive   = true
+}
+
 output "next_steps" {
   description = "Post-apply checklist."
   value       = <<-EOT

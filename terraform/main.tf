@@ -113,6 +113,58 @@ resource "aws_ecr_lifecycle_policy" "workspace" {
 }
 
 ###############################################################################
+# IAM user for cert-manager Route 53 DNS-01 challenges
+#
+# cert-manager runs in the cluster and calls Route 53 to create + remove
+# `_acme-challenge.<domain>` TXT records during ACME wildcard cert issuance.
+# Production should use IRSA (IAM Roles for Service Accounts) instead of
+# static keys, but that requires installing OCP in STS / manual cred mode
+# which is out of scope for the booth.
+#
+# Permissions follow the cert-manager docs:
+# https://cert-manager.io/docs/configuration/acme/dns01/route53/
+###############################################################################
+
+data "aws_iam_policy_document" "cert_manager_route53" {
+  statement {
+    sid     = "GetChange"
+    effect  = "Allow"
+    actions = ["route53:GetChange"]
+    resources = ["arn:aws:route53:::change/*"]
+  }
+  statement {
+    sid     = "ChangeResourceRecordSets"
+    effect  = "Allow"
+    actions = [
+      "route53:ChangeResourceRecordSets",
+      "route53:ListResourceRecordSets",
+    ]
+    resources = ["arn:aws:route53:::hostedzone/${data.aws_route53_zone.base.zone_id}"]
+  }
+  statement {
+    sid       = "ListHostedZonesByName"
+    effect    = "Allow"
+    actions   = ["route53:ListHostedZonesByName"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_user" "cert_manager" {
+  name = "${var.cluster_name}-cert-manager"
+  path = "/demo/"
+}
+
+resource "aws_iam_user_policy" "cert_manager_route53" {
+  name   = "route53-acme-challenge"
+  user   = aws_iam_user.cert_manager.name
+  policy = data.aws_iam_policy_document.cert_manager_route53.json
+}
+
+resource "aws_iam_access_key" "cert_manager" {
+  user = aws_iam_user.cert_manager.name
+}
+
+###############################################################################
 # IAM role + OIDC provider for GitHub Actions (optional)
 ###############################################################################
 
@@ -254,8 +306,8 @@ resource "null_resource" "gitops_bootstrap" {
       set -euo pipefail
       export KUBECONFIG="${var.install_dir}/auth/kubeconfig"
 
-      echo "==> Installing OpenShift GitOps operator..."
-      ${var.oc_binary} apply -f ${path.module}/../gitops/operator/subscription.yaml
+      echo "==> Applying RH-supported operator subscriptions (OpenShift GitOps + cert-manager)..."
+      ${var.oc_binary} apply -f ${path.module}/../gitops/operator/
 
       echo "==> Waiting for openshift-gitops Argo CD server to be Ready..."
       for i in $(seq 1 60); do
@@ -265,10 +317,34 @@ resource "null_resource" "gitops_bootstrap" {
         echo "    ...waiting ($i/60)"
         sleep 10
       done
-
       ${var.oc_binary} wait --for=condition=Ready pod \
         -l app.kubernetes.io/name=openshift-gitops-server \
         -n openshift-gitops --timeout=600s
+
+      echo "==> Waiting for cert-manager namespace to be created by the operator..."
+      for i in $(seq 1 60); do
+        if ${var.oc_binary} get namespace cert-manager 2>/dev/null | grep -q Active; then
+          break
+        fi
+        echo "    ...waiting for cert-manager ns ($i/60)"
+        sleep 10
+      done
+
+      echo "==> Creating Route 53 credentials Secret in cert-manager namespace..."
+      ${var.oc_binary} create secret generic route53-credentials \
+        --namespace=cert-manager \
+        --from-literal=access-key-id='${aws_iam_access_key.cert_manager.id}' \
+        --from-literal=secret-access-key='${aws_iam_access_key.cert_manager.secret}' \
+        --dry-run=client -o yaml | ${var.oc_binary} apply -f -
+
+      echo "==> Waiting for cert-manager CRDs (ClusterIssuer) to be installed..."
+      for i in $(seq 1 60); do
+        if ${var.oc_binary} get crd clusterissuers.cert-manager.io 2>/dev/null | grep -q clusterissuers; then
+          break
+        fi
+        echo "    ...waiting for cert-manager CRDs ($i/60)"
+        sleep 10
+      done
 
       echo "==> Bootstrapping Argo CD root Application (app-of-apps)..."
       ${var.oc_binary} apply -f ${path.module}/../gitops/bootstrap/root-app.yaml

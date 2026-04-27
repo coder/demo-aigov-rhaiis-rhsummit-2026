@@ -1,0 +1,55 @@
+# OpenShift Routes for Coder.
+#
+# We disable the Helm chart's built-in ingress (`coder.ingress.enable: false`
+# in gitops/apps/coder/application.yaml) and create Routes here so they can
+# reference the cert-manager-issued wildcard cert via `tls.externalCertificate`
+# (OCP 4.16+).
+#
+# Two Routes:
+#   1. `coder` — main UI / API at coder.apps.<fqdn>
+#   2. `coder-wildcard` — subdomain workspace apps at *.coder.apps.<fqdn>
+#      Requires the default ingress controller to allow wildcard Routes
+#      (see manifests/coder/ingress-wildcard-policy.yaml).
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: coder
+  namespace: coder
+  annotations:
+    haproxy.router.openshift.io/timeout: "300s"
+spec:
+  host: coder.apps.rhsummit-demo.aws.example.com   # replace before booth
+  to:
+    kind: Service
+    name: coder
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+    externalCertificate:
+      name: coder-tls
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: coder-wildcard
+  namespace: coder
+  annotations:
+    haproxy.router.openshift.io/timeout: "300s"
+spec:
+  host: x.coder.apps.rhsummit-demo.aws.example.com   # placeholder for wildcard
+  wildcardPolicy: Subdomain
+  to:
+    kind: Service
+    name: coder
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+    externalCertificate:
+      name: coder-tls

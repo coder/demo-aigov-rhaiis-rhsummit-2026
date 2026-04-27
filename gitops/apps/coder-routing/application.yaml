@@ -1,0 +1,31 @@
+# Coder routing — OpenShift Routes (main + wildcard) referencing the
+# cert-manager-issued TLS cert, plus ingress controller wildcard policy patch.
+#
+# Sync wave 2 — runs after cert-manager (wave 0) and Coder Helm chart (wave 1)
+# but before the wildcard cert is fully propagated. The Route can be applied
+# even if the Certificate hasn't issued yet — the Route just won't serve TLS
+# until the externalCertificate Secret exists.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coder-routing
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/coder
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: coder
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

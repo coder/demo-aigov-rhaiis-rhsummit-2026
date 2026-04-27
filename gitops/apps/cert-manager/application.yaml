@@ -1,0 +1,39 @@
+# cert-manager runtime config — ClusterIssuers (Let's Encrypt prod + staging)
+# and supporting resources.
+#
+# Pre-requisites NOT managed by Argo:
+#   - cert-manager Operator must be installed (gitops/operator/cert-manager-subscription.yaml)
+#   - Secret `route53-credentials` must exist in the `cert-manager` namespace
+#     (created by the cluster Terraform's bootstrap step)
+#
+# Sync wave 0 — runs before any app that depends on a Certificate.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/cert-manager
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
