@@ -93,6 +93,18 @@ variable "ai_gateway_url" {
   default     = "http://coder.coder.svc.cluster.local:7080/v1"
 }
 
+variable "sample_repo_url" {
+  description = "Public Git URL of the booth-demo sample repo. Cloned into every workspace at startup. Each clone is fresh from main, which always holds the canonical broken state — that's the per-demo reset mechanism."
+  type        = string
+  default     = "https://github.com/coder/demo-sbom-verifier.git"
+}
+
+variable "sample_repo_name" {
+  description = "Local directory name (under \\$HOME) for the cloned sample repo. Must match the repo's basename so the clone is idempotent."
+  type        = string
+  default     = "demo-sbom-verifier"
+}
+
 ###############################################################################
 # Coder data sources
 ###############################################################################
@@ -120,6 +132,15 @@ resource "coder_agent" "main" {
     export OPENAI_API_BASE="${var.ai_gateway_url}"
     export OPENAI_API_KEY="${data.coder_workspace_owner.me.session_token}"
     EOF
+
+    # Clone the booth-demo sample repo and surface its TASK.md as $HOME/TASK.md.
+    # Each workspace gets a fresh clone of `main` — that's the seed mechanism:
+    # main always holds the broken stub, so every demo run starts from the same
+    # canonical bug. The presenter pastes TASK.md content into Coder Tasks.
+    if [ ! -d "$HOME/${var.sample_repo_name}" ]; then
+      git clone "${var.sample_repo_url}" "$HOME/${var.sample_repo_name}"
+    fi
+    ln -sf "$HOME/${var.sample_repo_name}/TASK.md" "$HOME/TASK.md" || true
 
     # code-server (browser VS Code)
     if ! command -v code-server >/dev/null 2>&1; then

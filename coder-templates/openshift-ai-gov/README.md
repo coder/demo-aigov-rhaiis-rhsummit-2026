@@ -38,6 +38,8 @@ Set these once at template push time (`-V key=value` on `coder templates push`):
 | `namespace` | K8s namespace for workspace pods (default `coder-workspaces`) |
 | `image_registry` | Container registry path that hosts workspace base images (default `ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026`) |
 | `ai_gateway_url` | AI Gateway internal URL (default `http://coder.coder.svc.cluster.local:7080/v1`) |
+| `sample_repo_url` | Booth-demo sample repo cloned into every workspace at startup (default `https://github.com/coder/demo-sbom-verifier.git`) |
+| `sample_repo_name` | Local directory name for the clone (default `demo-sbom-verifier`) |
 
 ## Push manually
 
