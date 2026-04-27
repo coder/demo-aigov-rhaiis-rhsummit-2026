@@ -3,16 +3,18 @@
 # DNS-01 (not HTTP-01) is required because we need wildcard certs
 # (*.coder.apps.<fqdn>) for Coder's per-workspace subdomain apps.
 #
-# Authentication uses IAM roles, not static access keys. The cluster
-# Terraform's bootstrap step applies these ClusterIssuers with the
-# IAM role ARN populated in the `role` field. cert-manager uses
-# ambient credentials (EC2 IMDS on the node) to AssumeRole into the
-# cert-manager IAM role, which has scoped Route 53 permissions.
+# Authentication uses IRSA (IAM Roles for Service Accounts). The cluster
+# runs in STS mode with a pod identity webhook that injects AWS_ROLE_ARN
+# and AWS_WEB_IDENTITY_TOKEN_FILE into the cert-manager pod based on
+# the eks.amazonaws.com/role-arn annotation on its ServiceAccount.
 #
-# The `role` field is managed by the bootstrap step (not in this file)
-# because it contains an environment-specific IAM role ARN. The Argo CD
-# cert-manager Application uses RespectIgnoreDifferences to preserve
-# the bootstrap-applied role ARN across syncs.
+# The route53 solver section is intentionally minimal. Per the cert-manager
+# docs: "Regardless of which ambient mechanism you use, the route53
+# section is left empty, because cert-manager can find the credentials,
+# role, and region by looking for environment variables."
+#
+# The ServiceAccount annotation is applied by the cluster Terraform's
+# bootstrap step. Do NOT add static access keys here.
 
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -21,15 +23,13 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: austen@coder.com   # update via the patch in gitops/apps/cert-manager
+    email: austen@coder.com
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
     solvers:
       - dns01:
           route53:
             region: us-east-1
-            # role: <set by bootstrap> — cert-manager uses IMDS to
-            # AssumeRole into the cert-manager IAM role for Route 53.
 ---
 # Staging issuer (Let's Encrypt staging). Use this for early dry-runs to avoid
 # rate-limiting; switch Coder Certificate to letsencrypt-prod for booth day.
@@ -47,4 +47,3 @@ spec:
       - dns01:
           route53:
             region: us-east-1
-            # role: <set by bootstrap> — same as above.

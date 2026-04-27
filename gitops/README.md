@@ -5,53 +5,47 @@
 | App | Sync wave | What it deploys |
 |---|---|---|
 | `postgres` | 0 | CNPG `Cluster` CR (3 instances, multi-AZ via streaming replication) — auto-generates the `coder-app` Secret consumed by the Coder Helm chart |
-| `cert-manager` | 0 | ClusterIssuers (Let's Encrypt prod + staging) using DNS-01 over Route 53 |
+| `cert-manager` | 0 | ClusterIssuers (Let's Encrypt prod + staging) using DNS-01 over Route 53 with ambient IRSA credentials |
 | `coder` | 1 | Coder Helm chart (latest RC) — control plane + provisioner + AI Governance Add-On. Reads `coder-app/uri` for the Postgres URL. |
 | `rhaiis` | 2 | RHAIIS / vLLM Deployment + Service from `manifests/rhaiis/`. Image pulled with `redhat-pull-secret` (created by the cluster TF bootstrap step). |
 | `coder-routing` | 2 | OpenShift Route(s) for Coder with cert-manager-issued wildcard TLS + ingress wildcard policy patch |
 
 ### What's NOT in GitOps
 
-**Agent Firewall config** is intentionally **not** managed here. Per [Coder docs](https://coder.com/docs/ai-coder/agent-firewall), the firewall config is **template-scoped** — `coder-templates/openshift-ai-gov/config.yaml` is bundled with the template, mounted into the workspace at `~/.config/coder_boundary/config.yaml` by a `coder_script` at workspace start, and pushed to live Coder by `.github/workflows/push-templates.yml`. Different templates can have different allowlists (e.g., a defense-pattern template vs a public-research template). Do not move this to a cluster-wide ConfigMap.
+**Agent Firewall config** is intentionally **not** managed here. Per [Coder docs](https://coder.com/docs/ai-coder/agent-firewall), the firewall config is **template-scoped** — `coder-templates/openshift-ai-gov/config.yaml` is bundled with the template, mounted into the workspace at `~/.config/coder_boundary/config.yaml` by a `coder_script` at workspace start, and pushed to live Coder by `.github/workflows/push-templates.yml`. Different templates can have different allowlists.
 
 ## Operator policy
 
-This demo prefers **Red-Hat-certified, RH-supported operators** wherever Red Hat ships one. Subscriptions live in `operator/` and are applied by the cluster Terraform's bootstrap step (so the operators + CRDs are present before Argo CD tries to apply Cluster CRs that depend on them):
+This demo prefers **Red-Hat-certified, RH-supported operators** wherever Red Hat ships one. Subscriptions live in `operator/` and are applied by the cluster Terraform's bootstrap step:
 
 | File | Source | Why |
 |---|---|---|
 | `openshift-gitops-subscription.yaml` | `redhat-operators` | Red Hat OpenShift GitOps (NOT upstream Argo CD operator) |
-| `cert-manager-subscription.yaml` | `redhat-operators` | cert-manager Operator for Red Hat OpenShift (NOT upstream jetstack/cert-manager) |
-| `cnpg-subscription.yaml` | `community-operators` | **Documented exception.** Red Hat does not ship a first-party in-cluster Postgres operator. The RH-aligned alternative is RDS (cloud-only — breaks on-prem portability) or upstream Crunchy PGO (community as well). CloudNativePG is the de facto Kubernetes-native Postgres operator (CNCF Sandbox) and is OpenShift-compatible. |
-
-Coder is a Red Hat partner and uses the partner pull-secret (the same `pull-secret.json` from console.redhat.com, tied to the partner subscription) for any RH-distributed image.
-
-## Adding a new app
-
-1. Drop a new file at `gitops/apps/<name>/application.yaml`
-2. Commit + push to `main`
-3. Argo CD root app picks it up on the next refresh
+| `cert-manager-subscription.yaml` | `redhat-operators` | cert-manager Operator for Red Hat OpenShift |
+| `cnpg-subscription.yaml` | `community-operators` | **Documented exception.** CloudNativePG is the de facto Kubernetes-native Postgres operator (CNCF Sandbox). |
 
 ## Pre-requisites Argo CD won't manage for you
 
 The cluster Terraform's bootstrap step creates a few in-cluster resources that Argo CD-managed apps reference but cannot create themselves:
 
-| Namespace | Resource | Type | Source |
-|---|---|---|---|
-| `cert-manager` | ClusterIssuer `role` field | IAM role ARN | `aws_iam_role.cert_manager` from `terraform/irsa.tf`, applied by bootstrap via `oc apply --server-side` |
-| `coder` | `bedrock-aws-config` ConfigMap | AWS shared-config | `aws_iam_role.coder_bedrock` ARN from `terraform/irsa.tf`, written into a ConfigMap by bootstrap |
-| `ocp-ai` | `redhat-pull-secret` | Docker registry secret | `var.pull_secret_path` (the partner pull-secret from console.redhat.com) |
-| (node IAM roles) | `assume-demo-service-roles` inline policy | IAM inline policy | Added to IPI-created node roles by bootstrap via `aws iam put-role-policy` |
+| Resource | Where | Source |
+|---|---|---|
+| `cert-manager` SA annotation `eks.amazonaws.com/role-arn` | `cert-manager` namespace | `aws_iam_role.cert_manager` from `terraform/irsa.tf` |
+| `coder` SA with `eks.amazonaws.com/role-arn` annotation | `coder` namespace | `aws_iam_role.coder_bedrock` from `terraform/irsa.tf` |
+| `redhat-pull-secret` docker-registry Secret | `ocp-ai` namespace | `var.pull_secret_path` |
+| OIDC provider + platform IAM roles | AWS IAM | `ccoctl aws create-all` (run by Terraform) |
 
-The `coder-app` Secret used by the Coder Helm chart for its Postgres URL is **not** in this list — it is auto-generated by the CloudNativePG operator when it reconciles the Cluster CR in `manifests/postgres/cluster.yaml`. There is no manual DB-URL plumbing.
-
-If you ever need to inspect the bootstrap-created resources:
+The `coder-app` Secret used by the Coder Helm chart for its Postgres URL is auto-generated by the CloudNativePG operator.
 
 ```bash
-oc get clusterissuer letsencrypt-prod -o jsonpath='{.spec.acme.solvers[0].dns01.route53.role}'
-oc get configmap -n coder bedrock-aws-config -o yaml
-oc get secrets -n coder coder-app
-oc get secrets -n ocp-ai redhat-pull-secret
+# Verify IRSA annotations
+oc get sa cert-manager -n cert-manager -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}'
+oc get sa coder -n coder -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}'
+
+# Verify STS credentials on a platform component
+oc get secrets -n openshift-image-registry installer-cloud-credentials \
+  -o jsonpath='{.data.credentials}' | base64 -d
+# Should show role_arn + web_identity_token_file (not access keys)
 ```
 
 ## Watching sync
@@ -60,12 +54,6 @@ oc get secrets -n ocp-ai redhat-pull-secret
 oc get applications -n openshift-gitops -w
 ```
 
-Argo CD console URL — the OpenShift GitOps operator exposes it at:
-
-```
-https://openshift-gitops-server-openshift-gitops.apps.<cluster_fqdn>
-```
-
 ## Why GitOps and not pure Terraform?
 
-This audience (Red Hat Summit 2026) expects to see Argo CD. The cluster apps live in Git, change is a `git push`, drift correction is automatic, and the visual sync graph is a great booth talking point. Terraform owns AWS + the OCP install + a thin IRSA-bootstrap step only.
+This audience (Red Hat Summit 2026) expects to see Argo CD. The cluster apps live in Git, change is a `git push`, drift correction is automatic, and the visual sync graph is a great booth talking point. Terraform owns AWS + the OCP install + STS IRSA bootstrap only.

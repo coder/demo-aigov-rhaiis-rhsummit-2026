@@ -1,35 +1,28 @@
 ###############################################################################
-# IAM roles for cluster workloads
+# IAM roles for cluster workloads (IRSA via STS)
 #
-# Replaces static IAM users + access keys with IAM roles and STS
-# AssumeRole. Pods use EC2 instance metadata (IMDS) as base
-# credentials, then chain-assume into a scoped service role.
+# OpenShift is installed in credentialsMode: Manual with STS. The ccoctl
+# tool creates an S3-hosted OIDC provider and platform IAM roles before
+# the cluster installs. The pod identity webhook (included with STS mode)
+# injects projected SA tokens into annotated pods.
 #
-# Why roles instead of users:
-#   - No long-lived static credentials stored in K8s Secrets or TF state.
-#   - Compatible with AWS accounts that enforce MFA on IAM users (MFA
-#     context is absent from access keys used by pods, causing API
-#     denials when the account policy requires MFA).
-#   - STS-issued temporary credentials auto-expire.
+# This file creates additional IAM roles for demo workloads:
+#   - cert-manager: Route 53 DNS-01 ACME challenges
+#   - Coder Bedrock: AI Gateway -> AWS Bedrock invocations
 #
-# Trust model:
-#   Each role trusts the OCP node instance roles (master + worker) that
-#   the IPI installer provisions automatically. The bootstrap step adds
-#   a scoped sts:AssumeRole inline policy to those node roles so pods
-#   can chain-assume into the service role.
-#
-# Production upgrade path:
-#   For per-pod, per-ServiceAccount isolation, switch to full OIDC-based
-#   IRSA by installing OCP in credentialsMode: Manual + STS, or deploy
-#   the EKS Pod Identity Webhook backed by an S3-hosted OIDC provider.
+# Each role's trust policy uses sts:AssumeRoleWithWebIdentity scoped to
+# a specific Kubernetes ServiceAccount via the OIDC provider. This gives
+# per-pod credential isolation (only the annotated SA can assume the role).
 ###############################################################################
+
+locals {
+  oidc_bucket_name  = "${var.cluster_name}-oidc"
+  oidc_provider_url = "${local.oidc_bucket_name}.s3.${var.aws_region}.amazonaws.com"
+  oidc_provider_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${local.oidc_provider_url}"
+}
 
 ###############################################################################
 # cert-manager -> Route 53 DNS-01 challenges
-#
-# cert-manager uses ambient credentials (EC2 IMDS) to AssumeRole into
-# this role, then manages Route 53 TXT records for ACME DNS-01 challenges.
-# The ClusterIssuer references this role ARN in its `role` field.
 ###############################################################################
 
 resource "aws_iam_role" "cert_manager" {
@@ -39,18 +32,15 @@ resource "aws_iam_role" "cert_manager" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid    = "AllowOCPNodeAssume"
+      Sid    = "AllowCertManagerSA"
       Effect = "Allow"
       Principal = {
-        AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        Federated = local.oidc_provider_arn
       }
-      Action = "sts:AssumeRole"
+      Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
-        ArnLike = {
-          "aws:PrincipalArn" = [
-            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.cluster_name}-*-master-role",
-            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.cluster_name}-*-worker-role",
-          ]
+        StringEquals = {
+          "${local.oidc_provider_url}:sub" = "system:serviceaccount:cert-manager:cert-manager"
         }
       }
     }]
@@ -65,12 +55,6 @@ resource "aws_iam_role_policy" "cert_manager_route53" {
 
 ###############################################################################
 # Coder server / AI Gateway -> AWS Bedrock
-#
-# The Coder pod mounts an AWS shared config file (from ConfigMap
-# `bedrock-aws-config`) that sets `role_arn` and
-# `credential_source = Ec2InstanceMetadata`. The Go AWS SDK reads this
-# config, gets base credentials from IMDS, then AssumeRoles into this
-# role for Bedrock API calls.
 ###############################################################################
 
 resource "aws_iam_role" "coder_bedrock" {
@@ -80,18 +64,15 @@ resource "aws_iam_role" "coder_bedrock" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid    = "AllowOCPNodeAssume"
+      Sid    = "AllowCoderSA"
       Effect = "Allow"
       Principal = {
-        AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        Federated = local.oidc_provider_arn
       }
-      Action = "sts:AssumeRole"
+      Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
-        ArnLike = {
-          "aws:PrincipalArn" = [
-            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.cluster_name}-*-master-role",
-            "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.cluster_name}-*-worker-role",
-          ]
+        StringEquals = {
+          "${local.oidc_provider_url}:sub" = "system:serviceaccount:coder:coder"
         }
       }
     }]

@@ -17,10 +17,10 @@
 #   - The chart version + image tag track Coder release-candidate releases.
 #     Bump as new RCs ship. Linear: project `0e26deb1` (Coder Agents) —
 #     verify the May Beta milestone before booth.
-#   - AWS Bedrock credentials use IAM role assumption via EC2 IMDS. The
-#     ConfigMap `bedrock-aws-config` (created by bootstrap) is mounted as
-#     an AWS shared-config file. The Go AWS SDK reads role_arn +
-#     credential_source from it and handles the STS AssumeRole chain.
+#   - AWS Bedrock credentials are provided via IRSA. The cluster runs in
+#     STS mode with a pod identity webhook. The bootstrap step annotates
+#     the `coder` ServiceAccount with the Bedrock IAM role ARN, and the
+#     webhook injects AWS_ROLE_ARN + token into the pod automatically.
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -67,26 +67,11 @@ spec:
             - name: CODER_DISABLE_USAGE_STATS
               value: "true"
             # ── Bedrock provider for AI Gateway ─────────────────────────
-            # AI Gateway's Bedrock provider reads ambient AWS credentials
-            # (per coder/coder #24397, v2.33-rc.3). Instead of static
-            # access keys, we mount an AWS shared-config file that tells
-            # the SDK to AssumeRole via EC2 IMDS. The ConfigMap is created
-            # by the cluster Terraform's bootstrap step.
-            - name: AWS_CONFIG_FILE
-              value: "/etc/aws/config"
+            # The pod identity webhook injects AWS_ROLE_ARN and
+            # AWS_WEB_IDENTITY_TOKEN_FILE from the ServiceAccount
+            # annotation. Only AWS_REGION needs to be set explicitly.
             - name: AWS_REGION
               value: "us-east-1"
-
-          # Mount the AWS shared-config from the bootstrap-created ConfigMap.
-          volumeMounts:
-            - name: aws-config
-              mountPath: /etc/aws
-              readOnly: true
-
-          volumes:
-            - name: aws-config
-              configMap:
-                name: bedrock-aws-config
 
           replicaCount: 3     # multi-AZ HA — one pod per AZ via topology spread below
 

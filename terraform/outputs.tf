@@ -49,13 +49,18 @@ output "vpc_public_subnet_ids" {
   value       = module.vpc.public_subnets
 }
 
+output "oidc_provider_arn" {
+  description = "ARN of the IAM OIDC provider created by ccoctl for STS. Used by workload IAM role trust policies."
+  value       = local.oidc_provider_arn
+}
+
 output "cert_manager_role_arn" {
-  description = "IAM role ARN used by cert-manager to perform Route 53 DNS-01 challenges via AssumeRole. Injected into the ClusterIssuer by the bootstrap step."
+  description = "IAM role ARN used by cert-manager for Route 53 DNS-01 challenges via IRSA."
   value       = aws_iam_role.cert_manager.arn
 }
 
 output "coder_bedrock_role_arn" {
-  description = "IAM role ARN used by the Coder server pod for AWS Bedrock invocations (via AI Gateway). Injected into ConfigMap `bedrock-aws-config` in the `coder` namespace by the bootstrap step."
+  description = "IAM role ARN used by the Coder server pod for AWS Bedrock invocations via IRSA."
   value       = aws_iam_role.coder_bedrock.arn
 }
 
@@ -69,41 +74,39 @@ output "next_steps" {
   value       = <<-EOT
 
     ==============================================================
-    Cluster up. Next steps:
+    Cluster up (STS mode with IRSA). Next steps:
     ==============================================================
 
     1. Set kubeconfig in your shell:
          export KUBECONFIG=$(terraform output -raw kubeconfig_path)
 
-    2. Verify Argo CD is running:
+    2. Verify the cluster is using STS credentials:
+         oc get secrets -n openshift-image-registry installer-cloud-credentials \
+           -o jsonpath='{.data.credentials}' | base64 -d
+         # Should show role_arn + web_identity_token_file (not access keys)
+
+    3. Verify Argo CD is running:
          oc get pods -n openshift-gitops
 
-    3. Watch the app-of-apps sync (postgres at wave 0 stands up the
-       in-cluster CNPG Cluster — it auto-generates the `coder-app`
-       Secret that Coder consumes at wave 1):
+    4. Watch the app-of-apps sync:
          oc get applications -n openshift-gitops -w
 
-    4. Access the OCP console (kubeadmin password in auth dir):
+    5. Verify IRSA annotations on workload SAs:
+         oc get sa cert-manager -n cert-manager -o jsonpath='{.metadata.annotations}'
+         oc get sa coder -n coder -o jsonpath='{.metadata.annotations}'
+
+    6. Access the OCP console (kubeadmin password in auth dir):
          open $(terraform output -raw cluster_console_url 2>/dev/null || echo "see cluster_console_url output")
 
-    5. Request Bedrock model access (one-time, per-region):
+    7. Request Bedrock model access (one-time, per-region):
          open $(terraform output -raw bedrock_model_access_url)
          # Approve Anthropic Claude Sonnet 4.x for this region.
 
-    6. Set Coder URL + admin token as GH Actions secrets so
-       push-templates.yml can publish template changes:
+    8. Set Coder URL + admin token as GH Actions secrets:
          gh secret set CODER_URL --body "$(terraform output -raw coder_url)"
-         # Log in as admin in browser, copy token, then:
          gh secret set CODER_SESSION_TOKEN --body "<token>"
 
-    7. Push your first template (images build + publish to GHCR via
-       .github/workflows/build-images.yml using GITHUB_TOKEN — no AWS
-       OIDC required):
-         git add coder-templates/
-         git commit -m "feat(template): initial template"
-         git push origin main
-
-    8. Smoke-test RHAIIS tool-calling:
+    9. Smoke-test RHAIIS tool-calling:
          ../scripts/tool-call-smoke-test.sh \\
            "$(terraform output -raw rhaiis_internal_url)" \\
            granite-3.1-8b-instruct
