@@ -48,23 +48,3 @@ coder_chart_version = "2.33.0-rc.3"
 coder_image_tag     = "v2.33.0-rc.3"
 coder_subdomain     = "coder"
 coder_oidc_provider_url = ""     # leave empty to use built-in user/pass for the booth
-
-###############################################################################
-# Postgres (Coder DB)
-###############################################################################
-
-rds_instance_class  = "db.serverless"
-rds_engine_version  = "16.4"
-
-###############################################################################
-# ECR (workspace base images)
-###############################################################################
-
-ecr_repos = ["openshift-ai-gov-base"]
-
-###############################################################################
-# GitHub Actions OIDC
-###############################################################################
-
-github_actions_oidc_role_create = true
-github_repo                     = "coder/demo-aigov-rhaiis-rhsummit-2026"

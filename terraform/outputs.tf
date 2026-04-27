@@ -40,48 +40,13 @@ output "vpc_cidr" {
 }
 
 output "vpc_private_subnet_ids" {
-  description = "Private subnet IDs (one per AZ). OCP nodes + RDS land here."
+  description = "Private subnet IDs (one per AZ). OCP nodes land here."
   value       = module.vpc.private_subnets
 }
 
 output "vpc_public_subnet_ids" {
   description = "Public subnet IDs (one per AZ). NAT gateways + ELBs land here."
   value       = module.vpc.public_subnets
-}
-
-output "vpc_database_subnet_ids" {
-  description = "Database subnet IDs (one per AZ). RDS Aurora lives here."
-  value       = module.vpc.database_subnets
-}
-
-output "rds_writer_endpoint" {
-  description = "Aurora Postgres writer endpoint (always points at the current writer; auto-fails-over)."
-  value       = aws_rds_cluster.coder.endpoint
-}
-
-output "rds_reader_endpoint" {
-  description = "Aurora Postgres reader endpoint (load-balances across all reader instances)."
-  value       = aws_rds_cluster.coder.reader_endpoint
-}
-
-output "rds_database_name" {
-  description = "Aurora Postgres database name for Coder."
-  value       = aws_rds_cluster.coder.database_name
-}
-
-output "rds_availability_zones" {
-  description = "AZs the Aurora cluster instances are deployed into."
-  value       = local.vpc_azs
-}
-
-output "ecr_repo_urls" {
-  description = "Map of ECR repo name → repo URL for workspace base images."
-  value       = { for r in aws_ecr_repository.workspace : r.name => r.repository_url }
-}
-
-output "github_actions_role_arn" {
-  description = "IAM role ARN for GitHub Actions to assume via OIDC (set as GHA repo variable AWS_ROLE_ARN)."
-  value       = var.github_actions_oidc_role_create ? aws_iam_role.gha[0].arn : null
 }
 
 output "cert_manager_iam_user_name" {
@@ -92,17 +57,6 @@ output "cert_manager_iam_user_name" {
 output "cert_manager_access_key_id" {
   description = "AWS access key ID for cert-manager's Route 53 access. Already injected into the Kubernetes Secret `route53-credentials` in the `cert-manager` namespace by the bootstrap step."
   value       = aws_iam_access_key.cert_manager.id
-  sensitive   = true
-}
-
-output "external_secrets_iam_user_name" {
-  description = "Name of the IAM user used by External Secrets Operator (ESO) to read AWS Secrets Manager."
-  value       = aws_iam_user.external_secrets.name
-}
-
-output "external_secrets_access_key_id" {
-  description = "AWS access key ID for ESO. Already injected into the Kubernetes Secret `aws-secrets-manager-creds` in the `external-secrets` namespace by the bootstrap step."
-  value       = aws_iam_access_key.external_secrets.id
   sensitive   = true
 }
 
@@ -122,14 +76,6 @@ output "bedrock_model_access_url" {
   value       = "https://${var.aws_region}.console.aws.amazon.com/bedrock/home?region=${var.aws_region}#/modelaccess"
 }
 
-output "secretsmanager_secret_arns" {
-  description = "ARNs of the AWS Secrets Manager secrets backing the cluster's ExternalSecrets."
-  value = {
-    coder_db_url        = aws_secretsmanager_secret.coder_db_url.arn
-    redhat_pull_secret  = aws_secretsmanager_secret.redhat_pull_secret.arn
-  }
-}
-
 output "next_steps" {
   description = "Post-apply checklist."
   value       = <<-EOT
@@ -144,24 +90,32 @@ output "next_steps" {
     2. Verify Argo CD is running:
          oc get pods -n openshift-gitops
 
-    3. Access the OCP console (kubeadmin password in auth dir):
-         open $(terraform output -raw cluster_console_url 2>/dev/null || echo "see cluster_console_url output")
-
-    4. Wait for Argo CD root app to sync (Coder + RHAIIS + agent-firewalls):
+    3. Watch the app-of-apps sync (postgres at wave 0 stands up the
+       in-cluster CNPG Cluster — it auto-generates the `coder-app`
+       Secret that Coder consumes at wave 1):
          oc get applications -n openshift-gitops -w
 
-    5. Get Coder URL + admin token, set GH Actions secrets:
+    4. Access the OCP console (kubeadmin password in auth dir):
+         open $(terraform output -raw cluster_console_url 2>/dev/null || echo "see cluster_console_url output")
+
+    5. Request Bedrock model access (one-time, per-region):
+         open $(terraform output -raw bedrock_model_access_url)
+         # Approve Anthropic Claude Sonnet 4.x for this region.
+
+    6. Set Coder URL + admin token as GH Actions secrets so
+       push-templates.yml can publish template changes:
          gh secret set CODER_URL --body "$(terraform output -raw coder_url)"
          # Log in as admin in browser, copy token, then:
          gh secret set CODER_SESSION_TOKEN --body "<token>"
-         gh variable set AWS_ROLE_ARN --body "$(terraform output -raw github_actions_role_arn)"
 
-    6. Push your first template:
+    7. Push your first template (images build + publish to GHCR via
+       .github/workflows/build-images.yml using GITHUB_TOKEN — no AWS
+       OIDC required):
          git add coder-templates/
          git commit -m "feat(template): initial template"
          git push origin main
 
-    7. Smoke-test RHAIIS tool-calling:
+    8. Smoke-test RHAIIS tool-calling:
          ../scripts/tool-call-smoke-test.sh \\
            "$(terraform output -raw rhaiis_internal_url)" \\
            granite-3.1-8b-instruct

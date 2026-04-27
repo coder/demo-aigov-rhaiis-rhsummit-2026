@@ -1,0 +1,36 @@
+# CloudNativePG operator
+#
+# IMPORTANT — operator-policy exception:
+# Every other operator in this demo is Red-Hat-engineered. CloudNativePG is
+# the *community-operators* build (CNCF Sandbox project, NOT a Red Hat
+# product). We accept this exception because:
+#   1. Red Hat does not currently ship a first-party in-cluster Postgres
+#      operator. The RH-aligned alternatives are RDS (cloud-only — breaks
+#      on-prem portability) or the upstream Crunchy PGO (community as well).
+#   2. CNPG is the de facto Kubernetes-native Postgres operator: CNCF
+#      Sandbox, CloudNativePG.io, used in countless OCP customer
+#      deployments and explicitly documented as compatible with OpenShift.
+#   3. Booth simplicity wins: CNPG runs in any cluster (AWS / Azure /
+#      bare-metal / air-gap) with the same Cluster CR, which keeps the
+#      demo aligned with the on-prem portability narrative.
+#
+# Channel `stable-v1.24` is the current stable upstream at the time of
+# this commit. installPlanApproval is Automatic so the operator
+# auto-updates within the channel — fine for a throwaway demo cluster;
+# pin to a specific channel/version for production.
+#
+# Package: cloudnative-pg
+# Source:  community-operators
+# Channel: stable-v1.24
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: cloudnative-pg
+  namespace: openshift-operators
+spec:
+  channel: stable-v1.24
+  installPlanApproval: Automatic
+  name: cloudnative-pg
+  source: community-operators
+  sourceNamespace: openshift-marketplace

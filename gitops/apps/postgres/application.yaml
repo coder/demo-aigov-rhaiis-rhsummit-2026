@@ -1,0 +1,49 @@
+# In-cluster Postgres for Coder, via CloudNativePG operator.
+#
+# Pre-requisites:
+#   - cloudnative-pg operator Subscription installed
+#     (gitops/operator/cnpg-subscription.yaml — applied by the cluster
+#     Terraform's bootstrap step)
+#   - CNPG CRDs ready (TF bootstrap waits on `clusters.postgresql.cnpg.io`)
+#
+# What this does:
+#   - Creates the `coder` namespace if missing
+#   - Applies the `Cluster` CR — CNPG operator stands up a 3-instance
+#     streaming-replication Postgres cluster spread across AZs
+#   - CNPG auto-generates two Secrets in the `coder` namespace:
+#       - `coder-app`        — application user (consumed by Coder Helm
+#                              via CODER_PG_CONNECTION_URL)
+#       - `coder-superuser`  — postgres superuser (break-glass)
+#
+# Sync wave 0 — runs BEFORE the Coder Helm app (wave 1) so the `coder-app`
+# Secret exists by the time Coder pods try to read it.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/postgres
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: coder
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

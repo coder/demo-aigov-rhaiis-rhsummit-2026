@@ -1,20 +1,19 @@
 ###############################################################################
-# VPC for the OCP IPI install + RDS Aurora multi-AZ
+# VPC for the OCP IPI install
 #
 # We pre-provision the VPC instead of letting `openshift-install` create one
-# so:
-#   1. RDS Aurora can be deployed multi-AZ (writer + reader in two AZs) inside
-#      the same VPC the cluster lives in. No VPC peering, no public RDS,
-#      no chicken-and-egg.
-#   2. We control the CIDR layout (no surprise overlap with on-prem ranges).
-#   3. Multiple cluster components and helper services (RDS, future ESO
-#      VPC endpoints, etc.) share the network.
+# so we control the CIDR layout (no surprise overlap with on-prem ranges)
+# and can keep multi-AZ topology consistent across control-plane / worker
+# nodes / future helper services in the same network.
 #
 # OCP IPI install picks this up via `platform.aws.subnets` in install-config
 # (BYO-VPC pattern). The installer auto-detects public vs private from the
 # subnet route tables.
 #
-# Three AZs (a/b/c) chosen for control-plane HA + Aurora multi-AZ.
+# Three AZs (a/b/c) chosen for control-plane HA. CloudNativePG runs
+# in-cluster and uses pod-anti-affinity on topology.kubernetes.io/zone
+# (set in manifests/postgres/cluster.yaml) so its replicas spread across
+# the same three AZs as the worker nodes.
 ###############################################################################
 
 locals {

@@ -44,7 +44,7 @@ jobs:
 
       - name: coder templates push
         env:
-          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY || 'ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026' }}
           AI_GATEWAY_URL: ${{ secrets.AI_GATEWAY_URL }}
           NAMESPACE: ${{ vars.WORKSPACE_NAMESPACE || 'coder-workspaces' }}
         run: |
@@ -52,7 +52,7 @@ jobs:
           coder templates push ${{ matrix.template }} \
             --directory . \
             --variable namespace="$NAMESPACE" \
-            --variable ecr_registry="$ECR_REGISTRY" \
+            --variable image_registry="$IMAGE_REGISTRY" \
             --variable ai_gateway_url="$AI_GATEWAY_URL" \
             --yes \
             --message "GH Actions push from ${{ github.sha }}"

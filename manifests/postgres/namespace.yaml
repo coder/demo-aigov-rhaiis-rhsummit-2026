@@ -1,0 +1,16 @@
+# `coder` namespace
+#
+# Created here at sync wave 0 so the CNPG `Cluster` CR (also wave 0) can
+# land in it before the Coder Helm app (wave 1) syncs. The Coder Argo app
+# also has CreateNamespace=true as a fallback, and the cluster TF bootstrap
+# step also creates this namespace — so this is belt-and-suspenders. The
+# explicit declaration keeps GitOps the source of truth for namespace
+# labels / annotations going forward.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coder
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo
+  annotations:
+    description: "Coder control plane + CloudNativePG Postgres cluster for Coder."

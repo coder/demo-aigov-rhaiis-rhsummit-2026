@@ -10,7 +10,7 @@ directory.
 - Each template has:
   - `main.tf` — Coder Terraform (`coder/coder` provider)
   - `README.md` — what the template does, who it's for, env vars / params
-  - `images/` (optional) — Dockerfiles for the workspace base images, built and pushed to ECR by `.github/workflows/build-images.yml`
+  - `images/` (optional) — Dockerfiles for the workspace base images, built and pushed to GHCR by `.github/workflows/build-images.yml` using the workflow's built-in `GITHUB_TOKEN`
 
 ## Pushing a template manually
 
@@ -29,7 +29,7 @@ Required GH secrets (set once with `gh secret set`):
 - `CODER_URL` — the Coder instance URL (from `terraform output -raw coder_url`)
 - `CODER_SESSION_TOKEN` — Coder session token (created via `coder tokens create` after login)
 
-Required GH variable:
-- `AWS_ROLE_ARN` — ARN of the GHA OIDC role (from `terraform output -raw github_actions_role_arn`)
+Optional GH variable:
+- `IMAGE_REGISTRY` — overrides the default `ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026` registry path (use this if you fork the repo into another GH org)
 
-The workflow runs on push to `main` when `coder-templates/**` changes.
+The workflow runs on push to `main` when `coder-templates/**` changes. No AWS credentials are required — image pushes use the workflow's built-in `GITHUB_TOKEN`.

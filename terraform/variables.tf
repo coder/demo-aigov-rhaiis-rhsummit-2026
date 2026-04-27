@@ -3,7 +3,7 @@
 ###############################################################################
 
 variable "aws_region" {
-  description = "AWS region to deploy the demo cluster into. Default us-east-1 for the booth — most AZ headroom and the standard region for OCP IPI demos. The VPC is created with one private/public/database subnet per AZ in <region>{a,b,c}."
+  description = "AWS region to deploy the demo cluster into. Default us-east-1 for the booth — most AZ headroom and the standard region for OCP IPI demos. The VPC is created with one private/public subnet per AZ in <region>{a,b,c}."
   type        = string
   default     = "us-east-1"
 }
@@ -125,46 +125,4 @@ variable "coder_oidc_provider_url" {
   description = "OIDC issuer for Coder SSO. Leave empty to skip OIDC for the demo (use built-in user/pass)."
   type        = string
   default     = ""
-}
-
-###############################################################################
-# Postgres (Coder DB)
-###############################################################################
-
-variable "rds_instance_class" {
-  description = "RDS Aurora Postgres instance class. db.t4g.medium is sufficient for demo."
-  type        = string
-  default     = "db.t4g.medium"
-}
-
-variable "rds_engine_version" {
-  description = "Aurora Postgres engine version."
-  type        = string
-  default     = "16.4"
-}
-
-###############################################################################
-# ECR (workspace base images)
-###############################################################################
-
-variable "ecr_repos" {
-  description = "List of ECR repositories to create (one per workspace template that needs a custom base image)."
-  type        = list(string)
-  default     = ["openshift-ai-gov-base"]
-}
-
-###############################################################################
-# GitHub Actions OIDC (optional)
-###############################################################################
-
-variable "github_actions_oidc_role_create" {
-  description = "Whether to create the IAM role + OIDC provider trust for GitHub Actions to push to ECR. Set false to skip."
-  type        = bool
-  default     = true
-}
-
-variable "github_repo" {
-  description = "GitHub repo allowed to assume the GHA role (e.g., 'coder/demo-aigov-rhaiis-rhsummit-2026')."
-  type        = string
-  default     = "coder/demo-aigov-rhaiis-rhsummit-2026"
 }

@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: external-secrets
-  labels:
-    app.kubernetes.io/part-of: coder-aigov-demo
-    pod-security.kubernetes.io/enforce: privileged
-  annotations:
-    description: "Namespace holding the AWS Secrets Manager auth Secret for External Secrets Operator (ESO)."

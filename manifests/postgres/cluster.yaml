@@ -1,0 +1,50 @@
+# CloudNativePG Cluster — Postgres for Coder
+#
+# Three instances spread across AZs via pod-anti-affinity on
+# topology.kubernetes.io/zone. CNPG handles streaming replication + leader
+# election + automated failover; the writer is reached via the
+# `<name>-rw` Service, the read replicas via `<name>-ro`. Coder writes
+# only, so we point CODER_PG_CONNECTION_URL at the `-rw` endpoint via the
+# auto-generated `coder-app` Secret.
+#
+# CNPG generates two Secrets in this namespace at sync time:
+#   - `coder-app`        — keys: uri, host, port, dbname, user, password,
+#                          jdbc-uri (consumed by the Coder Helm chart)
+#   - `coder-superuser`  — same shape, for postgres superuser
+#
+# Storage: 20Gi PVC per instance, default StorageClass. OCP IPI on AWS
+# defaults to gp3-csi which is multi-AZ-aware (each PVC stays in its
+# instance's AZ).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: coder
+  namespace: coder
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  instances: 3
+  primaryUpdateStrategy: unsupervised
+
+  bootstrap:
+    initdb:
+      database: coder
+      owner: coder
+
+  storage:
+    size: 20Gi
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: topology.kubernetes.io/zone
+
+  monitoring:
+    enablePodMonitor: true

@@ -5,6 +5,12 @@ Reference architecture and deployable demo for the **Coder + Red Hat** booth at 
 > **Lead with AI Governance. Prove it with Developer Experience.**
 > Coder + Red Hat: safe AI adoption at enterprise scale.
 
+## What this demo proves
+
+1. **AI agents can be governed at enterprise scale** — every model call goes through AI Gateway and every workspace egress goes through Agent Firewalls; both are auditable and policy-controlled.
+2. **You can run the same architecture sovereign or cloud** — RHAIIS (Granite-3.1-8B) and Bedrock (Claude Sonnet) sit behind the same gateway; the workspace doesn't know or care which one answers.
+3. **The whole stack lands on OpenShift with operators and GitOps** — no AWS-only patterns in the cluster; this same shape installs on Azure, vSphere, bare-metal, or air-gap.
+
 ## What this repo is
 
 End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenShift 4.20+ (IPI install in your AWS account)** — combining:
@@ -13,7 +19,8 @@ End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenS
 - **Coder AI Governance Add-On** — AI Gateway (centralized LLM gateway) + Agent Firewalls (process-level egress policy) + audit trails
 - **Coder Agents (Early Access)** — self-hosted agent loop running inside the Coder control plane (no LLM API keys in the workspace)
 - **Coder Tasks** — background agent execution interface for Claude Code, Aider, Goose, Amazon Q, and custom agents
-- **Red Hat AI Inference Server (RHAIIS)** — enterprise vLLM serving an OpenAI-compatible endpoint, latest image
+- **Red Hat AI Inference Server (RHAIIS)** — enterprise vLLM serving an OpenAI-compatible endpoint, latest image. (RHAIIS can also be deployed as a `ServingRuntime` inside the full Red Hat OpenShift AI [RHOAI] stack; this demo deploys the standalone RHAIIS image directly to keep operator surface area small for the booth.)
+- **CloudNativePG** — in-cluster, multi-AZ Postgres for Coder via the `cloudnative-pg` operator. No RDS — the demo stays on-prem-portable.
 - **Red Hat OpenShift GitOps** (Argo CD) — manages all cluster apps via app-of-apps pattern
 - **cert-manager Operator for Red Hat OpenShift** — wildcard TLS for `*.coder.apps.<fqdn>` via Let's Encrypt + Route 53 DNS-01
 - **OpenShift Container Platform 4.20+** — self-managed via Installer-Provisioned Infrastructure (IPI) on AWS
@@ -27,7 +34,7 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 | Argo CD | `openshift-gitops-operator` | Red Hat (NOT upstream Argo CD operator) |
 | cert-manager | `openshift-cert-manager-operator` | Red Hat (NOT upstream jetstack/cert-manager) |
 | RHAIIS | `registry.redhat.io/rhoai/vllm-cpu-rhel9` | Red Hat AI Inference Server (NOT community vLLM build) |
-| External Secrets Operator | `external-secrets-operator` (channel: `stable`) | **community-operators** — *documented exception.* Red Hat does not ship a first-party ESO; the RH-supported alternative is HashiCorp Vault, overkill for two secrets. ESO is the path RH validated-patterns recommend for AWS Secrets Manager integration. See [`gitops/operator/external-secrets-subscription.yaml`](gitops/operator/external-secrets-subscription.yaml) for full reasoning. |
+| CloudNativePG | `cloudnative-pg` (channel: `stable-v1.24`) | **community-operators** — *documented exception.* Red Hat does not ship a first-party in-cluster Postgres operator; CNPG is the de facto Kubernetes-native Postgres operator (CNCF Sandbox). We pick it over RDS to keep the cluster apps on-prem-portable: the same `Cluster` CR runs on Azure / vSphere / bare-metal / air-gap with no AWS dependency. See [`gitops/operator/cnpg-subscription.yaml`](gitops/operator/cnpg-subscription.yaml) for full reasoning. |
 
 > **Demo simplicity over hardening.** This is a booth demo, not an ATO baseline. STIG/FIPS posture, OCP `restricted-v2` SCC overrides, and air-gap config are intentionally **not** applied — they overcomplicate setup. Production architectures keep them; see [`docs/architecture.md`](docs/architecture.md) for the production narrative arc.
 
@@ -38,19 +45,19 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │                                                                          │
 │  ┌─ Terraform manages ─────────────────────────────────────────────────┐ │
 │  │   VPC + subnets + NAT/IGW                                            │ │
-│  │   IAM roles for OCP installer + workers                              │ │
+│  │   IAM users (cert-manager → R53; Coder → Bedrock)                    │ │
 │  │   Route 53 records (you supply hosted zone)                          │ │
-│  │   RDS Aurora Postgres (Coder DB)                                     │ │
-│  │   ECR repos (workspace base images)                                  │ │
 │  │   OpenShift 4.20 IPI install (openshift-install via local-exec)      │ │
-│  │   OpenShift GitOps operator (post-install)                           │ │
+│  │   Operator subscriptions: GitOps + cert-manager + CloudNativePG      │ │
+│  │   Cluster Secrets bootstrap (route53, bedrock, redhat-pull-secret)   │ │
 │  │   Argo CD root Application (app-of-apps bootstrap)                   │ │
 │  └──────────────────────────────────────────────────────────────────────┘ │
 │                                                                          │
 │  ┌─ OpenShift cluster ────────────────────────────────────────────────┐ │
 │  │                                                                     │ │
 │  │  ┌─ Argo CD manages (GitOps from this repo) ─────────────────────┐ │ │
-│  │  │   external-secrets/  ESO ClusterSecretStore → AWS Secrets Mgr  │ │ │
+│  │  │   postgres/          CNPG Cluster CR (3 instances, multi-AZ)   │ │ │
+│  │  │                       → auto-generates `coder-app` Secret      │ │ │
 │  │  │   cert-manager/      Let's Encrypt ClusterIssuers (DNS-01/R53) │ │ │
 │  │  │   coder/             Coder Helm chart (RC) + AI Gov Add-On     │ │ │
 │  │  │   coder-routing/     OCP Routes + wildcard cert externalRef    │ │ │
@@ -73,7 +80,7 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 
        ▲
        │  GH Actions (.github/workflows/) pushes:
-       │    - build-images.yml: workspace base images → ECR (on Dockerfile changes)
+       │    - build-images.yml: workspace base images → GHCR (uses GITHUB_TOKEN, no AWS creds)
        │    - push-templates.yml: coder-templates/* → live Coder (on template changes)
        │
    ┌───┴────────────────────────────┐
@@ -103,22 +110,37 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │
 ├── gitops/                         # Argo CD app-of-apps (Argo points here)
 │   ├── README.md
+│   ├── operator/                   # Subscriptions applied by TF before Argo CD runs
+│   │   ├── openshift-gitops-subscription.yaml
+│   │   ├── cert-manager-subscription.yaml
+│   │   └── cnpg-subscription.yaml
 │   ├── bootstrap/
 │   │   └── root-app.yaml           # the one Application that fans out to all apps below
 │   └── apps/
+│       ├── postgres/
+│       │   └── application.yaml    # CNPG Cluster CR (auto-generates `coder-app` Secret)
+│       ├── cert-manager/
+│       │   └── application.yaml
 │       ├── coder/
 │       │   └── application.yaml    # Coder Helm chart (latest RC) with AI Gov Add-On
-│       ├── rhaiis/
-│       │   └── application.yaml    # RHAIIS / vLLM Deployment + Service
-│       └── agent-firewalls/
-│           └── application.yaml    # Coder Agent Firewalls rules ConfigMap
+│       ├── coder-routing/
+│       │   └── application.yaml
+│       └── rhaiis/
+│           └── application.yaml    # RHAIIS / vLLM Deployment + Service
 │
 ├── manifests/                      # raw Kubernetes manifests (referenced by Argo CD apps)
-│   ├── rhaiis/
+│   ├── postgres/
 │   │   ├── namespace.yaml
-│   │   └── vllm-deployment.yaml
-│   └── agent-firewalls/
-│       └── rules.example.yaml
+│   │   └── cluster.yaml            # CNPG Cluster CR (3 instances, multi-AZ)
+│   ├── cert-manager/
+│   │   └── cluster-issuer.yaml
+│   ├── coder/
+│   │   ├── certificate.yaml
+│   │   ├── ingress-wildcard-policy.yaml
+│   │   └── route.yaml
+│   └── rhaiis/
+│       ├── namespace.yaml
+│       └── vllm-deployment.yaml
 │
 ├── coder-templates/                # demo workspace templates pushed by GH Actions
 │   ├── README.md
@@ -136,7 +158,7 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │
 └── .github/
     └── workflows/
-        ├── build-images.yml        # build + push workspace base images to ECR
+        ├── build-images.yml        # build + push workspace base images to GHCR
         └── push-templates.yml      # `coder templates push` against the live cluster
 ```
 
@@ -183,17 +205,18 @@ terraform apply
 ```
 
 This will:
-1. Create RDS Aurora Postgres (Coder DB) + ECR repos + GHA OIDC role + cert-manager Route 53 IAM user
+1. Create the BYO-VPC + IAM users (cert-manager → Route 53; Coder → Bedrock)
 2. Generate `install-config.yaml` from the template
 3. Run `openshift-install create cluster` (~30–45 min)
-4. Apply both RH-supported operator subscriptions (OpenShift GitOps + cert-manager)
-5. Wait for the `cert-manager` namespace + CRDs to come up
-6. Inject the Route 53 access keys into Secret `route53-credentials` in `cert-manager` namespace
+4. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG)
+5. Wait for cert-manager + CNPG CRDs
+6. Bootstrap cluster Secrets (`route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`)
 7. Apply the Argo CD root Application (app-of-apps bootstrap)
 
 After `apply` finishes you'll have:
-- A live OCP 4.20 cluster with two RH-supported operators installed
-- Argo CD running, with Applications for cert-manager (ClusterIssuers) + Coder + RHAIIS + Agent Firewalls + coder-routing
+- A live OCP 4.20 cluster with three operators installed (GitOps + cert-manager + CNPG)
+- Argo CD running, with Applications for `postgres` (CNPG Cluster) + cert-manager (ClusterIssuers) + Coder + RHAIIS + coder-routing
+- Coder using a CNPG-generated `coder-app` Secret for its DB connection — no manual DB-URL plumbing
 - Wildcard TLS cert in flight for `*.coder.apps.<fqdn>` (Let's Encrypt prod, DNS-01 over Route 53)
 - Coder reachable at `https://coder.apps.<cluster-domain>`
 - RHAIIS reachable cluster-internally at `http://vllm.ocp-ai.svc:8000`

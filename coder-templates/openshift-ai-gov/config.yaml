@@ -42,11 +42,11 @@ allowlist:
   - "domain=pypi.org"
   - "domain=files.pythonhosted.org"
 
-  # ── ECR for the workspace base image (already pulled by the Pod, but
+  # ── GHCR for the workspace base image (already pulled by the Pod, but
   #    listed here so any in-workspace `docker pull` from the same registry
   #    works without going dark) ──
-  - "domain=*.dkr.ecr.us-east-1.amazonaws.com"
-  - "domain=*.amazonaws.com"
+  - "domain=ghcr.io"
+  - "domain=*.ghcr.io"
 
 # nsjail uses Linux network namespaces; requires CAP_NET_ADMIN on the pod
 # (configurable via OCP SCC). Strong bypass resistance.

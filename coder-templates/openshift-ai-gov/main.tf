@@ -65,7 +65,7 @@ data "coder_parameter" "memory_gb" {
 data "coder_parameter" "image" {
   name         = "image"
   display_name = "Workspace base image"
-  description  = "ECR-hosted base image (built from images/Dockerfile in this template's directory)."
+  description  = "GHCR-hosted base image (built from images/Dockerfile in this template's directory and published by .github/workflows/build-images.yml)."
   default      = "openshift-ai-gov-base:latest"
   type         = "string"
   mutable      = true
@@ -81,10 +81,10 @@ variable "namespace" {
   default     = "coder-workspaces"
 }
 
-variable "ecr_registry" {
-  description = "ECR registry domain (from `terraform output -raw ecr_repo_urls`). e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com"
+variable "image_registry" {
+  description = "Container registry path that hosts workspace base images. Defaults to this repo's GHCR namespace; override at template-push time if you fork."
   type        = string
-  default     = "TBD-ECR-REGISTRY"
+  default     = "ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026"
 }
 
 variable "ai_gateway_url" {
@@ -208,7 +208,7 @@ resource "kubernetes_pod" "main" {
 
     container {
       name              = "dev"
-      image             = "${var.ecr_registry}/demo-aigov/${data.coder_parameter.image.value}"
+      image             = "${var.image_registry}/${data.coder_parameter.image.value}"
       image_pull_policy = "Always"
       command           = ["sh", "-c", coder_agent.main.init_script]
 

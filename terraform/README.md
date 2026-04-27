@@ -1,13 +1,14 @@
 # Terraform — OpenShift 4.20 IPI on AWS + supporting infra
 
 Provisions:
-- AWS RDS Aurora Postgres (Coder DB)
-- AWS ECR repositories (workspace base images)
-- AWS IAM role + OIDC provider for GitHub Actions (push to ECR)
+- BYO-VPC (3 AZs) for the OCP cluster
+- AWS IAM users for cert-manager (Route 53 DNS-01) and Coder → Bedrock
 - OpenShift 4.20+ cluster via **Installer-Provisioned Infrastructure** (`openshift-install create cluster`)
-- OpenShift GitOps operator + Argo CD root Application (app-of-apps bootstrap)
+- Operator subscriptions: OpenShift GitOps + cert-manager (RH-supported) + CloudNativePG (community-operators, documented exception)
+- Cluster Secrets bootstrapped from this Terraform run: `route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`
+- Argo CD root Application (app-of-apps bootstrap)
 
-After `terraform apply` finishes, Argo CD takes over and syncs the cluster apps from `gitops/apps/` (Coder Helm chart, RHAIIS, Agent Firewalls).
+After `terraform apply` finishes, Argo CD takes over and syncs the cluster apps from `gitops/apps/` (Postgres CNPG cluster, Coder Helm chart, RHAIIS, Agent Firewalls). The CNPG operator generates Coder's DB connection Secret (`coder-app` in the `coder` namespace) on its own — there is no out-of-band DB URL to manage.
 
 ## Prereqs
 
@@ -32,11 +33,14 @@ terraform apply
 ```
 
 The `apply` will:
-1. Create RDS / ECR / IAM (~3 min)
-2. Render `install-config.yaml` into `./.cluster/`
-3. Run `openshift-install create cluster --dir=./.cluster` (~30–45 min)
-4. Apply OpenShift GitOps operator subscription + wait for Argo CD ready
-5. Apply Argo CD root Application (kicks off Coder + RHAIIS + Agent Firewalls sync)
+1. Create IAM users for cert-manager + Bedrock (~30 sec)
+2. Create the BYO-VPC (~2 min)
+3. Render `install-config.yaml` into `./.cluster/`
+4. Run `openshift-install create cluster --dir=./.cluster` (~30–45 min)
+5. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG)
+6. Wait for operator CRDs to land
+7. Create cluster Secrets (`route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`)
+8. Apply the Argo CD root Application (kicks off Postgres + Coder + RHAIIS + Agent Firewalls sync)
 
 When done, follow the `next_steps` output.
 
@@ -46,7 +50,7 @@ When done, follow the `next_steps` output.
 terraform destroy
 ```
 
-This runs `openshift-install destroy cluster` first (which removes the OCP-installer-managed VPC / EC2 / IAM / ELB / S3), then RDS / ECR / IAM.
+This runs `openshift-install destroy cluster` first (which removes the OCP-installer-managed EC2 / ELB / S3 / IAM created by the installer), then tears down the IAM users + VPC.
 
 If `openshift-install destroy` fails midway, inspect `./.cluster/` and re-run manually before letting Terraform proceed.
 
@@ -60,15 +64,14 @@ control_plane_instance_type = "m6i.4xlarge"   # 16 vCPU / 64 GiB
 worker_count                = 0
 ```
 
-SNO is fine for the booth — Coder + RHAIIS + GitOps + monitoring all fit in 64 GiB. You lose HA stories but gain provisioning speed and cost.
+SNO is fine for the booth — Coder + RHAIIS + GitOps + monitoring all fit in 64 GiB. You lose HA stories but gain provisioning speed and cost. CNPG `instances: 3` will collapse onto the one node (pod-anti-affinity becomes a soft preference); for SNO consider dropping `instances` to 1 in `manifests/postgres/cluster.yaml`.
 
 ## Why no STIG/FIPS
 
 Demo simplicity. The `install-config.yaml.tftpl` doesn't set `fips: true` and the deployed manifests don't override OCP's default `restricted-v2` SCC with anything stricter. For production deployments, see `docs/architecture.md` for the hardening pattern (LMCO POV / UDS Core JREN reference).
 
-## What's NOT here yet
+## What's NOT here
 
-- Custom VPC ("BYO-VPC") — the installer creates its own. Edit `install-config.yaml.tftpl` for BYO.
-- Multi-AZ RDS — single-AZ Aurora Serverless v2 for demo cost.
-- `restricted-v2` SCC overrides for vLLM — not needed at demo grade.
-- Air-gap path — production-only.
+- **No RDS / ECR / AWS Secrets Manager.** Postgres runs in-cluster (CNPG operator); workspace base images live on GHCR; the few Secrets the cluster needs are created in-line by this Terraform's bootstrap step.
+- **No GitHub Actions OIDC role.** GHCR pushes use the workflow's built-in `GITHUB_TOKEN`.
+- **STIG/FIPS posture, OCP `restricted-v2` SCC overrides, air-gap config** — production-only.

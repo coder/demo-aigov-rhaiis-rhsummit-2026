@@ -6,7 +6,7 @@ Coder workspace template for the Red Hat Summit 2026 booth demo. Lands a develop
 - `OPENAI_API_BASE` exported to the in-cluster AI Gateway URL → every model call this workspace makes is governed and audited
 - `OPENAI_API_KEY` set to the user's Coder session token (AI Gateway authenticates via this)
 - **Agent Firewall config** bundled with the template (`config.yaml`) and mounted to `~/.config/coder_boundary/config.yaml` at workspace start by the `boundary_config_setup` coder_script — process-level egress allowlist applies as soon as the agent runs
-- Workspace base image pulled from ECR (built and pushed by `.github/workflows/build-images.yml`)
+- Workspace base image pulled from GHCR (built and pushed by `.github/workflows/build-images.yml` using the workflow's built-in `GITHUB_TOKEN` — no AWS OIDC role required)
 
 ## Agent Firewall (per [Coder docs](https://coder.com/docs/ai-coder/agent-firewall))
 
@@ -27,7 +27,7 @@ Jail type is `nsjail` (default; strong bypass resistance, needs `CAP_NET_ADMIN` 
 |---|---|---|
 | `cpu` | `2` | Cores (1–8) |
 | `memory_gb` | `4` | Memory in GiB (2–32) |
-| `image` | `openshift-ai-gov-base:latest` | ECR image tag — bump after a Dockerfile change |
+| `image` | `openshift-ai-gov-base:latest` | GHCR image tag — bump after a Dockerfile change |
 
 ## Push variables
 
@@ -36,7 +36,7 @@ Set these once at template push time (`-V key=value` on `coder templates push`):
 | Variable | What |
 |---|---|
 | `namespace` | K8s namespace for workspace pods (default `coder-workspaces`) |
-| `ecr_registry` | ECR registry domain — get from `terraform output -raw ecr_repo_urls` |
+| `image_registry` | Container registry path that hosts workspace base images (default `ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026`) |
 | `ai_gateway_url` | AI Gateway internal URL (default `http://coder.coder.svc.cluster.local:7080/v1`) |
 
 ## Push manually
@@ -47,7 +47,7 @@ cd coder-templates/openshift-ai-gov
 coder templates push openshift-ai-gov \
   --directory . \
   --variable namespace=coder-workspaces \
-  --variable ecr_registry=123456789012.dkr.ecr.us-east-1.amazonaws.com \
+  --variable image_registry=ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026 \
   --variable ai_gateway_url=http://coder.coder.svc.cluster.local:7080/v1 \
   --yes
 ```

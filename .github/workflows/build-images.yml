@@ -15,16 +15,15 @@ on:
         default: "openshift-ai-gov"
 
 permissions:
-  id-token: write           # required for OIDC role assumption
   contents: read
+  packages: write           # required to push to GHCR
 
 env:
-  AWS_REGION: us-east-1
-  ECR_REPO_PREFIX: demo-aigov
+  IMAGE_REGISTRY: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026
 
 jobs:
   build:
-    name: Build + push to ECR
+    name: Build + push to GHCR
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -34,15 +33,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -55,8 +51,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.template }}-base:latest
-            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.template }}-base:${{ github.sha }}
+            ${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:latest
+            ${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -64,5 +60,5 @@ jobs:
         run: |
           echo "## Pushed image" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.template }}-base:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/${{ matrix.template }}-base:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
