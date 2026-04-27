@@ -63,6 +63,26 @@ terraform destroy
 
 Removes the hosted zone, IAM user + keys. Quota increases are NOT rolled back (Service Quotas doesn't support decrease via API).
 
+## Companion: `scripts/aws-quota-bootstrap.sh`
+
+For the request → wait → re-check phase of quota increases, use the standalone script `scripts/aws-quota-bootstrap.sh` at the repo root. Same arithmetic as this Terraform (mirrors `locals.vcpu_per_type`), but designed for the long async loop:
+
+```bash
+# Compute and check (no AWS state changes)
+scripts/aws-quota-bootstrap.sh check
+
+# File increases for any shortfall
+scripts/aws-quota-bootstrap.sh request
+
+# Poll until every tracked request reaches APPROVED / DENIED / CASE_CLOSED
+scripts/aws-quota-bootstrap.sh wait --timeout-minutes 120
+
+# One-off status print
+scripts/aws-quota-bootstrap.sh status
+```
+
+Use the script when you want a tight loop without re-running `terraform plan`; use this Terraform's `request_quota_increases = true` when you want quota requests in your IaC graph.
+
 ## What's NOT here yet
 
 - VPC + subnet pre-provisioning ("BYO-VPC" install). The OCP installer creates its own VPC by default; if you want to install into an existing one, edit `../install-config.yaml.tftpl` and add VPC pre-provisioning here.
