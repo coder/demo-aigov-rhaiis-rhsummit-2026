@@ -49,26 +49,14 @@ output "vpc_public_subnet_ids" {
   value       = module.vpc.public_subnets
 }
 
-output "cert_manager_iam_user_name" {
-  description = "Name of the IAM user used by cert-manager to perform Route 53 DNS-01 challenges."
-  value       = aws_iam_user.cert_manager.name
+output "cert_manager_role_arn" {
+  description = "IAM role ARN used by cert-manager to perform Route 53 DNS-01 challenges via AssumeRole. Injected into the ClusterIssuer by the bootstrap step."
+  value       = aws_iam_role.cert_manager.arn
 }
 
-output "cert_manager_access_key_id" {
-  description = "AWS access key ID for cert-manager's Route 53 access. Already injected into the Kubernetes Secret `route53-credentials` in the `cert-manager` namespace by the bootstrap step."
-  value       = aws_iam_access_key.cert_manager.id
-  sensitive   = true
-}
-
-output "coder_bedrock_iam_user_name" {
-  description = "Name of the IAM user the Coder server pod uses for AWS Bedrock invocations (via AI Gateway)."
-  value       = aws_iam_user.coder_bedrock.name
-}
-
-output "coder_bedrock_access_key_id" {
-  description = "AWS access key ID for Coder → Bedrock. Already injected into Secret `bedrock-credentials` in the `coder` namespace by the bootstrap step."
-  value       = aws_iam_access_key.coder_bedrock.id
-  sensitive   = true
+output "coder_bedrock_role_arn" {
+  description = "IAM role ARN used by the Coder server pod for AWS Bedrock invocations (via AI Gateway). Injected into ConfigMap `bedrock-aws-config` in the `coder` namespace by the bootstrap step."
+  value       = aws_iam_role.coder_bedrock.arn
 }
 
 output "bedrock_model_access_url" {

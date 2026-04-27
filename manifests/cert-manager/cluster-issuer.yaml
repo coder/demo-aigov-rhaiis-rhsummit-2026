@@ -3,13 +3,16 @@
 # DNS-01 (not HTTP-01) is required because we need wildcard certs
 # (*.coder.apps.<fqdn>) for Coder's per-workspace subdomain apps.
 #
-# Pre-requisite Secret `route53-credentials` in the `cert-manager` namespace
-# is created by the cluster Terraform's bootstrap step (it has the AWS
-# provider). Do NOT commit those access keys to Git.
+# Authentication uses IAM roles, not static access keys. The cluster
+# Terraform's bootstrap step applies these ClusterIssuers with the
+# IAM role ARN populated in the `role` field. cert-manager uses
+# ambient credentials (EC2 IMDS on the node) to AssumeRole into the
+# cert-manager IAM role, which has scoped Route 53 permissions.
 #
-# Production: use IAM Roles for Service Accounts (IRSA) instead of static
-# access keys. That requires installing OCP in STS / manual mode and
-# wiring the Cloud Credential Operator. Out of scope for the booth.
+# The `role` field is managed by the bootstrap step (not in this file)
+# because it contains an environment-specific IAM role ARN. The Argo CD
+# cert-manager Application uses RespectIgnoreDifferences to preserve
+# the bootstrap-applied role ARN across syncs.
 
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -25,15 +28,8 @@ spec:
       - dns01:
           route53:
             region: us-east-1
-            # hostedZoneID intentionally omitted — cert-manager auto-discovers
-            # the zone from the DNS name being challenged. Set explicitly if
-            # your account has multiple zones with overlapping suffixes.
-            accessKeyIDSecretRef:
-              name: route53-credentials
-              key: access-key-id
-            secretAccessKeySecretRef:
-              name: route53-credentials
-              key: secret-access-key
+            # role: <set by bootstrap> — cert-manager uses IMDS to
+            # AssumeRole into the cert-manager IAM role for Route 53.
 ---
 # Staging issuer (Let's Encrypt staging). Use this for early dry-runs to avoid
 # rate-limiting; switch Coder Certificate to letsencrypt-prod for booth day.
@@ -51,9 +47,4 @@ spec:
       - dns01:
           route53:
             region: us-east-1
-            accessKeyIDSecretRef:
-              name: route53-credentials
-              key: access-key-id
-            secretAccessKeySecretRef:
-              name: route53-credentials
-              key: secret-access-key
+            # role: <set by bootstrap> — same as above.

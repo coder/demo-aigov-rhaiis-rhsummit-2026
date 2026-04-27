@@ -3,8 +3,10 @@
 #
 # Pre-requisites NOT managed by Argo:
 #   - cert-manager Operator must be installed (gitops/operator/cert-manager-subscription.yaml)
-#   - Secret `route53-credentials` must exist in the `cert-manager` namespace
-#     (created by the cluster Terraform's bootstrap step)
+#   - The bootstrap step must have applied the ClusterIssuers with the
+#     IAM role ARN (the `role` field in the Route 53 solver config).
+#     This is done via `oc apply --server-side` in the bootstrap, and
+#     Argo CD preserves it via RespectIgnoreDifferences below.
 #
 # Sync wave 0 — runs before any app that depends on a Certificate.
 ---
@@ -24,6 +26,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager
+  # The bootstrap step applies the ClusterIssuers with the IAM role ARN
+  # (environment-specific, not committed to git). These ignore rules
+  # prevent Argo CD from reverting the role field during self-heal syncs.
+  ignoreDifferences:
+    - group: cert-manager.io
+      kind: ClusterIssuer
+      jsonPointers:
+        - /spec/acme/solvers/0/dns01/route53/role
   syncPolicy:
     automated:
       prune: true
@@ -31,6 +41,7 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
     retry:
       limit: 5
       backoff:
