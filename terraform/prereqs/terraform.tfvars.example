@@ -4,11 +4,11 @@ aws_region   = "us-east-1"
 aws_profile  = null            # null = default credential chain
 owner_email  = "austen@coder.com"
 
-cluster_name = "rhsummit-demo"   # MUST match cluster TF
+cluster_name = "cluster"   # MUST match cluster TF
 
 # Route 53
 manage_hosted_zone = true
-base_domain        = "aws.example.com"   # YOUR public domain
+base_domain        = "rh.coderdemo.io"   # YOUR public domain
 
 # IAM
 create_installer_iam = true

@@ -43,9 +43,9 @@ spec:
 
           env:
             - name: CODER_ACCESS_URL
-              value: "https://coder.apps.rhsummit-demo.aws.example.com"   # update to your cluster_fqdn
+              value: "https://coder.apps.cluster.rh.coderdemo.io"   # update to your cluster_fqdn
             - name: CODER_WILDCARD_ACCESS_URL
-              value: "*.coder.apps.rhsummit-demo.aws.example.com"
+              value: "*.coder.apps.cluster.rh.coderdemo.io"
             - name: CODER_PG_CONNECTION_URL
               valueFrom:
                 secretKeyRef:

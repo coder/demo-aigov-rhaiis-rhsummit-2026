@@ -27,11 +27,11 @@ variable "owner_email" {
 variable "cluster_name" {
   description = "OCP cluster name. Must be DNS-safe (lowercase, hyphens). Joined with base_domain to form FQDN."
   type        = string
-  default     = "rhsummit-demo"
+  default     = "cluster"
 }
 
 variable "base_domain" {
-  description = "Public Route 53 hosted zone you control (e.g., aws.example.com). The cluster FQDN will be <cluster_name>.<base_domain>."
+  description = "Public Route 53 hosted zone you control (e.g., rh.coderdemo.io). The cluster FQDN will be <cluster_name>.<base_domain>."
   type        = string
 }
 

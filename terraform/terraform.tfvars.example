@@ -15,8 +15,8 @@ owner_email  = "austen@coder.com"
 # OpenShift cluster
 ###############################################################################
 
-cluster_name             = "rhsummit-demo"
-base_domain              = "aws.example.com"   # YOUR public Route 53 zone
+cluster_name             = "cluster"
+base_domain              = "rh.coderdemo.io"   # YOUR public Route 53 zone
 openshift_version        = "stable-4.20"
 openshift_install_binary = "openshift-install" # path to 4.20+ binary
 oc_binary                = "oc"

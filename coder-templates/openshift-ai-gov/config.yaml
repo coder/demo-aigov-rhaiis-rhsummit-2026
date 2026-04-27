@@ -17,8 +17,8 @@
 
 allowlist:
   # ── Coder control plane (required for the agent loop / Tasks / API) ──
-  - "domain=coder.apps.rhsummit-demo.aws.example.com"      # update to your cluster_fqdn
-  - "domain=*.coder.apps.rhsummit-demo.aws.example.com"
+  - "domain=coder.apps.cluster.rh.coderdemo.io"      # update to your cluster_fqdn
+  - "domain=*.coder.apps.cluster.rh.coderdemo.io"
 
   # ── LLM providers via AI Gateway ──
   # AI Gateway lives at the Coder URL above; calls to Anthropic / Bedrock

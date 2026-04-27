@@ -23,7 +23,7 @@ variable "owner_email" {
 variable "cluster_name" {
   description = "OCP cluster name (used in IAM user naming and tags). Must match cluster TF."
   type        = string
-  default     = "rhsummit-demo"
+  default     = "cluster"
 }
 
 ###############################################################################
@@ -46,7 +46,7 @@ variable "manage_hosted_zone" {
 }
 
 variable "base_domain" {
-  description = "Public DNS zone (e.g., aws.example.com). Cluster FQDN will be <cluster_name>.<base_domain>."
+  description = "Public DNS zone (e.g., rh.coderdemo.io). Cluster FQDN will be <cluster_name>.<base_domain>."
   type        = string
 }
 

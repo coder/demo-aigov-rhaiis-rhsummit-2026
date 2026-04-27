@@ -13,7 +13,7 @@ After `terraform apply` finishes, Argo CD takes over and syncs the cluster apps 
 
 - AWS account with admin perms (or scoped enough for OCP IPI: VPC, IAM, EC2, ELB, S3, Route 53)
 - AWS credentials in shell (`aws sts get-caller-identity` succeeds)
-- A **public Route 53 hosted zone** for the cluster's parent domain (e.g., `aws.example.com`)
+- A **public Route 53 hosted zone** for the cluster's parent domain (e.g., `rh.coderdemo.io`)
 - Red Hat **pull secret** at `~/.openshift/pull-secret.json` — download from <https://console.redhat.com/openshift/install/pull-secret>
 - An **SSH public key** for OCP node access (e.g., `~/.ssh/id_ed25519.pub`)
 - **`openshift-install`** binary (4.20+) on `PATH` — download from <https://mirror.openshift.com/pub/openshift-v4/clients/ocp/>

@@ -19,7 +19,7 @@ metadata:
   annotations:
     haproxy.router.openshift.io/timeout: "300s"
 spec:
-  host: coder.apps.rhsummit-demo.aws.example.com   # replace before booth
+  host: coder.apps.cluster.rh.coderdemo.io   # replace before booth
   to:
     kind: Service
     name: coder
@@ -40,7 +40,7 @@ metadata:
   annotations:
     haproxy.router.openshift.io/timeout: "300s"
 spec:
-  host: x.coder.apps.rhsummit-demo.aws.example.com   # placeholder for wildcard
+  host: x.coder.apps.cluster.rh.coderdemo.io   # placeholder for wildcard
   wildcardPolicy: Subdomain
   to:
     kind: Service
