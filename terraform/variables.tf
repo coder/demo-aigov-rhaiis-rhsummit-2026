@@ -3,9 +3,9 @@
 ###############################################################################
 
 variable "aws_region" {
-  description = "AWS region to deploy the demo cluster into."
+  description = "AWS region to deploy the demo cluster into. Default us-east-1 for the booth — most AZ headroom and the standard region for OCP IPI demos. The VPC is created with one private/public/database subnet per AZ in <region>{a,b,c}."
   type        = string
-  default     = "us-east-2"
+  default     = "us-east-1"
 }
 
 variable "aws_profile" {

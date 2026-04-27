@@ -29,14 +29,49 @@ output "kubeadmin_password_path" {
   sensitive   = true
 }
 
-output "rds_endpoint" {
-  description = "Aurora Postgres writer endpoint."
+output "vpc_id" {
+  description = "VPC ID for the cluster (BYO-VPC into which OCP IPI installs)."
+  value       = module.vpc.vpc_id
+}
+
+output "vpc_cidr" {
+  description = "VPC CIDR. Useful for security-group rules and peering."
+  value       = module.vpc.vpc_cidr_block
+}
+
+output "vpc_private_subnet_ids" {
+  description = "Private subnet IDs (one per AZ). OCP nodes + RDS land here."
+  value       = module.vpc.private_subnets
+}
+
+output "vpc_public_subnet_ids" {
+  description = "Public subnet IDs (one per AZ). NAT gateways + ELBs land here."
+  value       = module.vpc.public_subnets
+}
+
+output "vpc_database_subnet_ids" {
+  description = "Database subnet IDs (one per AZ). RDS Aurora lives here."
+  value       = module.vpc.database_subnets
+}
+
+output "rds_writer_endpoint" {
+  description = "Aurora Postgres writer endpoint (always points at the current writer; auto-fails-over)."
   value       = aws_rds_cluster.coder.endpoint
+}
+
+output "rds_reader_endpoint" {
+  description = "Aurora Postgres reader endpoint (load-balances across all reader instances)."
+  value       = aws_rds_cluster.coder.reader_endpoint
 }
 
 output "rds_database_name" {
   description = "Aurora Postgres database name for Coder."
   value       = aws_rds_cluster.coder.database_name
+}
+
+output "rds_availability_zones" {
+  description = "AZs the Aurora cluster instances are deployed into."
+  value       = local.vpc_azs
 }
 
 output "ecr_repo_urls" {

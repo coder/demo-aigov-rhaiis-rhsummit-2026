@@ -82,7 +82,7 @@ variable "namespace" {
 }
 
 variable "ecr_registry" {
-  description = "ECR registry domain (from `terraform output -raw ecr_repo_urls`). e.g., 123456789012.dkr.ecr.us-east-2.amazonaws.com"
+  description = "ECR registry domain (from `terraform output -raw ecr_repo_urls`). e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com"
   type        = string
   default     = "TBD-ECR-REGISTRY"
 }

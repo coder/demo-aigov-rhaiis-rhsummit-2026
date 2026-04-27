@@ -1,6 +1,6 @@
 # Copy to terraform.tfvars and fill in.
 
-aws_region   = "us-east-2"
+aws_region   = "us-east-1"
 aws_profile  = null            # null = default credential chain
 owner_email  = "austen@coder.com"
 

@@ -3,9 +3,9 @@
 ###############################################################################
 
 variable "aws_region" {
-  description = "AWS region for the demo cluster (must match cluster TF aws_region)."
+  description = "AWS region for the demo cluster (must match cluster TF aws_region). Default us-east-1."
   type        = string
-  default     = "us-east-2"
+  default     = "us-east-1"
 }
 
 variable "aws_profile" {

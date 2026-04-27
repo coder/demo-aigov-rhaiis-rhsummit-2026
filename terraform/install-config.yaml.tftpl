@@ -29,13 +29,22 @@ networking:
   - cidr: 10.128.0.0/14
     hostPrefix: 23
   machineNetwork:
-  - cidr: 10.0.0.0/16
+  - cidr: ${machine_cidr}
   networkType: OVNKubernetes
   serviceNetwork:
   - 172.30.0.0/16
 platform:
   aws:
     region: ${aws_region}
+    # BYO-VPC: list every subnet (public + private) the installer is allowed
+    # to use. The installer auto-detects public vs private from the subnet's
+    # route table (IGW route → public, NAT route → private). All subnets
+    # must be tagged kubernetes.io/cluster/<name>: shared (handled by the
+    # VPC module).
+    subnets:
+%{ for s in subnet_ids ~}
+      - ${s}
+%{ endfor ~}
 publish: External
 pullSecret: |
   ${pull_secret}

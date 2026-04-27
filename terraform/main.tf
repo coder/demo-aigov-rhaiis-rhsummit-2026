@@ -42,12 +42,46 @@ data "local_file" "ssh_pubkey" {
 }
 
 ###############################################################################
-# RDS Aurora Postgres for Coder
+# RDS Aurora Postgres for Coder — multi-AZ (writer + reader)
+#
+# Lives in the BYO-VPC private database subnets. Reachable from OCP nodes
+# inside the same VPC; NOT publicly accessible. ESO + Coder pods reach it
+# via the VPC's internal DNS.
 ###############################################################################
 
 resource "random_password" "rds" {
   length  = 24
   special = false
+}
+
+resource "aws_security_group" "rds" {
+  name        = "${var.cluster_name}-rds"
+  description = "RDS Aurora — Coder DB. Allow Postgres from any host in the cluster VPC."
+  vpc_id      = module.vpc.vpc_id
+
+  tags = {
+    Name = "${var.cluster_name}-rds"
+  }
+}
+
+resource "aws_security_group_rule" "rds_ingress_postgres" {
+  type              = "ingress"
+  from_port         = 5432
+  to_port           = 5432
+  protocol          = "tcp"
+  cidr_blocks       = [module.vpc.vpc_cidr_block]
+  security_group_id = aws_security_group.rds.id
+  description       = "Postgres from any host in the cluster VPC"
+}
+
+resource "aws_security_group_rule" "rds_egress_all" {
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.rds.id
+  description       = "Allow egress for engine logs / monitoring"
 }
 
 resource "aws_rds_cluster" "coder" {
@@ -58,26 +92,45 @@ resource "aws_rds_cluster" "coder" {
   database_name           = "coder"
   master_username         = "coder"
   master_password         = random_password.rds.result
-  backup_retention_period = 1
-  skip_final_snapshot     = true # demo only — DON'T do this in prod
+  backup_retention_period = 7         # bumped from demo-1 for HA posture
+  skip_final_snapshot     = true      # demo only — set false + final_snapshot_identifier for prod
   storage_encrypted       = true
+  deletion_protection     = false     # demo
+
+  db_subnet_group_name   = module.vpc.database_subnet_group_name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+  availability_zones     = local.vpc_azs
 
   serverlessv2_scaling_configuration {
     min_capacity = 0.5
     max_capacity = 4.0
   }
-
-  # NOTE: by default lives in the default VPC. For demo simplicity we accept
-  # this. Production: pin to a specific subnet group inside your OCP VPC.
 }
 
-resource "aws_rds_cluster_instance" "coder" {
-  cluster_identifier = aws_rds_cluster.coder.id
-  identifier         = "${var.cluster_name}-coder-db-1"
-  instance_class     = "db.serverless"
-  engine             = aws_rds_cluster.coder.engine
-  engine_version     = aws_rds_cluster.coder.engine_version
-  publicly_accessible = true # demo only — Argo CD bootstrap reaches RDS from outside cluster
+# Writer instance — AZ 1 of 3
+resource "aws_rds_cluster_instance" "coder_writer" {
+  cluster_identifier   = aws_rds_cluster.coder.id
+  identifier           = "${var.cluster_name}-coder-db-writer"
+  instance_class       = "db.serverless"
+  engine               = aws_rds_cluster.coder.engine
+  engine_version       = aws_rds_cluster.coder.engine_version
+  publicly_accessible  = false
+  promotion_tier       = 0          # primary writer
+  availability_zone    = local.vpc_azs[0]
+  db_subnet_group_name = module.vpc.database_subnet_group_name
+}
+
+# Reader instance — AZ 2 of 3 (failover candidate, also serves read traffic)
+resource "aws_rds_cluster_instance" "coder_reader" {
+  cluster_identifier   = aws_rds_cluster.coder.id
+  identifier           = "${var.cluster_name}-coder-db-reader"
+  instance_class       = "db.serverless"
+  engine               = aws_rds_cluster.coder.engine
+  engine_version       = aws_rds_cluster.coder.engine_version
+  publicly_accessible  = false
+  promotion_tier       = 1
+  availability_zone    = local.vpc_azs[1]
+  db_subnet_group_name = module.vpc.database_subnet_group_name
 }
 
 ###############################################################################
@@ -132,8 +185,17 @@ resource "aws_secretsmanager_secret" "coder_db_url" {
 }
 
 resource "aws_secretsmanager_secret_version" "coder_db_url" {
-  secret_id     = aws_secretsmanager_secret.coder_db_url.id
+  secret_id = aws_secretsmanager_secret.coder_db_url.id
+  # Use the writer endpoint — Coder server writes; reads also go to writer
+  # by default. Aurora handles failover by repointing the writer endpoint
+  # to the reader instance automatically.
   secret_string = "postgres://coder:${random_password.rds.result}@${aws_rds_cluster.coder.endpoint}:5432/${aws_rds_cluster.coder.database_name}?sslmode=require"
+
+  # Force update if any of the underlying values change (so ESO re-syncs)
+  depends_on = [
+    aws_rds_cluster_instance.coder_writer,
+    aws_rds_cluster_instance.coder_reader,
+  ]
 }
 
 resource "aws_secretsmanager_secret" "redhat_pull_secret" {
@@ -319,6 +381,8 @@ resource "local_sensitive_file" "install_config" {
     worker_instance_type        = var.worker_instance_type
     pull_secret                 = trimspace(data.local_file.pull_secret.content)
     ssh_pubkey                  = trimspace(data.local_file.ssh_pubkey.content)
+    machine_cidr                = local.vpc_cidr
+    subnet_ids                  = concat(module.vpc.private_subnets, module.vpc.public_subnets)
   })
   file_permission      = "0600"
   directory_permission = "0700"

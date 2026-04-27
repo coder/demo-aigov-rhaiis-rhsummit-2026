@@ -64,7 +64,7 @@ spec:
             - name: CODER_DISABLE_USAGE_STATS
               value: "true"
 
-          replicaCount: 1     # demo — bump to 3 for HA
+          replicaCount: 3     # multi-AZ HA — one pod per AZ via topology spread below
 
           # Use OpenShift Routes via the chart's built-in support
           ingress:
@@ -81,6 +81,27 @@ spec:
             limits:
               cpu: "2"
               memory: "4Gi"
+
+          # Spread the 3 Coder pods across the 3 OCP node AZs so a single AZ
+          # outage takes at most one replica. Aurora Postgres failover (writer
+          # endpoint repoint) is automatic and survives the same AZ event.
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: coder
+
+          affinity:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: coder
+                    topologyKey: kubernetes.io/hostname
 
   destination:
     server: https://kubernetes.default.svc

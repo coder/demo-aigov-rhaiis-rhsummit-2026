@@ -33,7 +33,7 @@ cd coder-templates/openshift-ai-gov
 coder templates push openshift-ai-gov \
   --directory . \
   --variable namespace=coder-workspaces \
-  --variable ecr_registry=123456789012.dkr.ecr.us-east-2.amazonaws.com \
+  --variable ecr_registry=123456789012.dkr.ecr.us-east-1.amazonaws.com \
   --variable ai_gateway_url=http://coder.coder.svc.cluster.local:7080/v1 \
   --yes
 ```

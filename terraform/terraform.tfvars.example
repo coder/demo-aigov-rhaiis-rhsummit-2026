@@ -4,7 +4,10 @@
 # AWS / project basics
 ###############################################################################
 
-aws_region   = "us-east-2"
+# us-east-1 chosen for the booth: most AZ headroom, standard for OCP IPI demos.
+# VPC is BYO and created in <region>{a,b,c}; if you change region, change
+# the prereqs/terraform.tfvars region to match.
+aws_region   = "us-east-1"
 aws_profile  = null            # null = default credential chain
 owner_email  = "austen@coder.com"
 
