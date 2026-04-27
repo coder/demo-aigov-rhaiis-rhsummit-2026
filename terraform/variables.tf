@@ -104,15 +104,15 @@ variable "worker_instance_type" {
 ###############################################################################
 
 variable "coder_chart_version" {
-  description = "Coder Helm chart version. Set to a release-candidate version to get Coder Agents Early Access functionality. Examples: '2.34.0-rc.0', '2.33.0'."
+  description = "Coder Helm chart version. We pin to a release-candidate to get Coder Agents Early Access plus the chatd metrics, edit_files newline-strict diffs, per-turn model persistence, and agents-access org-scoped role migration that landed for this RC. Bump only when a newer tagged RC ships (RC tags now live directly on main; main HEAD is not necessarily a tagged RC)."
   type        = string
-  default     = "2.34.0-rc.0"
+  default     = "2.33.0-rc.3"
 }
 
 variable "coder_image_tag" {
   description = "Coder server container image tag. Should match coder_chart_version's app version."
   type        = string
-  default     = "v2.34.0-rc.0"
+  default     = "v2.33.0-rc.3"
 }
 
 variable "coder_subdomain" {

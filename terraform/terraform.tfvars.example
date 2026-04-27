@@ -37,9 +37,12 @@ worker_instance_type        = "m6i.2xlarge"
 # Coder
 ###############################################################################
 
-# Latest RC for full Coder Agents EA functionality. Bump as new RCs ship.
-coder_chart_version = "2.34.0-rc.0"
-coder_image_tag     = "v2.34.0-rc.0"
+# Latest tagged RC for full Coder Agents EA functionality.
+# v2.33.0-rc.3 (commit 3362b5ae, Apr 22 2026) is the latest tagged candidate.
+# RC tags live directly on `main` under the new release process — bump only
+# when a newer tagged rc.N exists, not on every main HEAD movement.
+coder_chart_version = "2.33.0-rc.3"
+coder_image_tag     = "v2.33.0-rc.3"
 coder_subdomain     = "coder"
 coder_oidc_provider_url = ""     # leave empty to use built-in user/pass for the booth
 

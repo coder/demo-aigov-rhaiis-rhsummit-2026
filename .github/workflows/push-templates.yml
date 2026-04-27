@@ -31,7 +31,7 @@ jobs:
 
       - name: Install coder CLI
         run: |
-          curl -L https://coder.com/install.sh | sh -s -- --version 2.34.0-rc.0
+          curl -L https://coder.com/install.sh | sh -s -- --version 2.33.0-rc.3
           coder --version
 
       - name: coder login
