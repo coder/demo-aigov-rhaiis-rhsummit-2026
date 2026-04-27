@@ -154,13 +154,65 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │   └── coder/
 │
 ├── scripts/
-│   └── tool-call-smoke-test.sh     # validate RHAIIS tool-call parser end-to-end
+│   ├── tool-call-smoke-test.sh        # validate RHAIIS tool-call parser end-to-end
+│   ├── bootstrap-r53-delegation.sh    # cross-account R53 subdomain delegation
+│   ├── aws-quota-bootstrap.sh         # compute / request / track AWS quotas
+│   └── setup-demo-labels.sh           # GH labels for the sprint-ticket flow
 │
 └── .github/
     └── workflows/
         ├── build-images.yml        # build + push workspace base images to GHCR
         └── push-templates.yml      # `coder templates push` against the live cluster
 ```
+
+## Sizing, cost, and startup time
+
+### Recommended cluster shape: 3-node converged + optional GPU 4th node
+
+The default we ship is a **compact 3-node OpenShift cluster** — three control-plane nodes that are also schedulable for workloads, no separate worker MachineSet (`compute.replicas: 0` in `install-config.yaml`). It preserves the full multi-AZ HA narrative (3 control-plane replicas + CNPG `instances: 3` spread across `topology.kubernetes.io/zone`) at roughly 30% of the cost of a 6-node cluster, and it's what every other reference architecture in this demo assumes.
+
+For booth days (and on-demand testing) you can add a **4th GPU worker** to host a CUDA build of RHAIIS. Off-days, the GPU node stays at `replicas: 0` and RHAIIS runs on a CPU image on the converged nodes — no GPU charges, no demo behavior change.
+
+| Shape | Compute (us-east-1, on-demand) | NAT GW | ~$/24h | Multi-AZ HA story | Notes |
+|---|---|---|---|---|---|
+| **Compact 3-node converged (recommended)** — 3 × m6i.2xlarge as CP+worker | $1.152/hr | $0.135/hr | **~$31** | ✓ | CNPG instances=3 still works; no dedicated provisioner pool |
+| Compact 3 + 1 × g5.2xlarge GPU (booth days) | $2.364/hr | $0.135/hr | **~$60** | ✓ | RHAIIS on `vllm-cuda-rhel9` + `nvidia.com/gpu: 1` |
+| SNO (1 × m6i.4xlarge) | $0.768/hr | $0.045/hr | ~$20 | ✗ | No HA; CNPG must collapse to instances=1; one bad node = demo dead |
+| Full HA (current 3 CP + 3 worker) | $1.728/hr | $0.135/hr | ~$45 | ✓ | Dedicated provisioner pool; biggest footprint |
+
+> **GPU vCPU is a separate AWS quota.** New accounts often start at 0 in `Running On-Demand G and VT instances vCPU` (quota code `L-DB2E81BA`). File the increase request at least a week before booth — case-based approval, not auto. `scripts/aws-quota-bootstrap.sh` files and tracks it for you.
+
+### Lifecycle: declarative tear-down / rebuild, never `ec2 stop`
+
+OCP doesn't tolerate `ec2 stop/start` cleanly (etcd quorum, kubelet TLS rot, IPI-managed ELBs). The right pattern for "off-hours" is `terraform destroy` + `terraform apply` on a schedule. Because nothing in `gitops/`, `manifests/`, or `coder-templates/` is account-state-dependent, every rebuild lands in the same place — Bedrock model access, R53 delegation, and GHCR images all survive a destroy.
+
+Practical cadence for booth-prep weeks:
+- **Up** — Monday morning, `terraform apply` (~60 min cold start, see table below)
+- **Down** — Friday EOD, `terraform destroy` (~10 min)
+- ~50 hr/week uptime on compact-3 ≈ **$65/week**, vs ~$215/week if left running 24/7.
+
+A future commit can wrap this in `make cluster-up` / `make cluster-down` plus a GHA cron — call it out when you want it.
+
+### Startup time (cold start to first usable workspace)
+
+| Phase | Tool | Approx time | Notes |
+|---|---|---|---|
+| Quota requests (one-time, run a week ahead) | `scripts/aws-quota-bootstrap.sh request` | minutes – days | Standard vCPU often auto-approves; GPU vCPU is case-based |
+| R53 cross-account delegation (one-time) | `scripts/bootstrap-r53-delegation.sh` | ~2 min total + propagation | <60s for resolver pickup once parent applies |
+| Account-level prereqs (one-time per account) | `terraform/prereqs apply` | ~3–5 min | IAM users + (optional) hosted-zone create |
+| Cluster install — VPC + IAM | `terraform/main.tf` (early stages) | ~3 min | BYO-VPC, NAT gateways per AZ |
+| Cluster install — `openshift-install create cluster` | `terraform/main.tf` (local-exec) | **~30–45 min** | The single biggest line item; AWS image pull + bootstrap + CP nodes |
+| Operator subscriptions + CRD wait | `terraform/main.tf` (gitops_bootstrap) | ~3–5 min | OpenShift GitOps + cert-manager + CNPG |
+| Cluster Secrets bootstrap | same step | ~30 sec | route53-credentials, bedrock-credentials, redhat-pull-secret |
+| Argo CD app-of-apps sync | Argo (autonomous) | ~3–5 min | postgres (CNPG Cluster reconcile) → coder Helm → coder-routing → rhaiis |
+| TLS cert issuance (Let's Encrypt DNS-01) | cert-manager | ~2–5 min | After Coder Route exists |
+| First Coder admin login + GH Actions secrets | manual + `gh secret set` | ~2 min | `CODER_URL`, `CODER_SESSION_TOKEN` |
+| First template push | `.github/workflows/push-templates.yml` | ~2 min | Triggered by any `coder-templates/**` change |
+| Prebuilt-Workspace warm pool ready | Coder | ~3–5 min | One-time per template |
+| **First usable workspace from a fresh AWS account** | end-to-end | **~60–75 min** | Mostly the OCP installer |
+| **GPU node added (booth day)** | `oc scale machineset/...` | +4–5 min | EC2 spin-up + NVIDIA driver install |
+
+Subsequent booth-week rebuilds skip the one-time rows and land in **~50–60 min** end-to-end.
 
 ## Quickstart
 
