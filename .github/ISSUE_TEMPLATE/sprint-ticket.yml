@@ -1,0 +1,50 @@
+name: 🏃 Sprint Ticket (booth demo)
+description: Create a sprint ticket. Auto-applies the `sprint-ticket` label, which triggers Coder workspace provisioning via .github/workflows/sprint-ticket.yml.
+title: "[Sprint] "
+labels: ["sprint-ticket"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Demo issue template — stands in for Jira / sprint planning
+        On submit, the `sprint-ticket` label is auto-applied and the workflow at `.github/workflows/sprint-ticket.yml` provisions a Coder workspace from the `openshift-ai-gov` template. The workspace link will appear as a comment on this issue once it's claimed from the Prebuilt warm pool (typically <60s).
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-line summary of the work item.
+      placeholder: e.g., Add input validation to the checkout endpoint
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What needs to happen?
+      description: Acceptance criteria, implementation notes, links — whatever the developer or agent needs to pick this up.
+      placeholder: |
+        - [ ] Add validation for null/empty fields on POST /checkout
+        - [ ] Return 400 with structured error details on validation failure
+        - [ ] Add unit tests covering edge cases
+        - [ ] Update API docs
+    validations:
+      required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 - Blocker
+        - P1 - High
+        - P2 - Medium
+        - P3 - Low
+      default: 2
+
+  - type: input
+    id: owner
+    attributes:
+      label: Suggested owner
+      description: GitHub @ handle of the dev who picks this up (optional — for the demo this is purely cosmetic).
+      placeholder: "@ausbru87"

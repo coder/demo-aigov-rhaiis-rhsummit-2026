@@ -208,7 +208,26 @@ git push origin main
 
 The `push-templates.yml` workflow will run `coder templates push` against your cluster.
 
-### 4. Validate end-to-end
+### 4. Set up the booth-demo sprint-ticket flow
+
+Run once per repo to create the demo labels (`sprint-ticket`, `demo`, `rhsummit-2026`):
+
+```bash
+./scripts/setup-demo-labels.sh
+```
+
+The booth demo flow becomes:
+
+1. Open a new GitHub Issue and pick the **🏃 Sprint Ticket (booth demo)** template
+2. Fill in the summary (e.g., *"Add input validation to checkout endpoint"*) and submit
+3. The `sprint-ticket` label is auto-applied → `.github/workflows/sprint-ticket.yml` fires
+4. The workflow calls `coder create sprint-<issue-number> --template openshift-ai-gov`
+5. The Prebuilt Workspace claim from the warm pool returns in <60s
+6. The workflow comments back on the issue with the workspace URL
+
+Stand at the booth, click **New Issue → Sprint Ticket → Submit**, and the audience watches the workspace appear in the Coder UI in real time.
+
+### 5. Validate end-to-end
 
 ```bash
 ./scripts/tool-call-smoke-test.sh \
@@ -218,7 +237,7 @@ The `push-templates.yml` workflow will run `coder templates push` against your c
 
 Expected: `✅ PASS: tool_calls returned ...`
 
-### 5. Tear down
+### 6. Tear down
 
 ```bash
 cd terraform/

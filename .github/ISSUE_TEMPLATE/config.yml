@@ -1,0 +1,4 @@
+# Keep blank issues enabled for non-demo bug reports / questions.
+# The Sprint Ticket template appears as the recommended default.
+blank_issues_enabled: true
+contact_links: []

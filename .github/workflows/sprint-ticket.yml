@@ -1,0 +1,155 @@
+name: Sprint ticket → Coder workspace
+
+# Booth demo: when a GitHub Issue is opened or labeled with `sprint-ticket`,
+# this workflow provisions a Coder workspace from the openshift-ai-gov
+# template (claims a Prebuilt Workspace from the warm pool — typically
+# <60s) and comments back on the issue with the workspace link.
+#
+# This replaces the AAP / Tekton "sprint mock UI" option in the v3 demo
+# plan. GitHub Issues stands in for Jira; the workflow stands in for any
+# enterprise ticket → workspace pipeline.
+#
+# Required GitHub secrets (set with `gh secret set`):
+#   CODER_URL            — the Coder instance URL (terraform output -raw coder_url)
+#   CODER_SESSION_TOKEN  — Coder session token (created via `coder tokens create`)
+#
+# Required GitHub label (create once with scripts/setup-demo-labels.sh):
+#   sprint-ticket
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "GitHub issue number to provision a workspace for"
+        required: true
+        type: number
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  provision-workspace:
+    name: Provision Coder workspace from sprint ticket
+    runs-on: ubuntu-latest
+    # Only fire when the issue is opened with the label, gets the label
+    # added later, or is dispatched manually. Skip if the label was added
+    # automatically alongside other irrelevant labels.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'sprint-ticket') ||
+      (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'sprint-ticket'))
+
+    steps:
+      - name: Resolve issue context
+        id: ctx
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          ISSUE_TITLE:  ${{ github.event.issue.title || '' }}
+        run: |
+          set -euo pipefail
+          # Workspace name: sprint-<issue_number>. Coder requires DNS-safe
+          # names; the issue number alone is safe.
+          echo "ws_name=sprint-${ISSUE_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "issue_number=${ISSUE_NUMBER}"   >> "$GITHUB_OUTPUT"
+          echo "issue_title=${ISSUE_TITLE}"     >> "$GITHUB_OUTPUT"
+
+      - name: Install coder CLI
+        run: |
+          set -euo pipefail
+          # Match the Coder server RC version in use. Bump when bumping
+          # coder_chart_version / coder_image_tag in terraform.tfvars.
+          curl -fsSL https://coder.com/install.sh | sh -s -- --version 2.34.0-rc.0
+          coder --version
+
+      - name: coder login
+        env:
+          CODER_URL:           ${{ secrets.CODER_URL }}
+          CODER_SESSION_TOKEN: ${{ secrets.CODER_SESSION_TOKEN }}
+        run: |
+          set -euo pipefail
+          coder login "$CODER_URL" --token "$CODER_SESSION_TOKEN"
+          coder users show me
+
+      - name: Resolve current Coder username
+        id: user
+        run: |
+          set -euo pipefail
+          USERNAME=$(coder users show me --column username --output json | jq -r '.[0].username')
+          echo "username=${USERNAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Coder workspace from openshift-ai-gov template
+        id: create
+        env:
+          WS_NAME: ${{ steps.ctx.outputs.ws_name }}
+        run: |
+          set -euo pipefail
+
+          # Idempotency: if the workspace already exists (re-labeling the
+          # same issue), skip creation rather than fail the workflow.
+          if coder list --output json | jq -e --arg n "$WS_NAME" '.[] | select(.name == $n)' >/dev/null; then
+            echo "Workspace $WS_NAME already exists; skipping create."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            coder create "$WS_NAME" \
+              --template openshift-ai-gov \
+              --yes
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compose workspace URL
+        id: url
+        env:
+          CODER_URL: ${{ secrets.CODER_URL }}
+          USERNAME:  ${{ steps.user.outputs.username }}
+          WS_NAME:   ${{ steps.ctx.outputs.ws_name }}
+        run: |
+          echo "url=${CODER_URL}/@${USERNAME}/${WS_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on issue with workspace link
+        uses: actions/github-script@v7
+        env:
+          WS_URL:    ${{ steps.url.outputs.url }}
+          WS_NAME:   ${{ steps.ctx.outputs.ws_name }}
+          CREATED:   ${{ steps.create.outputs.created }}
+          ISSUE_NUM: ${{ steps.ctx.outputs.issue_number }}
+        with:
+          script: |
+            const issueNumber = parseInt(process.env.ISSUE_NUM, 10);
+            const wsUrl   = process.env.WS_URL;
+            const wsName  = process.env.WS_NAME;
+            const created = process.env.CREATED === 'true';
+
+            const verb = created ? 'Provisioning' : 'Already provisioned';
+            const body = [
+              `🚀 **${verb} Coder workspace** for this ticket.`,
+              ``,
+              `- Workspace: \`${wsName}\``,
+              `- Open it: ${wsUrl}`,
+              ``,
+              `Workspace claims a Prebuilt instance from the warm pool — typically ready in <60 seconds.`,
+              ``,
+              `_Governed by Coder AI Governance Add-On (AI Gateway + Agent Firewalls). Models served by Red Hat AI Inference Server (RHAIIS)._`
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: issueNumber,
+              body,
+            });
+
+      - name: Summary
+        env:
+          WS_NAME:  ${{ steps.ctx.outputs.ws_name }}
+          WS_URL:   ${{ steps.url.outputs.url }}
+        run: |
+          {
+            echo "## Provisioned workspace"
+            echo ""
+            echo "- Issue: #${{ steps.ctx.outputs.issue_number }} (${{ steps.ctx.outputs.issue_title }})"
+            echo "- Workspace: \`${WS_NAME}\`"
+            echo "- URL: ${WS_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
