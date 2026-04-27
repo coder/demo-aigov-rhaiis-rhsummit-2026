@@ -1,0 +1,146 @@
+# Red Hat AI Inference Server (RHAIIS) — OpenAI-compatible inference endpoint
+#
+# Verified to expose:
+#   POST /v1/chat/completions   (with tools / tool_choice for tool-calling)
+#   POST /v1/completions
+#   POST /v1/embeddings
+#   GET  /v1/models
+#
+# Tool-call support requires the right per-model parser. This example uses
+# `granite` for IBM Granite-3.1-8B-Instruct. Alternates:
+#   --tool-call-parser hermes        (Qwen2.5 / Qwen2.5-Coder, OpenHermes)
+#   --tool-call-parser llama3_json   (Llama-3.1+ Instruct)
+#   --tool-call-parser mistral       (Mistral / Mixtral Instruct)
+#   --tool-call-parser deepseek      (DeepSeek-V3 / DeepSeek-Coder-V2.5+)
+#
+# CPU-only sizing below works for Granite-3.1-8B at low concurrency (booth /
+# dev). Use a GPU node and scale request resources for production loads.
+#
+# Pull-secret expectation: a `redhat-pull-secret` of type
+# kubernetes.io/dockerconfigjson exists in this namespace, sourced from your
+# Red Hat subscription (registry.redhat.io). Create it with:
+#
+#   oc create secret docker-registry redhat-pull-secret \
+#     --docker-server=registry.redhat.io \
+#     --docker-username='<RH_USERNAME>' \
+#     --docker-password='<RH_TOKEN>' \
+#     --namespace=ocp-ai
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: inference
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate                  # model load is heavy; avoid double-warmup
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm
+        app.kubernetes.io/component: inference
+    spec:
+      imagePullSecrets:
+        - name: redhat-pull-secret
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vllm
+          # TODO: pin to a specific tag from registry.redhat.io after verifying
+          # tool-call parser support in your target RHAIIS version.
+          image: registry.redhat.io/rhoai/vllm-cpu-rhel9:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --model
+            - ibm-granite/granite-3.1-8b-instruct
+            - --tool-call-parser
+            - granite
+            - --enable-auto-tool-choice
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            # Modest context for booth demos; tune for production.
+            - --max-model-len
+            - "8192"
+            # Single-tenant booth — disable telemetry.
+            - --disable-log-requests
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: HF_HOME
+              value: /tmp/hf-cache
+            # If the model is not pre-baked into the image, vLLM will download
+            # from Hugging Face on first start. For air-gap / production,
+            # bake or sideload the model into a PVC and point HF_HOME there.
+            - name: HF_HUB_OFFLINE
+              value: "0"
+          resources:
+            requests:
+              cpu: "2"
+              memory: "8Gi"
+            limits:
+              cpu: "4"
+              memory: "16Gi"
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 60     # first model load takes a minute
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false   # vLLM writes to HF cache; volume below
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /tmp/hf-cache
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: 30Gi              # 8B fp16 ≈ 16GB; leave headroom
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
