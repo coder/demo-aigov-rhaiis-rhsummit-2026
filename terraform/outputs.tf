@@ -106,6 +106,22 @@ output "external_secrets_access_key_id" {
   sensitive   = true
 }
 
+output "coder_bedrock_iam_user_name" {
+  description = "Name of the IAM user the Coder server pod uses for AWS Bedrock invocations (via AI Gateway)."
+  value       = aws_iam_user.coder_bedrock.name
+}
+
+output "coder_bedrock_access_key_id" {
+  description = "AWS access key ID for Coder → Bedrock. Already injected into Secret `bedrock-credentials` in the `coder` namespace by the bootstrap step."
+  value       = aws_iam_access_key.coder_bedrock.id
+  sensitive   = true
+}
+
+output "bedrock_model_access_url" {
+  description = "Direct link to the Bedrock model-access page in the AWS console for this region. You must one-time-approve Anthropic models here before AI Gateway can invoke them."
+  value       = "https://${var.aws_region}.console.aws.amazon.com/bedrock/home?region=${var.aws_region}#/modelaccess"
+}
+
 output "secretsmanager_secret_arns" {
   description = "ARNs of the AWS Secrets Manager secrets backing the cluster's ExternalSecrets."
   value = {

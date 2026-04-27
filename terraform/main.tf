@@ -244,6 +244,58 @@ resource "aws_iam_access_key" "external_secrets" {
 }
 
 ###############################################################################
+# IAM user for Coder server / AI Gateway → AWS Bedrock
+#
+# AI Gateway picks up ambient AWS credentials from env vars on the Coder
+# server pod (per PR coder/coder#24397 in v2.33-rc.3). The bootstrap step
+# materializes these creds as Kubernetes Secret `bedrock-credentials` in
+# the `coder` namespace; the Helm values mount AWS_ACCESS_KEY_ID /
+# AWS_SECRET_ACCESS_KEY from that Secret as env vars. AWS_REGION is set
+# to the cluster region.
+#
+# IMPORTANT: Bedrock model access is granted per-account, per-region,
+# per-model via a one-time AWS console step. After this Terraform applies,
+# go to the Bedrock console for ${var.aws_region} and request access to
+# the Anthropic models you'll use for the demo (Claude Sonnet 4.x at
+# minimum). Approval is typically instant for Anthropic on Bedrock.
+###############################################################################
+
+data "aws_iam_policy_document" "coder_bedrock" {
+  statement {
+    sid    = "BedrockInvoke"
+    effect = "Allow"
+    actions = [
+      "bedrock:InvokeModel",
+      "bedrock:InvokeModelWithResponseStream",
+      "bedrock:Converse",
+      "bedrock:ConverseStream",
+      "bedrock:ListFoundationModels",
+      "bedrock:GetFoundationModel",
+      "bedrock:ListInferenceProfiles",
+      "bedrock:GetInferenceProfile",
+    ]
+    # Demo: allow against all foundation models. Production: scope to the
+    # specific model and inference-profile ARNs you have access to.
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_user" "coder_bedrock" {
+  name = "${var.cluster_name}-coder-bedrock"
+  path = "/demo/"
+}
+
+resource "aws_iam_user_policy" "coder_bedrock" {
+  name   = "bedrock-invoke"
+  user   = aws_iam_user.coder_bedrock.name
+  policy = data.aws_iam_policy_document.coder_bedrock.json
+}
+
+resource "aws_iam_access_key" "coder_bedrock" {
+  user = aws_iam_user.coder_bedrock.name
+}
+
+###############################################################################
 # IAM user for cert-manager Route 53 DNS-01 challenges
 #
 # cert-manager runs in the cluster and calls Route 53 to create + remove
@@ -496,6 +548,17 @@ resource "null_resource" "gitops_bootstrap" {
         --namespace=external-secrets \
         --from-literal=access-key-id='${aws_iam_access_key.external_secrets.id}' \
         --from-literal=secret-access-key='${aws_iam_access_key.external_secrets.secret}' \
+        --dry-run=client -o yaml | ${var.oc_binary} apply -f -
+
+      echo "==> Creating coder namespace if missing..."
+      ${var.oc_binary} create namespace coder --dry-run=client -o yaml | ${var.oc_binary} apply -f -
+
+      echo "==> Creating Bedrock credentials Secret in coder namespace (AI Gateway picks these up via ambient AWS env vars)..."
+      ${var.oc_binary} create secret generic bedrock-credentials \
+        --namespace=coder \
+        --from-literal=aws-access-key-id='${aws_iam_access_key.coder_bedrock.id}' \
+        --from-literal=aws-secret-access-key='${aws_iam_access_key.coder_bedrock.secret}' \
+        --from-literal=aws-region='${var.aws_region}' \
         --dry-run=client -o yaml | ${var.oc_binary} apply -f -
 
       echo "==> Bootstrapping Argo CD root Application (app-of-apps)..."

@@ -63,6 +63,25 @@ spec:
               value: "true"
             - name: CODER_DISABLE_USAGE_STATS
               value: "true"
+            # ── Bedrock provider for AI Gateway ─────────────────────────
+            # AI Gateway's Bedrock provider reads ambient AWS env vars
+            # (per coder/coder #24397, v2.33-rc.3). Secret is created by
+            # the cluster Terraform's bootstrap step.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: bedrock-credentials
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bedrock-credentials
+                  key: aws-secret-access-key
+            - name: AWS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: bedrock-credentials
+                  key: aws-region
 
           replicaCount: 3     # multi-AZ HA — one pod per AZ via topology spread below
 
