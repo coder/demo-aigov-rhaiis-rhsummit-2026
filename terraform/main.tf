@@ -113,6 +113,75 @@ resource "aws_ecr_lifecycle_policy" "workspace" {
 }
 
 ###############################################################################
+# AWS Secrets Manager — backing store for ESO
+#
+# Two secrets the cluster needs at sync time:
+#   1. coder-db-url     — postgres connection URL for Coder
+#   2. redhat-pull-secret — the partner pull-secret JSON for RHAIIS image
+#
+# Stored here so External Secrets Operator can pull them into the cluster
+# as Kubernetes Secrets, eliminating the manual `oc create secret` steps.
+#
+# AWS SM cost is ~$0.40/secret/month. Two secrets => $0.80/month. Negligible.
+###############################################################################
+
+resource "aws_secretsmanager_secret" "coder_db_url" {
+  name                    = "demo-aigov/coder-db-url"
+  description             = "Postgres connection URL for the Coder control plane (consumed by ESO)."
+  recovery_window_in_days = 0   # demo only — drops immediately on destroy
+}
+
+resource "aws_secretsmanager_secret_version" "coder_db_url" {
+  secret_id     = aws_secretsmanager_secret.coder_db_url.id
+  secret_string = "postgres://coder:${random_password.rds.result}@${aws_rds_cluster.coder.endpoint}:5432/${aws_rds_cluster.coder.database_name}?sslmode=require"
+}
+
+resource "aws_secretsmanager_secret" "redhat_pull_secret" {
+  name                    = "demo-aigov/redhat-pull-secret"
+  description             = "Red Hat partner pull-secret JSON (consumed by ESO for RHAIIS image pulls)."
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "redhat_pull_secret" {
+  secret_id     = aws_secretsmanager_secret.redhat_pull_secret.id
+  secret_string = trimspace(data.local_file.pull_secret.content)
+}
+
+###############################################################################
+# IAM user for External Secrets Operator (ESO) to read AWS Secrets Manager
+###############################################################################
+
+data "aws_iam_policy_document" "external_secrets_read" {
+  statement {
+    sid    = "ReadDemoSecrets"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+    resources = [
+      aws_secretsmanager_secret.coder_db_url.arn,
+      aws_secretsmanager_secret.redhat_pull_secret.arn,
+    ]
+  }
+}
+
+resource "aws_iam_user" "external_secrets" {
+  name = "${var.cluster_name}-external-secrets"
+  path = "/demo/"
+}
+
+resource "aws_iam_user_policy" "external_secrets" {
+  name   = "secretsmanager-read"
+  user   = aws_iam_user.external_secrets.name
+  policy = data.aws_iam_policy_document.external_secrets_read.json
+}
+
+resource "aws_iam_access_key" "external_secrets" {
+  user = aws_iam_user.external_secrets.name
+}
+
+###############################################################################
 # IAM user for cert-manager Route 53 DNS-01 challenges
 #
 # cert-manager runs in the cluster and calls Route 53 to create + remove
@@ -306,7 +375,7 @@ resource "null_resource" "gitops_bootstrap" {
       set -euo pipefail
       export KUBECONFIG="${var.install_dir}/auth/kubeconfig"
 
-      echo "==> Applying RH-supported operator subscriptions (OpenShift GitOps + cert-manager)..."
+      echo "==> Applying RH-supported + community operator subscriptions (OpenShift GitOps + cert-manager + ESO)..."
       ${var.oc_binary} apply -f ${path.module}/../gitops/operator/
 
       echo "==> Waiting for openshift-gitops Argo CD server to be Ready..."
@@ -330,13 +399,6 @@ resource "null_resource" "gitops_bootstrap" {
         sleep 10
       done
 
-      echo "==> Creating Route 53 credentials Secret in cert-manager namespace..."
-      ${var.oc_binary} create secret generic route53-credentials \
-        --namespace=cert-manager \
-        --from-literal=access-key-id='${aws_iam_access_key.cert_manager.id}' \
-        --from-literal=secret-access-key='${aws_iam_access_key.cert_manager.secret}' \
-        --dry-run=client -o yaml | ${var.oc_binary} apply -f -
-
       echo "==> Waiting for cert-manager CRDs (ClusterIssuer) to be installed..."
       for i in $(seq 1 60); do
         if ${var.oc_binary} get crd clusterissuers.cert-manager.io 2>/dev/null | grep -q clusterissuers; then
@@ -345,6 +407,32 @@ resource "null_resource" "gitops_bootstrap" {
         echo "    ...waiting for cert-manager CRDs ($i/60)"
         sleep 10
       done
+
+      echo "==> Waiting for External Secrets Operator CRDs..."
+      for i in $(seq 1 60); do
+        if ${var.oc_binary} get crd externalsecrets.external-secrets.io 2>/dev/null | grep -q externalsecrets; then
+          break
+        fi
+        echo "    ...waiting for ESO CRDs ($i/60)"
+        sleep 10
+      done
+
+      echo "==> Creating external-secrets namespace if missing..."
+      ${var.oc_binary} create namespace external-secrets --dry-run=client -o yaml | ${var.oc_binary} apply -f -
+
+      echo "==> Creating Route 53 credentials Secret in cert-manager namespace..."
+      ${var.oc_binary} create secret generic route53-credentials \
+        --namespace=cert-manager \
+        --from-literal=access-key-id='${aws_iam_access_key.cert_manager.id}' \
+        --from-literal=secret-access-key='${aws_iam_access_key.cert_manager.secret}' \
+        --dry-run=client -o yaml | ${var.oc_binary} apply -f -
+
+      echo "==> Creating AWS Secrets Manager creds Secret in external-secrets namespace..."
+      ${var.oc_binary} create secret generic aws-secrets-manager-creds \
+        --namespace=external-secrets \
+        --from-literal=access-key-id='${aws_iam_access_key.external_secrets.id}' \
+        --from-literal=secret-access-key='${aws_iam_access_key.external_secrets.secret}' \
+        --dry-run=client -o yaml | ${var.oc_binary} apply -f -
 
       echo "==> Bootstrapping Argo CD root Application (app-of-apps)..."
       ${var.oc_binary} apply -f ${path.module}/../gitops/bootstrap/root-app.yaml

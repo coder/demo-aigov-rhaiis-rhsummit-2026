@@ -4,18 +4,22 @@
 
 | App | Sync wave | What it deploys |
 |---|---|---|
+| `external-secrets` | -1 | ClusterSecretStore pointing at AWS Secrets Manager |
 | `cert-manager` | 0 | ClusterIssuers (Let's Encrypt prod + staging) using DNS-01 over Route 53 |
-| `coder` | 1 | Coder Helm chart (latest RC) — control plane + provisioner + AI Governance Add-On |
-| `rhaiis` | 2 | RHAIIS / vLLM Deployment + Service from `manifests/rhaiis/` |
+| `coder` | 1 | Coder Helm chart (latest RC) — control plane + provisioner + AI Governance Add-On. ExternalSecret materializes `coder-db-url` at wave 0 within this app's tree. |
+| `rhaiis` | 2 | RHAIIS / vLLM Deployment + Service from `manifests/rhaiis/`. ExternalSecret materializes `redhat-pull-secret` at wave 0 within this app's tree. |
 | `coder-routing` | 2 | OpenShift Route(s) for Coder with cert-manager-issued wildcard TLS + ingress wildcard policy patch |
 | `agent-firewalls` | 3 | Coder Agent Firewalls rules ConfigMap from `manifests/agent-firewalls/` |
 
 ## Operator policy
 
-This demo uses **only Red-Hat-certified, RH-supported operators** wherever Red Hat ships one. We do not deploy upstream community variants when an RH-supported equivalent exists. Operator subscriptions live in `operator/`:
+This demo prefers **Red-Hat-certified, RH-supported operators** wherever Red Hat ships one. Subscriptions live in `operator/`:
 
-- `openshift-gitops-subscription.yaml` — Red Hat OpenShift GitOps (Argo CD)
-- `cert-manager-subscription.yaml` — cert-manager Operator for Red Hat OpenShift (NOT upstream jetstack/cert-manager)
+| File | Source | Why |
+|---|---|---|
+| `openshift-gitops-subscription.yaml` | `redhat-operators` | Red Hat OpenShift GitOps (NOT upstream Argo CD operator) |
+| `cert-manager-subscription.yaml` | `redhat-operators` | cert-manager Operator for Red Hat OpenShift (NOT upstream jetstack/cert-manager) |
+| `external-secrets-subscription.yaml` | `community-operators` | **Documented exception.** Red Hat does not ship a first-party External Secrets Operator. The RH-supported alternative for this use case is HashiCorp Vault on OpenShift, which is overkill for two demo secrets. ESO appears in several Red Hat validated-patterns docs (multicluster-gitops, AAP+AWS-Secrets-Manager) as the integration point for AWS Secrets Manager. |
 
 Coder is a Red Hat partner and uses the partner pull-secret (the same `pull-secret.json` from console.redhat.com, tied to the partner subscription) for any RH-distributed image.
 
@@ -27,29 +31,25 @@ Coder is a Red Hat partner and uses the partner pull-secret (the same `pull-secr
 
 ## Pre-requisites Argo CD won't manage for you
 
-Three secrets must exist before sync — none are in Git for obvious reasons. Two are created by you; one is created automatically by the cluster Terraform's bootstrap step.
+All cluster secrets are now **automatically created by the cluster Terraform's bootstrap step** — there are no manual `oc create secret` steps anymore.
+
+The flow:
+
+1. Cluster TF writes `coder-db-url` and `redhat-pull-secret` content into AWS Secrets Manager (`demo-aigov/coder-db-url`, `demo-aigov/redhat-pull-secret`)
+2. Cluster TF creates two scoped IAM users (cert-manager → Route 53; ESO → Secrets Manager) with access keys
+3. Cluster TF bootstrap injects three Kubernetes Secrets:
+   - `route53-credentials` in the `cert-manager` namespace (cert-manager IAM keys)
+   - `aws-secrets-manager-creds` in the `external-secrets` namespace (ESO IAM keys)
+4. Argo CD applies the `ClusterSecretStore` (wave -1)
+5. ExternalSecrets in the `coder` and `ocp-ai` namespaces (wave 0) cause ESO to materialize the actual `coder-db-url` and `redhat-pull-secret` Kubernetes Secrets from AWS Secrets Manager
+
+If you ever need to inspect the secrets manually:
 
 ```bash
-# 1. Coder DB URL (RDS Aurora endpoint + password from terraform output)
-#    YOU create this once after `terraform apply`:
-oc create namespace coder 2>/dev/null || true
-oc create secret generic coder-db-url \
-  -n coder \
-  --from-literal=url='postgres://coder:<RDS_PASSWORD>@<RDS_ENDPOINT>:5432/coder?sslmode=require'
-
-# 2. Red Hat partner pull secret for RHAIIS image
-#    YOU create this once with your partner pull-secret JSON
-#    (https://console.redhat.com/openshift/install/pull-secret):
-oc create namespace ocp-ai 2>/dev/null || true
-oc create secret docker-registry redhat-pull-secret \
-  --docker-server=registry.redhat.io \
-  --docker-username='<RH_USERNAME>' \
-  --docker-password='<RH_TOKEN>' \
-  --namespace=ocp-ai
-
-# 3. Route 53 credentials for cert-manager DNS-01 challenges
-#    AUTOMATICALLY created by `terraform apply` (cluster TF bootstrap step).
-#    No action needed unless you're running outside of the cluster TF flow.
+oc get secrets -n coder coder-db-url
+oc get secrets -n ocp-ai redhat-pull-secret
+oc get secrets -n external-secrets aws-secrets-manager-creds
+oc get secrets -n cert-manager route53-credentials
 ```
 
 ## Watching sync

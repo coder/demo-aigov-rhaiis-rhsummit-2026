@@ -22,11 +22,12 @@ End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenS
 
 This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat ships one. Coder is a Red Hat partner and pulls all RH-distributed images through the partner pull-secret. Specifically:
 
-| Component | Operator | Source |
+| Component | Operator / Image | Source |
 |---|---|---|
 | Argo CD | `openshift-gitops-operator` | Red Hat (NOT upstream Argo CD operator) |
 | cert-manager | `openshift-cert-manager-operator` | Red Hat (NOT upstream jetstack/cert-manager) |
 | RHAIIS | `registry.redhat.io/rhoai/vllm-cpu-rhel9` | Red Hat AI Inference Server (NOT community vLLM build) |
+| External Secrets Operator | `external-secrets-operator` (channel: `stable`) | **community-operators** — *documented exception.* Red Hat does not ship a first-party ESO; the RH-supported alternative is HashiCorp Vault, overkill for two secrets. ESO is the path RH validated-patterns recommend for AWS Secrets Manager integration. See [`gitops/operator/external-secrets-subscription.yaml`](gitops/operator/external-secrets-subscription.yaml) for full reasoning. |
 
 > **Demo simplicity over hardening.** This is a booth demo, not an ATO baseline. STIG/FIPS posture, OCP `restricted-v2` SCC overrides, and air-gap config are intentionally **not** applied — they overcomplicate setup. Production architectures keep them; see [`docs/architecture.md`](docs/architecture.md) for the production narrative arc.
 

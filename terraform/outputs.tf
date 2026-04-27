@@ -60,6 +60,25 @@ output "cert_manager_access_key_id" {
   sensitive   = true
 }
 
+output "external_secrets_iam_user_name" {
+  description = "Name of the IAM user used by External Secrets Operator (ESO) to read AWS Secrets Manager."
+  value       = aws_iam_user.external_secrets.name
+}
+
+output "external_secrets_access_key_id" {
+  description = "AWS access key ID for ESO. Already injected into the Kubernetes Secret `aws-secrets-manager-creds` in the `external-secrets` namespace by the bootstrap step."
+  value       = aws_iam_access_key.external_secrets.id
+  sensitive   = true
+}
+
+output "secretsmanager_secret_arns" {
+  description = "ARNs of the AWS Secrets Manager secrets backing the cluster's ExternalSecrets."
+  value = {
+    coder_db_url        = aws_secretsmanager_secret.coder_db_url.arn
+    redhat_pull_secret  = aws_secretsmanager_secret.redhat_pull_secret.arn
+  }
+}
+
 output "next_steps" {
   description = "Post-apply checklist."
   value       = <<-EOT
