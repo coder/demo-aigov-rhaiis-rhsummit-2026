@@ -1,12 +1,14 @@
 # AWS credentials — what's needed, where, and why
 
-> **Demo-grade.** Static IAM access keys throughout. IRSA (IAM Roles for Service Accounts) is the production pattern; out of scope for the booth.
-> Last updated 2026-04-27 (commit `be5f0c4`-era).
+> **IAM role-based.** No static IAM user access keys. Cluster workloads
+> use IAM roles assumed via EC2 instance metadata (STS AssumeRole),
+> which is compatible with AWS accounts that enforce MFA on IAM users.
+> Last updated 2026-04-27.
 
 Three personas hold AWS credentials in this demo:
 
 1. **You** — the human running Terraform and the scripts in `scripts/`.
-2. **The cluster** — two scoped IAM users this repo's Terraform creates, plus the IPI installer's instance profiles for the OCP nodes.
+2. **The cluster** — two scoped IAM roles this repo's Terraform creates, plus the IPI installer's instance profiles for the OCP nodes.
 3. **AWS Bedrock** — a one-time per-region, per-model human approval in the AWS console, gated by your account.
 
 GitHub Actions has **no AWS creds** after the GHCR migration. CI pushes use `GITHUB_TOKEN`.
@@ -22,28 +24,36 @@ GitHub Actions has **no AWS creds** after the GHCR migration. CI pushes use `GIT
 | **GitHub PAT** (`gh auth login`) | You | `gh repo create`, `gh secret set`, repo workflows | Repo-scoped for `coder/*`. Not AWS. |
 
 Notes:
-- The Terraform AWS provider, `openshift-install`, and the `aws` CLI all use the **same SDK credential chain** (`AWS_PROFILE` env var → `~/.aws/credentials` → instance metadata). So if `aws sts get-caller-identity` works in your shell, TF will work.
+- The Terraform AWS provider, `openshift-install`, and the `aws` CLI all use the **same SDK credential chain** (`AWS_PROFILE` env var -> `~/.aws/credentials` -> instance metadata). So if `aws sts get-caller-identity` works in your shell, TF will work.
 - We don't ship a dedicated installer IAM user by default. `terraform/prereqs/main.tf` *can* create `ocp-installer-<cluster_name>` with `AdministratorAccess` (`var.create_installer_iam = true`) if you'd rather decouple the cluster lifecycle from your personal creds.
 
 ---
 
 ## Operation-time — cluster running
 
-The cluster TF creates **two** scoped IAM users at apply time. The IPI installer creates a third class (instance profiles) automatically. All three serve different consumers:
+The cluster TF creates **two** scoped IAM roles at apply time. The IPI installer creates a third class (instance profiles) automatically. All three serve different consumers:
 
-| IAM user / role | Created by | Permissions | Where the access key lands in the cluster | Consumed by |
+| IAM role | Created by | Permissions | How pods authenticate | Consumed by |
 |---|---|---|---|---|
-| `<cluster_name>-cert-manager` | `terraform/main.tf` — `aws_iam_user.cert_manager` + `aws_iam_user_policy.cert_manager_route53` | `route53:GetChange`, `ChangeResourceRecordSets`, `ListResourceRecordSets` scoped to the `base_domain` zone ARN; `ListHostedZonesByName` on `*` | K8s Secret `route53-credentials` in the `cert-manager` namespace, written by the TF bootstrap step (`oc create secret generic ... --dry-run=client -o yaml \| oc apply -f -`) | cert-manager DNS-01 ACME challenge solver — issues the `*.coder.apps.<cluster>.<base_domain>` wildcard cert against Let's Encrypt prod |
-| `<cluster_name>-coder-bedrock` | `terraform/main.tf` — `aws_iam_user.coder_bedrock` + `aws_iam_user_policy.coder_bedrock` | `bedrock:InvokeModel*`, `Converse*`, `ListFoundationModels`, `GetFoundationModel`, `List*InferenceProfile*`, `Get*InferenceProfile*` on `Resource: "*"` (demo only) | K8s Secret `bedrock-credentials` in the `coder` namespace | Coder server pod env vars (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`) → AI Gateway's Bedrock provider picks them up via the AWS SDK ambient chain (per `coder/coder#24397`, v2.33-rc.3) |
+| `<cluster_name>-cert-manager-route53` | `terraform/irsa.tf` — `aws_iam_role.cert_manager` | `route53:GetChange`, `ChangeResourceRecordSets`, `ListResourceRecordSets` scoped to the `base_domain` zone ARN; `ListHostedZonesByName` on `*` | cert-manager uses ambient EC2 IMDS credentials to `sts:AssumeRole` into this role. The `role` field in the ClusterIssuer tells cert-manager which ARN to assume. | cert-manager DNS-01 ACME challenge solver — issues the `*.coder.apps.<cluster>.<base_domain>` wildcard cert against Let's Encrypt prod |
+| `<cluster_name>-coder-bedrock` | `terraform/irsa.tf` — `aws_iam_role.coder_bedrock` | `bedrock:InvokeModel*`, `Converse*`, `ListFoundationModels`, `GetFoundationModel`, `List*InferenceProfile*`, `Get*InferenceProfile*` on `Resource: "*"` (demo only) | Coder pod mounts ConfigMap `bedrock-aws-config` as an AWS shared-config file. The Go AWS SDK reads `role_arn` + `credential_source = Ec2InstanceMetadata` and handles the STS AssumeRole chain. | Coder server pod -> AI Gateway's Bedrock provider picks up credentials via the AWS SDK ambient chain (per `coder/coder#24397`, v2.33-rc.3) |
 | **OCP IPI instance profiles** | `openshift-install` itself, not this Terraform | EC2 / EBS / ELB / S3 (ignition bucket) / internal Route 53 zone / IAM lifecycle as needed for `machine-api`, `kube-controller-manager`, `aws-ebs-csi-driver`, ELB controller | EC2 instance metadata on every CP + worker node | OCP system controllers — node lifecycle, EBS volumes, ELB / NLB provisioning, ignition bootstrap |
 
-The third one we don't manage. If you ever switch to `credentialsMode: Manual` (STS) and IRSA, you'd own those role ARNs explicitly; for the demo's IPI install they're transparent.
+### How IAM role assumption works (IMDS + AssumeRole)
 
-### Why static keys + K8s Secret instead of IRSA
+1. The OCP IPI installer creates EC2 instance profiles with IAM roles for master and worker nodes.
+2. Our Terraform creates scoped IAM roles with trust policies that allow the OCP node roles to call `sts:AssumeRole`.
+3. The bootstrap step adds an inline `sts:AssumeRole` policy to the node roles (discovered at runtime via `oc get infrastructure cluster`).
+4. Pods on OCP nodes access EC2 IMDS to get temporary credentials for the node role.
+5. The AWS SDK chains these into an `sts:AssumeRole` call to the target service role, getting scoped, temporary credentials.
 
-- IRSA requires installing OCP in `credentialsMode: Manual` mode and running `ccoctl` to seed component credentials BEFORE the install completes — adds ~20 min and several manual steps to the apply path.
-- The booth target is "minutes from `apply` to a working demo," and the surface area covered by these two scoped IAM users is small (2 users, narrow permissions).
-- The README's `## Sizing, cost, and startup time` section calls out static keys as a documented exception; production deployments should reapply LMCO POV–style hardening (IRSA + Vault).
+No static access keys are involved. All credentials are STS-issued and auto-expire.
+
+### Why IAM roles instead of IAM users
+
+- **MFA compatibility.** AWS accounts with MFA policies deny API calls from IAM user access keys that lack MFA context. Pods cannot provide MFA, so static user keys fail. IAM roles assumed via IMDS bypass this because the trust relationship is between AWS services, not users.
+- **No long-lived secrets.** No access keys stored in K8s Secrets or TF state. STS credentials auto-expire (default 1 hour, renewed automatically by the SDK).
+- **Auditable.** CloudTrail logs show which role was assumed and from which instance, providing better attribution than shared access keys.
 
 ---
 
@@ -55,7 +65,7 @@ Bedrock is gated **per AWS account, per region, per model** by a human approval 
 https://${AWS_REGION}.console.aws.amazon.com/bedrock/home?region=${AWS_REGION}#/modelaccess
 ```
 
-The Terraform `bedrock_model_access_url` output is a direct link. Approval is typically instant for Anthropic models. After approval, the `coder-bedrock` IAM user's keys can invoke them.
+The Terraform `bedrock_model_access_url` output is a direct link. Approval is typically instant for Anthropic models. After approval, the Coder pod's assumed role can invoke them.
 
 There is no API equivalent for this approval step. It is the only piece of the demo that requires a console session.
 
@@ -63,19 +73,8 @@ There is no API equivalent for this approval step. It is the only piece of the d
 
 ## Lifecycle and rotation
 
-- **All three IAM users live in TF state.** `terraform destroy` deletes the two scoped users we manage. `openshift-install destroy cluster` (run as the destroy provisioner) cleans up the IPI installer's instance profiles. The wiring at `terraform/main.tf:177-205` runs the destroy provisioner before the AWS resources tear down.
-- **Rotation in place** for either scoped user:
-  ```bash
-  cd terraform/
-  terraform apply -replace=aws_iam_access_key.cert_manager
-  # or
-  terraform apply -replace=aws_iam_access_key.coder_bedrock
-  ```
-  TF will mint a new access key, the bootstrap step re-runs `oc apply -f` (idempotent server-side apply) to update the K8s Secret, and the next pod restart picks up the new value. For a clean rotation:
-  ```bash
-  oc rollout restart -n cert-manager deployment/cert-manager
-  oc rollout restart -n coder       deployment/coder
-  ```
+- **IAM roles live in TF state** (ARNs, not secrets). `terraform destroy` deletes the two scoped roles. `openshift-install destroy cluster` (run as the destroy provisioner) cleans up the IPI installer's instance profiles and the inline `assume-demo-service-roles` policies on node roles.
+- **No credential rotation needed.** STS temporary credentials issued via AssumeRole auto-expire and are renewed by the AWS SDK. There are no static keys to rotate.
 - **Sandbox profile rotation** is on you / your AWS Org policy. TF state doesn't depend on which session token your sandbox profile happens to have at apply time.
 - **GitHub PAT rotation** — `gh auth refresh` covers it. No AWS coupling.
 
@@ -86,7 +85,7 @@ There is no API equivalent for this approval step. It is the only piece of the d
 | Where | What | Sensitivity |
 |---|---|---|
 | `~/.aws/credentials` | Sandbox + parent profile static keys (yours) | High — your laptop |
-| `terraform/.terraform.tfstate` (after apply) | Both scoped IAM users' access key IDs **and secrets** | High — these are operational creds for the live cluster |
+| `terraform/.terraform.tfstate` (after apply) | IAM role ARNs (no secrets) | Low — ARNs are not secrets |
 | `${install_dir}/auth/kubeconfig` | Cluster kubeadmin kubeconfig | High — full cluster admin |
 | `${install_dir}/auth/kubeadmin-password` | Initial kubeadmin password | High |
 | `~/.openshift/pull-secret.json` | RH partner pull-secret (yours) | High — pulls from `registry.redhat.io` |
@@ -94,17 +93,18 @@ There is no API equivalent for this approval step. It is the only piece of the d
 `.gitignore` covers all `*.tfstate` and the cluster install dir is `./.cluster/` which is gitignored. Even so:
 
 - Back the install dir + tfstate up to encrypted storage if you stop trusting the laptop disk.
-- Move TF state to **S3 with KMS encryption + DynamoDB locking** when you implement remote state (planned in the cluster-up/down lifecycle work). That gets the access keys off your disk and into IAM-controlled storage.
+- Move TF state to **S3 with KMS encryption + DynamoDB locking** when you implement remote state (planned in the cluster-up/down lifecycle work).
 
 ---
 
-## Production-hardening checklist (intentionally NOT done for booth)
+## Production-hardening checklist (beyond booth scope)
 
-- Replace `cert-manager` and `coder-bedrock` IAM users with **IRSA** + `credentialsMode: Manual` in `install-config.yaml`.
-- Scope the Bedrock IAM user from `Resource: "*"` to the specific model + inference-profile ARNs you've actually approved.
-- Move K8s Secrets behind a real secrets manager with audit and rotation (Vault on OCP, ESO + AWS SM, etc.). The current refactor explicitly dropped ESO/SM for booth simplicity — see `gitops/operator/cnpg-subscription.yaml` for the broader operator-policy reasoning.
+- Switch to **full OIDC-based IRSA** with `credentialsMode: Manual` in `install-config.yaml` + `ccoctl` for per-ServiceAccount role isolation. The current IMDS-based AssumeRole gives node-level (not pod-level) credential scope.
+- Scope the Bedrock IAM role from `Resource: "*"` to the specific model + inference-profile ARNs you've actually approved.
+- Move K8s config behind a real secrets manager with audit (Vault on OCP, ESO + AWS SM, etc.).
 - Remote TF state on S3 + DynamoDB lock (planned).
 - Service-control-policy (SCP) review at the AWS Organizations level if the sandbox account is in an Org.
+- Deploy the [EKS Pod Identity Webhook](https://github.com/aws/amazon-eks-pod-identity-webhook) on OpenShift for per-pod credential isolation without full STS mode.
 
 ---
 
@@ -114,9 +114,9 @@ There is no API equivalent for this approval step. It is the only piece of the d
 |---|---|
 | Who needs AWS creds to run `terraform apply`? | You — sandbox profile, account-admin level. |
 | Who needs AWS creds in GitHub Actions? | Nobody. Removed with the GHCR migration. |
-| What can the `cert-manager` user do? | Edit Route 53 records in the cluster's `base_domain` zone. Nothing else. |
-| What can the `coder-bedrock` user do? | Invoke Bedrock models (any). Nothing else. |
-| How does AI Gateway find Bedrock creds? | AWS SDK ambient chain — env vars on the Coder pod from the `bedrock-credentials` Secret. |
+| What can the cert-manager role do? | Edit Route 53 records in the cluster's `base_domain` zone. Nothing else. |
+| What can the coder-bedrock role do? | Invoke Bedrock models (any). Nothing else. |
+| How does AI Gateway find Bedrock creds? | AWS SDK ambient chain — reads ConfigMap-mounted AWS config with `role_arn` + `credential_source = Ec2InstanceMetadata`, then AssumeRole via IMDS. |
 | Where does the workspace get AWS creds? | It doesn't. Workspaces talk to AI Gateway only; AI Gateway is the AWS-aware piece. |
 | What if Bedrock is denied for the model I picked? | One-time human click in the Bedrock console at `bedrock_model_access_url`. |
-| What's the destroy story? | `terraform destroy` removes both scoped users; `openshift-install destroy cluster` (wrapped) cleans up the IPI-managed instance profiles. |
+| What's the destroy story? | `terraform destroy` removes both scoped roles; `openshift-install destroy cluster` (wrapped) cleans up the IPI-managed instance profiles. |

@@ -2,10 +2,10 @@
 
 Provisions:
 - BYO-VPC (3 AZs) for the OCP cluster
-- AWS IAM users for cert-manager (Route 53 DNS-01) and Coder → Bedrock
+- AWS IAM roles for cert-manager (Route 53 DNS-01) and Coder -> Bedrock (AssumeRole via IMDS, no static keys)
 - OpenShift 4.20+ cluster via **Installer-Provisioned Infrastructure** (`openshift-install create cluster`)
 - Operator subscriptions: OpenShift GitOps + cert-manager (RH-supported) + CloudNativePG (community-operators, documented exception)
-- Cluster Secrets bootstrapped from this Terraform run: `route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`
+- IRSA trust chain: sts:AssumeRole on OCP node roles, ClusterIssuers with role ARN, Bedrock AWS config ConfigMap
 - Argo CD root Application (app-of-apps bootstrap)
 
 After `terraform apply` finishes, Argo CD takes over and syncs the cluster apps from `gitops/apps/` (Postgres CNPG cluster, Coder Helm chart, RHAIIS, Agent Firewalls). The CNPG operator generates Coder's DB connection Secret (`coder-app` in the `coder` namespace) on its own — there is no out-of-band DB URL to manage.
@@ -14,12 +14,13 @@ After `terraform apply` finishes, Argo CD takes over and syncs the cluster apps 
 
 - AWS account with admin perms (or scoped enough for OCP IPI: VPC, IAM, EC2, ELB, S3, Route 53)
 - AWS credentials in shell (`aws sts get-caller-identity` succeeds)
+- **`aws` CLI** on `PATH` (used by the bootstrap step to add AssumeRole policies to OCP node roles)
 - A **public Route 53 hosted zone** for the cluster's parent domain (e.g., `rh.coderdemo.io`)
 - Red Hat **pull secret** at `~/.openshift/pull-secret.json` — download from <https://console.redhat.com/openshift/install/pull-secret>
 - An **SSH public key** for OCP node access (e.g., `~/.ssh/id_ed25519.pub`)
 - **`openshift-install`** binary (4.20+) on `PATH` — download from <https://mirror.openshift.com/pub/openshift-v4/clients/ocp/>
 - **`oc`** binary on `PATH`
-- Terraform ≥ 1.7 or OpenTofu ≥ 1.7
+- Terraform >= 1.7 or OpenTofu >= 1.7
 
 ## Usage
 
@@ -33,14 +34,15 @@ terraform apply
 ```
 
 The `apply` will:
-1. Create IAM users for cert-manager + Bedrock (~30 sec)
+1. Create IAM roles for cert-manager + Bedrock (~30 sec)
 2. Create the BYO-VPC (~2 min)
 3. Render `install-config.yaml` into `./.cluster/`
-4. Run `openshift-install create cluster --dir=./.cluster` (~30–45 min)
+4. Run `openshift-install create cluster --dir=./.cluster` (~30-45 min)
 5. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG)
 6. Wait for operator CRDs to land
-7. Create cluster Secrets (`route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`)
-8. Apply the Argo CD root Application (kicks off Postgres + Coder + RHAIIS + Agent Firewalls sync)
+7. Discover OCP node IAM roles and add sts:AssumeRole permissions
+8. Apply ClusterIssuers with cert-manager IAM role ARN, create Bedrock AWS config ConfigMap, `redhat-pull-secret`
+9. Apply the Argo CD root Application (kicks off Postgres + Coder + RHAIIS + Agent Firewalls sync)
 
 When done, follow the `next_steps` output.
 
@@ -50,13 +52,13 @@ When done, follow the `next_steps` output.
 terraform destroy
 ```
 
-This runs `openshift-install destroy cluster` first (which removes the OCP-installer-managed EC2 / ELB / S3 / IAM created by the installer), then tears down the IAM users + VPC.
+This runs `openshift-install destroy cluster` first (which removes the OCP-installer-managed EC2 / ELB / S3 / IAM created by the installer, including the node roles and their inline policies), then tears down the IAM roles + VPC.
 
 If `openshift-install destroy` fails midway, inspect `./.cluster/` and re-run manually before letting Terraform proceed.
 
 ## SNO mode
 
-For the cheapest possible demo (~$0.40–0.80/hr), switch to **Single-Node OpenShift**:
+For the cheapest possible demo (~$0.40-0.80/hr), switch to **Single-Node OpenShift**:
 
 ```hcl
 control_plane_count         = 1
@@ -72,6 +74,6 @@ Demo simplicity. The `install-config.yaml.tftpl` doesn't set `fips: true` and th
 
 ## What's NOT here
 
-- **No RDS / ECR / AWS Secrets Manager.** Postgres runs in-cluster (CNPG operator); workspace base images live on GHCR; the few Secrets the cluster needs are created in-line by this Terraform's bootstrap step.
+- **No RDS / ECR / AWS Secrets Manager.** Postgres runs in-cluster (CNPG operator); workspace base images live on GHCR; cluster-side AWS config uses IAM roles + ConfigMaps (no Secrets with access keys).
 - **No GitHub Actions OIDC role.** GHCR pushes use the workflow's built-in `GITHUB_TOKEN`.
 - **STIG/FIPS posture, OCP `restricted-v2` SCC overrides, air-gap config** — production-only.
