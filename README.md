@@ -50,10 +50,21 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │  ┌─ OpenShift cluster ────────────────────────────────────────────────┐ │
 │  │                                                                     │ │
 │  │  ┌─ Argo CD manages (GitOps from this repo) ─────────────────────┐ │ │
-│  │  │   coder/        Coder Helm chart (latest RC) + AI Gov Add-On   │ │ │
-│  │  │   rhaiis/       RHAIIS / vLLM serving Granite-3.1-8B-Instruct  │ │ │
-│  │  │   agent-firewalls/  Process-level egress allowlist             │ │ │
-│  │  │   (future)      Monitoring, demo data seeding                   │ │ │
+│  │  │   external-secrets/  ESO ClusterSecretStore → AWS Secrets Mgr  │ │ │
+│  │  │   cert-manager/      Let's Encrypt ClusterIssuers (DNS-01/R53) │ │ │
+│  │  │   coder/             Coder Helm chart (RC) + AI Gov Add-On     │ │ │
+│  │  │   coder-routing/     OCP Routes + wildcard cert externalRef    │ │ │
+│  │  │   rhaiis/            RHAIIS / vLLM serving Granite-3.1-8B      │ │ │
+│  │  │   (future)           Monitoring, demo data seeding             │ │ │
+│  │  └────────────────────────────────────────────────────────────────┘ │ │
+│  │                                                                     │ │
+│  │  ┌─ Workspace template (pushed by GH Actions) ───────────────────┐ │ │
+│  │  │   coder-templates/openshift-ai-gov/                            │ │ │
+│  │  │     - main.tf (Coder agent + code-server + Pod)                │ │ │
+│  │  │     - config.yaml (Agent Firewall allowlist — process-level)   │ │ │
+│  │  │     - images/Dockerfile (UBI9 base)                            │ │ │
+│  │  │   Agent Firewall config mounts to                              │ │ │
+│  │  │   ~/.config/coder_boundary/config.yaml at workspace start      │ │ │
 │  │  └────────────────────────────────────────────────────────────────┘ │ │
 │  │                                                                     │ │
 │  └─────────────────────────────────────────────────────────────────────┘ │

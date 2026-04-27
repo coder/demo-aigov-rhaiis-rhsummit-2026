@@ -9,7 +9,10 @@
 | `coder` | 1 | Coder Helm chart (latest RC) — control plane + provisioner + AI Governance Add-On. ExternalSecret materializes `coder-db-url` at wave 0 within this app's tree. |
 | `rhaiis` | 2 | RHAIIS / vLLM Deployment + Service from `manifests/rhaiis/`. ExternalSecret materializes `redhat-pull-secret` at wave 0 within this app's tree. |
 | `coder-routing` | 2 | OpenShift Route(s) for Coder with cert-manager-issued wildcard TLS + ingress wildcard policy patch |
-| `agent-firewalls` | 3 | Coder Agent Firewalls rules ConfigMap from `manifests/agent-firewalls/` |
+
+### What's NOT in GitOps
+
+**Agent Firewall config** is intentionally **not** managed here. Per [Coder docs](https://coder.com/docs/ai-coder/agent-firewall), the firewall config is **template-scoped** — `coder-templates/openshift-ai-gov/config.yaml` is bundled with the template, mounted into the workspace at `~/.config/coder_boundary/config.yaml` by a `coder_script` at workspace start, and pushed to live Coder by `.github/workflows/push-templates.yml`. Different templates can have different allowlists (e.g., a defense-pattern template vs a public-research template). Do not move this to a cluster-wide ConfigMap.
 
 ## Operator policy
 

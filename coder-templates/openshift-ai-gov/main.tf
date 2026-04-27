@@ -162,6 +162,30 @@ resource "coder_app" "code" {
 }
 
 ###############################################################################
+# Agent Firewall — config setup at workspace start
+#
+# Per https://coder.com/docs/ai-coder/agent-firewall, the firewall reads
+# its allowlist from ~/.config/coder_boundary/config.yaml. We bundle the
+# config alongside main.tf and install it into the workspace via a
+# coder_script that runs on every workspace start. base64-encoding the
+# file content keeps the heredoc portable across shells.
+###############################################################################
+
+resource "coder_script" "boundary_config_setup" {
+  agent_id     = coder_agent.main.id
+  display_name = "Agent Firewall config setup"
+  run_on_start = true
+  script       = <<-EOF
+    #!/bin/sh
+    set -eu
+    mkdir -p "$HOME/.config/coder_boundary"
+    echo '${base64encode(file("${path.module}/config.yaml"))}' | base64 -d > "$HOME/.config/coder_boundary/config.yaml"
+    chmod 600 "$HOME/.config/coder_boundary/config.yaml"
+    echo "Agent Firewall config installed at $HOME/.config/coder_boundary/config.yaml"
+  EOF
+}
+
+###############################################################################
 # Workspace Pod
 ###############################################################################
 

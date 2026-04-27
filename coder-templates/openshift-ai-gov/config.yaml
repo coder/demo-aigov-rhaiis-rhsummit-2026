@@ -1,0 +1,59 @@
+# Coder Agent Firewall config — workspace-side allowlist for AI coding agents.
+#
+# Mounted into the workspace at ~/.config/coder_boundary/config.yaml by the
+# `boundary_config_setup` coder_script resource in main.tf at workspace start.
+# Agent Firewall reads this file when it starts inside the workspace.
+#
+# Rule format (per https://coder.com/docs/ai-coder/agent-firewall):
+#   "domain=example.com"                            domain + all subdomains
+#   "domain=*.example.com"                          subdomains only
+#   "method=GET,HEAD domain=api.example.com"        restrict HTTP methods
+#   "method=POST domain=api.example.com path=/v1"   method + path
+#   "path=/api/v1/*,/api/v2/*"                      path-only allow
+#
+# Default behavior: anything NOT explicitly allowed is denied at the
+# process level and emits an audit log entry; the developer in the same
+# workspace is unaffected.
+
+allowlist:
+  # ── Coder control plane (required for the agent loop / Tasks / API) ──
+  - "domain=coder.apps.rhsummit-demo.aws.example.com"      # update to your cluster_fqdn
+  - "domain=*.coder.apps.rhsummit-demo.aws.example.com"
+
+  # ── LLM providers via AI Gateway ──
+  # AI Gateway lives at the Coder URL above; calls to Anthropic / Bedrock
+  # transit AI Gateway, not the workspace, so the workspace doesn't need
+  # api.anthropic.com directly when Coder Agents is in use. Kept here for
+  # tooling that bypasses the gateway (e.g., a developer experimenting
+  # with claude CLI).
+  - "domain=api.anthropic.com"
+  - "domain=statsig.anthropic.com"
+
+  # ── Sovereign inference (RHAIIS / vLLM in-cluster) ──
+  - "domain=vllm.ocp-ai.svc"
+  - "domain=vllm.ocp-ai.svc.cluster.local"
+
+  # ── Source / artifact infra (booth-friendly defaults; replace with your
+  #    real Git host + registry for the live event) ──
+  - "method=GET,POST,PUT,PATCH domain=github.com"
+  - "domain=*.github.com"
+  - "domain=raw.githubusercontent.com"
+  - "domain=registry.npmjs.org"
+  - "domain=pypi.org"
+  - "domain=files.pythonhosted.org"
+
+  # ── ECR for the workspace base image (already pulled by the Pod, but
+  #    listed here so any in-workspace `docker pull` from the same registry
+  #    works without going dark) ──
+  - "domain=*.dkr.ecr.us-east-1.amazonaws.com"
+  - "domain=*.amazonaws.com"
+
+# nsjail uses Linux network namespaces; requires CAP_NET_ADMIN on the pod
+# (configurable via OCP SCC). Strong bypass resistance.
+# Switch to landjail only if you're on a kernel ≥ 6.7 (RHEL 9 / OCP 4.20
+# nodes are 5.14 — landjail will fail at runtime).
+jail_type: nsjail
+
+log_dir: /tmp/boundary_logs
+log_level: warn
+proxy_port: 8087

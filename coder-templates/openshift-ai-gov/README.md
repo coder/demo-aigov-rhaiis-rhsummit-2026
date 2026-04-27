@@ -5,7 +5,21 @@ Coder workspace template for the Red Hat Summit 2026 booth demo. Lands a develop
 - Browser VS Code (`code-server`) on port 13337
 - `OPENAI_API_BASE` exported to the in-cluster AI Gateway URL → every model call this workspace makes is governed and audited
 - `OPENAI_API_KEY` set to the user's Coder session token (AI Gateway authenticates via this)
+- **Agent Firewall config** bundled with the template (`config.yaml`) and mounted to `~/.config/coder_boundary/config.yaml` at workspace start by the `boundary_config_setup` coder_script — process-level egress allowlist applies as soon as the agent runs
 - Workspace base image pulled from ECR (built and pushed by `.github/workflows/build-images.yml`)
+
+## Agent Firewall (per [Coder docs](https://coder.com/docs/ai-coder/agent-firewall))
+
+The allowlist is **template-scoped, not cluster-wide.** Edit `config.yaml` in this directory to update what agents can reach, then push the template (`coder templates push` or via the `push-templates.yml` workflow on a `coder-templates/**` change). New workspaces pick it up immediately; existing workspaces re-mount on next restart.
+
+Rule format reference:
+- `"domain=github.com"` — domain + all subdomains
+- `"domain=*.github.com"` — subdomains only
+- `"method=GET,HEAD domain=api.github.com"` — restrict HTTP methods
+- `"method=POST domain=api.example.com path=/users,/posts"` — method + path
+- `"path=/api/v1/*,/api/v2/*"` — path-only allow
+
+Jail type is `nsjail` (default; strong bypass resistance, needs `CAP_NET_ADMIN` via OCP SCC). `landjail` requires kernel ≥ 6.7 — RHEL 9 / OCP 4.20 nodes are kernel 5.14, so it will fail at runtime.
 
 ## Parameters
 
