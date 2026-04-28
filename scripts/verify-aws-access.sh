@@ -56,6 +56,9 @@ SKIP_COUNT=0
 PASS="\033[32m✓\033[0m"
 FAIL="\033[31m✗\033[0m"
 SKIP="\033[33m○\033[0m"
+WARN="\033[33m!\033[0m"
+
+WARN_COUNT=0
 
 check() {
   local label="$1"; shift
@@ -64,6 +67,20 @@ check() {
   else
     printf "  %b %s\n" "$FAIL" "$label"
     FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+  fi
+}
+
+# soft-check: failures emit a warning + remediation hint, do NOT count
+# against exit status. Use for things that are recoverable later (Bedrock
+# region activation) or that the cluster install path doesn't actually
+# need at install time.
+soft_check() {
+  local label="$1" hint="$2"; shift 2
+  if "$@" >/dev/null 2>&1; then
+    printf "  %b %s\n" "$PASS" "$label"
+  else
+    printf "  %b %s  (%s)\n" "$WARN" "$label" "$hint"
+    WARN_COUNT=$(( WARN_COUNT + 1 ))
   fi
 }
 
@@ -94,17 +111,27 @@ ARN=$(aws --profile "$SANDBOX" sts get-caller-identity --query Arn --output text
 printf "  %b sts:GetCallerIdentity  (Account: %s)\n" "$PASS" "$ACCOUNT_ID"
 printf "    principal: %s\n\n" "$ARN"
 
-# These map to the calls TF + scripts make most often.
+# These map to the calls TF + scripts make most often. iam:GetUser is
+# intentionally NOT here — SSO assumes a federated role, not an IAM user,
+# so iam:GetUser always returns NoSuchEntity even with AdministratorAccess.
+# sts:GetCallerIdentity (already passed above) is the correct "whoami"
+# for an SSO session.
 check "ec2:DescribeVpcs"                         aws --profile "$SANDBOX" --region "$REGION" ec2 describe-vpcs --max-items 1
 check "ec2:DescribeSubnets"                      aws --profile "$SANDBOX" --region "$REGION" ec2 describe-subnets --max-items 1
 check "iam:ListUsers"                            aws --profile "$SANDBOX" iam list-users --max-items 1
-check "iam:GetUser (whoami)"                     aws --profile "$SANDBOX" iam get-user
 check "route53:ListHostedZones"                  aws --profile "$SANDBOX" route53 list-hosted-zones --max-items 1
 check "service-quotas:GetServiceQuota (vCPU)"    aws --profile "$SANDBOX" --region "$REGION" service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A
 check "service-quotas:list-history (vCPU)"       aws --profile "$SANDBOX" --region "$REGION" service-quotas list-requested-service-quota-change-history-by-quota --service-code ec2 --quota-code L-1216C47A
-check "bedrock:ListFoundationModels"             aws --profile "$SANDBOX" --region "$REGION" bedrock list-foundation-models --max-results 1
 check "elasticloadbalancing:DescribeLoadBalancers" aws --profile "$SANDBOX" --region "$REGION" elbv2 describe-load-balancers --max-items 1
 check "s3:ListAllMyBuckets"                      aws --profile "$SANDBOX" s3api list-buckets
+
+# Bedrock is consumed by AI Gateway at runtime (post-cluster). Failure
+# here is most often the one-time region-level service activation (open
+# https://${REGION}.console.aws.amazon.com/bedrock/home?region=${REGION}#/modelaccess
+# once); does not block cluster install.
+soft_check "bedrock:ListFoundationModels" \
+  "soft — Bedrock region activation pending; not blocking. Open the model-access console once before booth." \
+  aws --profile "$SANDBOX" --region "$REGION" bedrock list-foundation-models --max-results 1
 
 ###############################################################################
 # Parent profile (optional)
@@ -153,12 +180,19 @@ fi
 echo
 echo "==========================================================="
 if (( FAIL_COUNT == 0 )); then
-  printf "%b  All required checks passed (%d skipped).\n" "$PASS" "$SKIP_COUNT"
+  printf "%b  All required checks passed (%d skipped, %d soft-warning).\n" \
+    "$PASS" "$SKIP_COUNT" "$WARN_COUNT"
   echo "    You're ready to run scripts/bootstrap-r53-delegation.sh and"
   echo "    scripts/aws-quota-bootstrap.sh, then 'cd terraform && terraform apply'."
+  if (( WARN_COUNT > 0 )); then
+    echo
+    echo "    Soft warnings are recoverable later (e.g., Bedrock region"
+    echo "    activation is a one-time AWS console click, not blocking)."
+  fi
   exit 0
 else
-  printf "%b  %d check(s) failed (%d skipped).\n" "$FAIL" "$FAIL_COUNT" "$SKIP_COUNT"
+  printf "%b  %d check(s) failed (%d skipped, %d soft-warning).\n" \
+    "$FAIL" "$FAIL_COUNT" "$SKIP_COUNT" "$WARN_COUNT"
   echo "    See docs/aws-setup.md §2 (sandbox perms) or §3b (parent perms)."
   echo "    docs/aws-creds.md explains *why* each permission is needed."
   exit 3
