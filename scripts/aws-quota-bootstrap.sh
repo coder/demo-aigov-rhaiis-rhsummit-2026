@@ -58,11 +58,15 @@ set -euo pipefail
 # Defaults — overridable by env vars (e.g., from `source .env`) or flags
 ###############################################################################
 
+# Defaults mirror terraform/variables.tf so this script and the cluster TF
+# compute identical needs from identical numbers. Locked cluster shape:
+# 3× m6i.4xlarge converged + 1× g5.2xlarge GPU (always on). Override via
+# TF_VAR_* env vars (sourced from .env) or CLI flags.
 AWS_PROFILE="${AWS_PROFILE:-default}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 CONTROL_PLANE_COUNT="${TF_VAR_control_plane_count:-3}"
-CONTROL_PLANE_INSTANCE_TYPE="${TF_VAR_control_plane_instance_type:-m6i.xlarge}"
-WORKER_COUNT="${TF_VAR_worker_count:-3}"
+CONTROL_PLANE_INSTANCE_TYPE="${TF_VAR_control_plane_instance_type:-m6i.4xlarge}"
+WORKER_COUNT="${TF_VAR_worker_count:-0}"
 WORKER_INSTANCE_TYPE="${TF_VAR_worker_instance_type:-m6i.2xlarge}"
 VCPU_BUFFER="${VCPU_BUFFER:-12}"
 EIP_MARGIN="${EIP_MARGIN:-2}"
