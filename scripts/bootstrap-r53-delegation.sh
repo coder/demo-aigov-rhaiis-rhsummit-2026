@@ -136,7 +136,12 @@ fi
 
 echo "==> Capturing NS values for child zone..."
 
-mapfile -t NS_VALUES < <(aws --profile "$CHILD_PROFILE" route53 get-hosted-zone \
+# Portable read-loop instead of `mapfile` — macOS ships bash 3.2 by default,
+# and `/usr/bin/env bash` picks that up unless you've installed a newer one.
+NS_VALUES=()
+while IFS= read -r line; do
+  [ -n "$line" ] && NS_VALUES+=("$line")
+done < <(aws --profile "$CHILD_PROFILE" route53 get-hosted-zone \
   --id "$CHILD_ZONE_ID" \
   --query 'DelegationSet.NameServers[]' --output text | tr '\t' '\n')
 
