@@ -115,7 +115,7 @@ echo "==> Looking up child zone $CHILD_ZONE in account $CHILD_PROFILE..."
 
 CHILD_ZONE_ID="$(aws --profile "$CHILD_PROFILE" route53 list-hosted-zones-by-name \
   --dns-name "$CHILD_ZONE_DOT" --max-items 1 \
-  --query "HostedZones[?Name=='$CHILD_ZONE_DOT' && !Config.PrivateZone].Id | [0]" \
+  --query "HostedZones[?Name=='$CHILD_ZONE_DOT' && Config.PrivateZone==\`false\`].Id | [0]" \
   --output text 2>/dev/null || echo "None")"
 
 if [[ "$CHILD_ZONE_ID" == "None" || -z "$CHILD_ZONE_ID" ]]; then
@@ -196,7 +196,7 @@ echo "==> Applying change to parent zone $PARENT_ZONE in account $PARENT_PROFILE
 
 PARENT_ZONE_ID="$(aws --profile "$PARENT_PROFILE" route53 list-hosted-zones-by-name \
   --dns-name "$PARENT_ZONE_DOT" --max-items 1 \
-  --query "HostedZones[?Name=='$PARENT_ZONE_DOT' && !Config.PrivateZone].Id | [0]" \
+  --query "HostedZones[?Name=='$PARENT_ZONE_DOT' && Config.PrivateZone==\`false\`].Id | [0]" \
   --output text)"
 
 if [[ "$PARENT_ZONE_ID" == "None" || -z "$PARENT_ZONE_ID" ]]; then
