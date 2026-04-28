@@ -1,0 +1,156 @@
+# Coder Observability stack — Grafana + Prometheus + Loki + Coder dashboards.
+#
+# Helm chart from helm.coder.com/observability — purpose-built for Coder
+# (control plane metrics, AI Gateway / AI Bridge dashboards, Agent
+# Boundaries dashboard for the firewall narrative). Same chart pattern
+# zambruhni-refs/k3s-infra uses; values adapted for OCP:
+#   - storageClass omitted (OCP default = gp3-csi on AWS IPI)
+#   - ingress.enabled: false (we create OCP Route + cert-manager
+#     Certificate explicitly in manifests/observability/)
+#   - GitHub OAuth disabled — booth uses anonymous viewer + admin password
+#     so visitors can browse dashboards without an SSO dance. Re-enable
+#     for production by adding the same `auth.github` section the k3s
+#     reference uses.
+#   - Postgres exporter mountSecret omitted — CNPG-generated `coder-app`
+#     Secret has different key names than the chart expects; wiring the
+#     postgres datasource is a follow-up. Prometheus + Loki + Grafana
+#     dashboards work without it.
+#
+# Multi-source Argo App: chart from helm.coder.com + manifests
+# (Route + Certificate + dashboard ConfigMaps) from this repo. Both apply
+# to the `coder-observability` namespace.
+#
+# Sync wave 3 — runs after Coder (wave 1) and RHAIIS (wave 2). The chart
+# auto-discovers Coder's Prometheus endpoint, so it needs Coder pods up
+# before its scrape configs are useful.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coder-observability
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  sources:
+    - repoURL: https://helm.coder.com/observability
+      chart: coder-observability
+      targetRevision: "*"
+      helm:
+        releaseName: coder-observability
+        values: |
+          global:
+            coder:
+              controlPlaneNamespace: coder
+              externalProvisionersNamespace: coder
+              workspacesSelector: 'namespace=`coder-workspaces`'
+
+            # Postgres exporter wiring — DEFERRED. CNPG's auto-generated
+            # `coder-app` Secret has keys (uri/host/port/dbname/user/
+            # password/jdbc-uri) that don't match what the chart expects
+            # (PGUSER/PGPASSWORD/etc.). Skipping mountSecret leaves the
+            # exporter unwired; Prom + Loki + Grafana dashboards still
+            # render. To enable later, add a TF bootstrap step that
+            # writes a properly-shaped `secret-postgres` into the
+            # coder-observability namespace.
+            postgres:
+              hostname: coder-rw.coder.svc.cluster.local
+              port: 5432
+              database: coder
+              username: coder
+              # mountSecret: "secret-postgres"   # see comment above
+
+            dashboards:
+              enabled: true
+              refresh: "30s"
+              timerange: "12h"
+
+            alerts:
+              enabled: true
+
+          grafana:
+            enabled: true
+            persistence:
+              enabled: true
+              size: 5Gi
+              # storageClass omitted → uses OCP default (gp3-csi on AWS IPI)
+
+            # Booth-friendly auth: anonymous viewer (read-only public),
+            # admin password set via the standard chart-managed secret.
+            grafana.ini:
+              server:
+                root_url: https://grafana.apps.cluster.rhsummit.coderdemo.io
+              auth:
+                disable_login_form: false
+                disable_signout_menu: false
+              auth.basic:
+                enabled: true
+              auth.anonymous:
+                enabled: true
+                org_name: "Main Org."
+                org_role: "Viewer"
+
+            # Infinity plugin — needed by the AI Bridge dashboard's
+            # litellm-pricing-data datasource (k3s pattern, copied).
+            plugins:
+              - yesoreyeram-infinity-datasource
+
+            sidecar:
+              dashboards:
+                enabled: true
+                label: grafana_dashboard
+                labelValue: "1"
+              datasources:
+                enabled: true
+                label: grafana_datasource
+                labelValue: "1"
+
+          prometheus:
+            enabled: true
+            server:
+              persistentVolume:
+                enabled: true
+                size: 20Gi
+                # storageClass: gp3-csi (cluster default)
+              retention: "7d"     # booth window — k3s ref keeps 60d
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 512Mi
+                limits:
+                  cpu: 1000m
+                  memory: 2Gi
+            # OCP ships its own node-exporter as part of the
+            # cluster-monitoring stack — disable the chart's to avoid
+            # port-9100 collisions.
+            prometheus-node-exporter:
+              enabled: false
+
+          loki:
+            enabled: true
+            persistence:
+              enabled: true
+              size: 20Gi
+              # storageClass: gp3-csi (cluster default)
+
+    - repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+      targetRevision: main
+      path: manifests/observability
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: coder-observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

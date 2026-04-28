@@ -131,8 +131,10 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │       │   └── application.yaml    # Coder Helm chart (latest RC) with AI Gov Add-On
 │       ├── coder-routing/
 │       │   └── application.yaml
-│       └── rhaiis/
-│           └── application.yaml    # RHAIIS / vLLM (CUDA) Deployment + Service
+│       ├── rhaiis/
+│       │   └── application.yaml    # RHAIIS / vLLM (CUDA) Deployment + Service
+│       └── observability/
+│           └── application.yaml    # Grafana + Prom + Loki + Coder dashboards
 │
 ├── manifests/                      # raw Kubernetes manifests (referenced by Argo CD apps)
 │   ├── postgres/
@@ -147,9 +149,15 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │   │   ├── certificate.yaml
 │   │   ├── ingress-wildcard-policy.yaml
 │   │   └── route.yaml
-│   └── rhaiis/
-│       ├── namespace.yaml
-│       └── vllm-deployment.yaml    # CUDA image, nvidia.com/gpu: 1 request
+│   ├── rhaiis/
+│   │   ├── namespace.yaml
+│   │   └── vllm-deployment.yaml    # CUDA image, nvidia.com/gpu: 1 request
+│   └── observability/
+│       ├── certificate.yaml             # Grafana TLS cert
+│       ├── route.yaml                   # OCP Route for Grafana
+│       ├── agent-boundaries-dashboard-configmap.yaml
+│       ├── aibridge-dashboard-configmap.yaml
+│       └── infinity-datasource-configmap.yaml
 │
 ├── coder-templates/                # demo workspace templates pushed by GH Actions
 │   ├── README.md

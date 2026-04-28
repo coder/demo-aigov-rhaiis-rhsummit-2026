@@ -10,6 +10,7 @@
 | `coder` | 1 | Coder Helm chart (latest RC) — control plane + provisioner + AI Governance Add-On. Reads `coder-app/uri` for the Postgres URL. |
 | `rhaiis` | 2 | RHAIIS / vLLM (CUDA build) Deployment + Service from `manifests/rhaiis/`. Image pulled with `redhat-pull-secret`; pod schedules on the GPU node via `nvidia.com/gpu.present=true` selector + `nvidia.com/gpu: 1` resource request. |
 | `coder-routing` | 2 | OpenShift Route(s) for Coder with cert-manager-issued wildcard TLS + ingress wildcard policy patch |
+| `coder-observability` | 3 | Grafana + Prometheus + Loki + Coder dashboards (Helm chart from `helm.coder.com/observability`). Bundled dashboards include AI Bridge model-invocation metrics + Agent Boundaries (Agent Firewall) activity — the "every model call is governed and logged" booth visual. Route at `grafana.apps.cluster.<base_domain>`. |
 
 ### What's NOT in GitOps
 
