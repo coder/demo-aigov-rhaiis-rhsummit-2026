@@ -125,12 +125,14 @@ check "service-quotas:list-history (vCPU)"       aws --profile "$SANDBOX" --regi
 check "elasticloadbalancing:DescribeLoadBalancers" aws --profile "$SANDBOX" --region "$REGION" elbv2 describe-load-balancers --max-items 1
 check "s3:ListAllMyBuckets"                      aws --profile "$SANDBOX" s3api list-buckets
 
-# Bedrock is consumed by AI Gateway at runtime (post-cluster). Failure
-# here is most often the one-time region-level service activation (open
-# https://${REGION}.console.aws.amazon.com/bedrock/home?region=${REGION}#/modelaccess
-# once); does not block cluster install.
+# Bedrock is consumed by AI Gateway at runtime (post-cluster). AWS retired
+# the per-model approval page in late 2025; serverless models auto-enable
+# on first invocation. Failure here usually just means the principal
+# hasn't yet invoked any Bedrock model in this region (one bedrock-runtime
+# invoke-model fixes it; first-time Anthropic users may also see a use-case
+# form). Does not block cluster install.
 soft_check "bedrock:ListFoundationModels" \
-  "soft — Bedrock region activation pending; not blocking. Open the model-access console once before booth." \
+  "soft — Bedrock not yet invoked in this region; first invoke auto-enables. Anthropic first-time users may need to fill a 1-page use-case form." \
   aws --profile "$SANDBOX" --region "$REGION" bedrock list-foundation-models --max-results 1
 
 ###############################################################################

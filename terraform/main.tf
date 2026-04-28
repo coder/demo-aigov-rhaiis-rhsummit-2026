@@ -52,11 +52,11 @@ data "local_file" "ssh_pubkey" {
 # AWS_SECRET_ACCESS_KEY from that Secret as env vars. AWS_REGION is set
 # to the cluster region.
 #
-# IMPORTANT: Bedrock model access is granted per-account, per-region,
-# per-model via a one-time AWS console step. After this Terraform applies,
-# go to the Bedrock console for ${var.aws_region} and request access to
-# the Anthropic models you'll use for the demo (Claude Sonnet 4.x at
-# minimum). Approval is typically instant for Anthropic on Bedrock.
+# NOTE: AWS retired the per-model "Manage model access" page in late 2025.
+# Serverless models on Bedrock now auto-enable on first invocation by any
+# IAM principal in the account. First-time Anthropic users are prompted
+# for a one-page use-case form on first open/invoke — fill it in once,
+# approval is typically minutes, and the entire account is unblocked.
 ###############################################################################
 
 data "aws_iam_policy_document" "coder_bedrock" {

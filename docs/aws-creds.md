@@ -47,17 +47,18 @@ The third one we don't manage. If you ever switch to `credentialsMode: Manual` (
 
 ---
 
-## AWS Bedrock model access — one-time, manual, human
+## AWS Bedrock model access — first-invoke auto-enable + Anthropic use-case form
 
-Bedrock is gated **per AWS account, per region, per model** by a human approval in the AWS console:
+AWS retired the per-model "Manage model access" console page in late 2025. Serverless foundation models on Bedrock are now **automatically enabled in your account when first invoked** — no manual activation step.
 
-```
-https://${AWS_REGION}.console.aws.amazon.com/bedrock/home?region=${AWS_REGION}#/modelaccess
-```
+Two caveats remain:
 
-The Terraform `bedrock_model_access_url` output is a direct link. Approval is typically instant for Anthropic models. After approval, the `coder-bedrock` IAM user's keys can invoke them.
+1. **First-time Anthropic users** (no prior Anthropic-on-Bedrock invocation in this account) are prompted for a one-page use-case form when they open Claude in the Model catalog or first invoke it. Approval is typically minutes; the form is `https://${AWS_REGION}.console.aws.amazon.com/bedrock/home?region=${AWS_REGION}#/foundation-models` → click into the model.
+2. **AWS Marketplace models** (NOT Anthropic-direct, but third-party catalog entries) require an admin with Marketplace permissions to invoke the model once before account-wide access kicks in.
 
-There is no API equivalent for this approval step. It is the only piece of the demo that requires a console session.
+Practically, our demo only needs Anthropic Claude (Sonnet/Opus tier) for the cloud provider behind AI Gateway. Smoke-test the activation with `aws bedrock-runtime invoke-model --model-id anthropic.claude-sonnet-4-...` once before the booth — if it returns content, you're set; if it errors with `AccessDeniedException` and a use-case-form pointer, fill the form and retry.
+
+After the first successful invocation, the `coder-bedrock` IAM user's keys (created by the cluster TF) work without any further console interaction.
 
 ---
 
@@ -118,5 +119,5 @@ There is no API equivalent for this approval step. It is the only piece of the d
 | What can the `coder-bedrock` user do? | Invoke Bedrock models (any). Nothing else. |
 | How does AI Gateway find Bedrock creds? | AWS SDK ambient chain — env vars on the Coder pod from the `bedrock-credentials` Secret. |
 | Where does the workspace get AWS creds? | It doesn't. Workspaces talk to AI Gateway only; AI Gateway is the AWS-aware piece. |
-| What if Bedrock is denied for the model I picked? | One-time human click in the Bedrock console at `bedrock_model_access_url`. |
+| What if Bedrock is denied for the model I picked? | First-time Anthropic-on-Bedrock users get a one-page use-case form on first invoke. Submit once at `bedrock_model_catalog_url`; auto-enable on first invoke does the rest. |
 | What's the destroy story? | `terraform destroy` removes both scoped users; `openshift-install destroy cluster` (wrapped) cleans up the IPI-managed instance profiles. |

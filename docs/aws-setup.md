@@ -274,7 +274,7 @@ Once both profiles verify cleanly:
 
 1. **R53 cross-account delegation** — `scripts/bootstrap-r53-delegation.sh` (one-time, ~2 min)
 2. **Service quotas** — `scripts/aws-quota-bootstrap.sh check` then `... request` if anything is short. **Run this at least a week before the booth** if your sandbox is new — GPU vCPU (`L-DB2E81BA`) approval is case-based, not auto.
-3. **Bedrock model access** — open the URL printed by `terraform output -raw bedrock_model_access_url` after the cluster is up; one-click approval per Anthropic model.
+3. **Bedrock first-invoke + Anthropic use-case form** — AWS retired per-model approval in late 2025. Open the URL printed by `terraform output -raw bedrock_model_catalog_url`, click into Claude Sonnet 4, fill the one-page use-case form if prompted (first-time Anthropic-on-Bedrock users only). Or smoke-test directly with `aws bedrock-runtime invoke-model`.
 4. **Account-level prereqs** — `cd terraform/prereqs && terraform apply`. With `manage_hosted_zone = false` (default in `.env`), this only creates the optional installer IAM user.
 5. **Cluster install** — `cd terraform && terraform apply`. ~60 minutes; see the [startup-time table](../README.md#startup-time-cold-start-to-first-usable-workspace) in the main README.
 
