@@ -3,6 +3,12 @@ baseDomain: ${base_domain}
 metadata:
   name: ${cluster_name}
 controlPlane:
+  # Compact (3-node converged) cluster: control-plane nodes are also
+  # schedulable for workloads (`compute.replicas: 0` below). Sized large
+  # enough to absorb everything except RHAIIS, which lives on the GPU
+  # MachineSet defined as a second compute pool. m6i.4xlarge gives ~13
+  # vCPU per node usable for workloads after kube-control-plane + OS
+  # overhead.
   hyperthreading: Enabled
   name: master
   replicas: ${control_plane_count}
@@ -13,6 +19,10 @@ controlPlane:
         size: 120
         type: gp3
 compute:
+# General worker pool — disabled. The 3 control-plane nodes carry every
+# CPU workload via the converged-cluster pattern. Keep this entry so the
+# installer's compute-pool list isn't empty (some installer paths require
+# at least one compute pool definition).
 - hyperthreading: Enabled
   name: worker
   replicas: ${worker_count}
@@ -22,6 +32,24 @@ compute:
       type: ${worker_instance_type}
       rootVolume:
         size: 120
+        type: gp3
+%{ endif ~}
+# GPU pool — hosts RHAIIS (vllm-cuda-rhel9). NVIDIA GPU Operator labels
+# these nodes with `nvidia.com/gpu.present=true`; the RHAIIS Deployment's
+# nodeSelector + nvidia.com/gpu resource request guarantee it lands here.
+# Pinned to one AZ because g5 capacity is unevenly distributed and we want
+# predictable launch behavior at booth time.
+- hyperthreading: Enabled
+  name: gpu
+  replicas: ${gpu_count}
+%{ if gpu_count > 0 ~}
+  platform:
+    aws:
+      type: ${gpu_instance_type}
+      zones:
+        - ${gpu_zone}
+      rootVolume:
+        size: 200
         type: gp3
 %{ endif ~}
 networking:

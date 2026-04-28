@@ -1,0 +1,74 @@
+# NVIDIA GPU operator ClusterPolicy — declares which GPU operator
+# components run on the cluster's GPU nodes.
+#
+# Default-good for OCP 4.21 + RHCOS RHEL 9 base. The operator picks up
+# this CR, watches NFD-labeled GPU nodes, and rolls out:
+#   - NVIDIA driver DaemonSet (compiles + loads kernel module)
+#   - container-toolkit (CRI-O config for /dev/nvidia* exposure)
+#   - device-plugin (kubelet sees nvidia.com/gpu as schedulable)
+#   - GPU Feature Discovery (labels nodes with nvidia.com/gpu.*)
+#   - DCGM exporter (Prometheus GPU metrics)
+#
+# We don't taint GPU nodes — RHAIIS finds them via nodeSelector +
+# nvidia.com/gpu resource request, and we want general workloads to be
+# able to land there if pressure spikes (defense in depth, not a primary
+# scheduling target).
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: gpu-cluster-policy
+spec:
+  operator:
+    defaultRuntime: crio
+    use_ocp_driver_toolkit: true
+  daemonsets:
+    priorityClassName: system-node-critical
+
+  driver:
+    enabled: true
+    # Use the operator's auto-detection. For a specific driver pin, set
+    # `version: "550.54.15"` etc.
+    upgradePolicy:
+      autoUpgrade: true
+      maxParallelUpgrades: 1
+      drain:
+        enable: true
+        force: false
+        timeoutSeconds: 300
+        deleteEmptyDir: false
+
+  toolkit:
+    enabled: true
+    installDir: "/usr/local/nvidia"
+
+  devicePlugin:
+    enabled: true
+    config:
+      name: ""
+      default: ""
+
+  gfd:
+    enabled: true
+
+  dcgm:
+    enabled: true
+
+  dcgmExporter:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+  nodeStatusExporter:
+    enabled: true
+
+  mig:
+    strategy: single
+
+  migManager:
+    enabled: false        # only relevant for A100 / H100 MIG; A10G doesn't MIG
+
+  validator:
+    plugin:
+      env:
+        - name: WITH_WORKLOAD
+          value: "false"

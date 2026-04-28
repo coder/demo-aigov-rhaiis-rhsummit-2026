@@ -82,21 +82,43 @@ variable "control_plane_count" {
 }
 
 variable "control_plane_instance_type" {
-  description = "EC2 instance type for control plane nodes. m6i.xlarge is the OCP default; bump for SNO."
+  description = "EC2 instance type for control plane nodes. Default m6i.4xlarge for the compact 3-node converged cluster (CP nodes also schedulable; need headroom for OCP system + Coder + CNPG + workspaces)."
   type        = string
-  default     = "m6i.xlarge"
+  default     = "m6i.4xlarge"
 }
 
 variable "worker_count" {
-  description = "Number of compute (worker) nodes. 0 if SNO (control_plane_count=1)."
+  description = "Number of general-compute (worker) nodes. Default 0 — converged cluster pattern: control-plane nodes are also schedulable. Set >0 only if you want a dedicated worker pool in addition to the converged + GPU nodes."
   type        = number
-  default     = 3
+  default     = 0
 }
 
 variable "worker_instance_type" {
-  description = "EC2 instance type for compute nodes. m6i.2xlarge fits Coder + RHAIIS + GitOps comfortably."
+  description = "EC2 instance type for general-compute nodes (only used when worker_count > 0)."
   type        = string
   default     = "m6i.2xlarge"
+}
+
+###############################################################################
+# GPU compute pool — hosts RHAIIS (vllm-cuda-rhel9)
+###############################################################################
+
+variable "gpu_count" {
+  description = "Number of GPU worker nodes. Default 1 — RHAIIS always runs on the GPU node, every time the cluster is up. Set 0 only if you're temporarily disabling GPU and have a CPU fallback path for RHAIIS (not currently shipped in this repo)."
+  type        = number
+  default     = 1
+}
+
+variable "gpu_instance_type" {
+  description = "EC2 instance type for the GPU worker. g5.2xlarge has 1× A10G (24 GiB VRAM), 8 vCPU, 32 GiB RAM — fits Granite-3.1-8B-Instruct fp16 with headroom. Cheaper alternative: g4dn.2xlarge (T4, 16 GiB VRAM)."
+  type        = string
+  default     = "g5.2xlarge"
+}
+
+variable "gpu_zone_index" {
+  description = "Index into the AZ list (0..2) where the GPU node will live. g5 capacity is uneven across AZs; pinning to one predictable AZ avoids surprises at boot."
+  type        = number
+  default     = 0
 }
 
 ###############################################################################

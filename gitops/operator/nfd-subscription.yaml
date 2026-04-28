@@ -1,0 +1,24 @@
+# Node Feature Discovery (NFD) operator — RH-engineered.
+#
+# NFD detects hardware features on each node (CPU flags, NICs, GPUs via
+# PCI devices, etc.) and exposes them as labels and node-resource hints.
+# The NVIDIA GPU operator depends on NFD's labels (e.g.,
+# `feature.node.kubernetes.io/pci-10de.present=true`) to know which nodes
+# need GPU drivers and the device plugin.
+#
+# Source: redhat-operators (Red Hat-engineered, RH-supported).
+# Channel: stable. installPlanApproval: Automatic so it follows minor-rev
+# updates within the channel. Pin to a specific channel (e.g., 4.21) for
+# production; stable is fine for booth.
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: nfd
+  namespace: openshift-operators
+spec:
+  channel: stable
+  installPlanApproval: Automatic
+  name: nfd
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace

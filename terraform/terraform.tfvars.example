@@ -25,16 +25,27 @@ install_dir              = "./.cluster"
 pull_secret_path  = "~/.openshift/pull-secret.json"
 ssh_pubkey_path   = "~/.ssh/id_ed25519.pub"
 
-# 3 control-plane HA cluster (recommended for demo realism):
+# Compact 3-node converged cluster — control-plane nodes are also schedulable
+# for workloads (compute.replicas: 0 in install-config.yaml). m6i.4xlarge
+# gives ~13 vCPU usable per node after kube-control-plane + OS overhead;
+# 3 nodes × 13 = 39 vCPU usable for everything except RHAIIS, which lives
+# on the separate GPU node.
 control_plane_count         = 3
-control_plane_instance_type = "m6i.xlarge"
-worker_count                = 3
-worker_instance_type        = "m6i.2xlarge"
+control_plane_instance_type = "m6i.4xlarge"
+worker_count                = 0          # converged — no dedicated worker pool
+worker_instance_type        = "m6i.2xlarge"   # placeholder, unused when worker_count = 0
 
-# Single-Node OpenShift (cheapest demo, ~$0.40-0.80/hr):
+# GPU pool — always 1 node when the cluster is up. RHAIIS (vllm-cuda-rhel9)
+# lands here exclusively via nodeSelector + nvidia.com/gpu resource request.
+gpu_count          = 1
+gpu_instance_type  = "g5.2xlarge"   # 1× A10G GPU (24 GiB VRAM), 8 vCPU, 32 GiB RAM
+gpu_zone_index     = 0              # us-east-1a
+
+# Single-Node OpenShift (cheapest "demo" — no HA story, no GPU):
 # control_plane_count         = 1
-# control_plane_instance_type = "m6i.4xlarge"   # 16 vCPU / 64 GiB — fits Coder + RHAIIS + GitOps
+# control_plane_instance_type = "m6i.8xlarge"
 # worker_count                = 0
+# gpu_count                   = 0
 
 ###############################################################################
 # Coder

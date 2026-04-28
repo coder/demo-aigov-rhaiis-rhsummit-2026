@@ -1,0 +1,48 @@
+# GPU stack — NodeFeatureDiscovery + NVIDIA ClusterPolicy CRs.
+#
+# Pre-requisites (applied by the cluster TF's gitops_bootstrap step
+# before Argo CD takes over):
+#   - NFD operator Subscription (gitops/operator/nfd-subscription.yaml)
+#   - NVIDIA GPU operator Subscription
+#     (gitops/operator/nvidia-gpu-operator-subscription.yaml)
+#
+# Argo CD applies the CRs in this app once the operators publish their
+# CRDs. If the CRDs aren't ready yet, Argo retries with backoff — that's
+# why retry.limit and backoff are generous below.
+#
+# Sync wave 0 — runs alongside `postgres`, before Coder (wave 1) and
+# RHAIIS (wave 2). The GPU node itself is provisioned by the openshift-
+# install installer at cluster-create time (a second compute pool in
+# install-config.yaml), independent of this Argo app — so the node is
+# already up by the time NFD detects its PCI devices and the GPU operator
+# rolls drivers onto it.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gpu-stack
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/gpu-stack
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nvidia-gpu-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

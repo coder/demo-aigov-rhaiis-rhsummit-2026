@@ -5,9 +5,10 @@
 | App | Sync wave | What it deploys |
 |---|---|---|
 | `postgres` | 0 | CNPG `Cluster` CR (3 instances, multi-AZ via streaming replication) — auto-generates the `coder-app` Secret consumed by the Coder Helm chart |
+| `gpu-stack` | 0 | NodeFeatureDiscovery instance + NVIDIA GPU operator `ClusterPolicy`. Drivers + device-plugin + GPU Feature Discovery roll out onto the g5.2xlarge GPU node provisioned by the installer's `gpu` compute pool. |
 | `cert-manager` | 0 | ClusterIssuers (Let's Encrypt prod + staging) using DNS-01 over Route 53 |
 | `coder` | 1 | Coder Helm chart (latest RC) — control plane + provisioner + AI Governance Add-On. Reads `coder-app/uri` for the Postgres URL. |
-| `rhaiis` | 2 | RHAIIS / vLLM Deployment + Service from `manifests/rhaiis/`. Image pulled with `redhat-pull-secret` (created by the cluster TF bootstrap step). |
+| `rhaiis` | 2 | RHAIIS / vLLM (CUDA build) Deployment + Service from `manifests/rhaiis/`. Image pulled with `redhat-pull-secret`; pod schedules on the GPU node via `nvidia.com/gpu.present=true` selector + `nvidia.com/gpu: 1` resource request. |
 | `coder-routing` | 2 | OpenShift Route(s) for Coder with cert-manager-issued wildcard TLS + ingress wildcard policy patch |
 
 ### What's NOT in GitOps
@@ -22,7 +23,9 @@ This demo prefers **Red-Hat-certified, RH-supported operators** wherever Red Hat
 |---|---|---|
 | `openshift-gitops-subscription.yaml` | `redhat-operators` | Red Hat OpenShift GitOps (NOT upstream Argo CD operator) |
 | `cert-manager-subscription.yaml` | `redhat-operators` | cert-manager Operator for Red Hat OpenShift (NOT upstream jetstack/cert-manager) |
+| `nfd-subscription.yaml` | `redhat-operators` | Node Feature Discovery — Red Hat-engineered. Required by the NVIDIA GPU operator to detect GPU PCI devices on each node. |
 | `cnpg-subscription.yaml` | `community-operators` | **Documented exception.** Red Hat does not ship a first-party in-cluster Postgres operator. The RH-aligned alternative is RDS (cloud-only — breaks on-prem portability) or upstream Crunchy PGO (community as well). CloudNativePG is the de facto Kubernetes-native Postgres operator (CNCF Sandbox) and is OpenShift-compatible. |
+| `nvidia-gpu-operator-subscription.yaml` | `certified-operators` | **Documented exception.** NVIDIA-engineered, Red Hat-certified for OpenShift. Red Hat does not engineer their own GPU operator and explicitly directs OCP customers to NVIDIA's certified build for GPU support — see RH docs on [GPU architecture](https://docs.openshift.com/container-platform/4.21/architecture/nvidia-gpu-architecture-overview.html). |
 
 Coder is a Red Hat partner and uses the partner pull-secret (the same `pull-secret.json` from console.redhat.com, tied to the partner subscription) for any RH-distributed image.
 

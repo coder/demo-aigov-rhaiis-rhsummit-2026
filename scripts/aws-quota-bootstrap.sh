@@ -36,11 +36,12 @@
 #   --eip-margin N                  EIP margin (default 2 — ELBs created
 #                                   during IPI install can briefly hold
 #                                   extra EIPs)
-#   --with-gpu                      add a GPU node to the demo's needs
-#                                   (default off; flag turns on)
+#   --with-gpu / --no-gpu           include / exclude a GPU node in the
+#                                   demo's needs. Default: ON (the locked
+#                                   architecture always runs a GPU node
+#                                   when the cluster is up).
 #   --gpu-instance-type T           GPU instance type (default g5.2xlarge)
-#   --gpu-count N                   GPU node count (default 1, only used
-#                                   when --with-gpu is set)
+#   --gpu-count N                   GPU node count (default 1)
 #   --tracker-file PATH             default ~/.aws-quota-bootstrap.json
 #   --timeout-minutes N             for `wait` command (default 60)
 #   --poll-seconds N                for `wait` command (default 60)
@@ -65,7 +66,11 @@ WORKER_COUNT="${TF_VAR_worker_count:-3}"
 WORKER_INSTANCE_TYPE="${TF_VAR_worker_instance_type:-m6i.2xlarge}"
 VCPU_BUFFER="${VCPU_BUFFER:-12}"
 EIP_MARGIN="${EIP_MARGIN:-2}"
-WITH_GPU="${WITH_GPU:-false}"
+# GPU defaults ON. The locked architecture has the GPU node always present
+# whenever the cluster is up (RHAIIS lives there exclusively, no CPU
+# fallback). Pass --no-gpu to plan a GPU-less cluster (e.g., for sizing
+# experiments — would also need RHAIIS Deployment edits to do for real).
+WITH_GPU="${WITH_GPU:-true}"
 GPU_INSTANCE_TYPE="${GPU_INSTANCE_TYPE:-g5.2xlarge}"
 GPU_COUNT="${GPU_COUNT:-1}"
 TRACKER_FILE="${TRACKER_FILE:-$HOME/.aws-quota-bootstrap.json}"
@@ -87,6 +92,7 @@ while [[ $# -gt 0 ]]; do
     --vcpu-buffer)                  VCPU_BUFFER="$2"; shift 2 ;;
     --eip-margin)                   EIP_MARGIN="$2"; shift 2 ;;
     --with-gpu)                     WITH_GPU="true"; shift ;;
+    --no-gpu)                       WITH_GPU="false"; shift ;;
     --gpu-instance-type)            GPU_INSTANCE_TYPE="$2"; shift 2 ;;
     --gpu-count)                    GPU_COUNT="$2"; shift 2 ;;
     --tracker-file)                 TRACKER_FILE="$2"; shift 2 ;;

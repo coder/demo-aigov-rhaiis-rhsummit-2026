@@ -33,7 +33,9 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 |---|---|---|
 | Argo CD | `openshift-gitops-operator` | Red Hat (NOT upstream Argo CD operator) |
 | cert-manager | `openshift-cert-manager-operator` | Red Hat (NOT upstream jetstack/cert-manager) |
-| RHAIIS | `registry.redhat.io/rhoai/vllm-cpu-rhel9` | Red Hat AI Inference Server (NOT community vLLM build) |
+| RHAIIS | `registry.redhat.io/rhoai/vllm-cuda-rhel9` | Red Hat AI Inference Server, GPU image (lands on the GPU worker via NFD-applied `nvidia.com/gpu.present=true` label) |
+| Node Feature Discovery (NFD) | `nfd` | Red Hat (RH-engineered; labels nodes with PCI/CPU features so the GPU operator knows which nodes need drivers) |
+| NVIDIA GPU Operator | `gpu-operator-certified` (channel: `stable`) | **certified-operators** — *documented exception.* NVIDIA-engineered, Red Hat-certified for OCP. Red Hat doesn't ship a first-party GPU operator; this is the path RH explicitly directs OpenShift customers to for GPU support. |
 | CloudNativePG | `cloudnative-pg` (channel: `stable-v1.24`) | **community-operators** — *documented exception.* Red Hat does not ship a first-party in-cluster Postgres operator; CNPG is the de facto Kubernetes-native Postgres operator (CNCF Sandbox). We pick it over RDS to keep the cluster apps on-prem-portable: the same `Cluster` CR runs on Azure / vSphere / bare-metal / air-gap with no AWS dependency. See [`gitops/operator/cnpg-subscription.yaml`](gitops/operator/cnpg-subscription.yaml) for full reasoning. |
 
 > **Demo simplicity over hardening.** This is a booth demo, not an ATO baseline. STIG/FIPS posture, OCP `restricted-v2` SCC overrides, and air-gap config are intentionally **not** applied — they overcomplicate setup. Production architectures keep them; see [`docs/architecture.md`](docs/architecture.md) for the production narrative arc.
@@ -113,12 +115,16 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │   ├── operator/                   # Subscriptions applied by TF before Argo CD runs
 │   │   ├── openshift-gitops-subscription.yaml
 │   │   ├── cert-manager-subscription.yaml
-│   │   └── cnpg-subscription.yaml
+│   │   ├── cnpg-subscription.yaml
+│   │   ├── nfd-subscription.yaml                  # Node Feature Discovery (RH)
+│   │   └── nvidia-gpu-operator-subscription.yaml  # NVIDIA GPU operator (certified)
 │   ├── bootstrap/
 │   │   └── root-app.yaml           # the one Application that fans out to all apps below
 │   └── apps/
 │       ├── postgres/
 │       │   └── application.yaml    # CNPG Cluster CR (auto-generates `coder-app` Secret)
+│       ├── gpu-stack/
+│       │   └── application.yaml    # NFD instance + NVIDIA ClusterPolicy
 │       ├── cert-manager/
 │       │   └── application.yaml
 │       ├── coder/
@@ -126,12 +132,15 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │       ├── coder-routing/
 │       │   └── application.yaml
 │       └── rhaiis/
-│           └── application.yaml    # RHAIIS / vLLM Deployment + Service
+│           └── application.yaml    # RHAIIS / vLLM (CUDA) Deployment + Service
 │
 ├── manifests/                      # raw Kubernetes manifests (referenced by Argo CD apps)
 │   ├── postgres/
 │   │   ├── namespace.yaml
 │   │   └── cluster.yaml            # CNPG Cluster CR (3 instances, multi-AZ)
+│   ├── gpu-stack/
+│   │   ├── nodefeaturediscovery.yaml   # NFD CR
+│   │   └── clusterpolicy.yaml          # NVIDIA GPU operator ClusterPolicy
 │   ├── cert-manager/
 │   │   └── cluster-issuer.yaml
 │   ├── coder/
@@ -140,7 +149,7 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │   │   └── route.yaml
 │   └── rhaiis/
 │       ├── namespace.yaml
-│       └── vllm-deployment.yaml
+│       └── vllm-deployment.yaml    # CUDA image, nvidia.com/gpu: 1 request
 │
 ├── coder-templates/                # demo workspace templates pushed by GH Actions
 │   ├── README.md
@@ -167,20 +176,39 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 
 ## Sizing, cost, and startup time
 
-### Recommended cluster shape: 3-node converged + optional GPU 4th node
+### Locked cluster shape: 3-node converged + 1 GPU (always)
 
-The default we ship is a **compact 3-node OpenShift cluster** — three control-plane nodes that are also schedulable for workloads, no separate worker MachineSet (`compute.replicas: 0` in `install-config.yaml`). It preserves the full multi-AZ HA narrative (3 control-plane replicas + CNPG `instances: 3` spread across `topology.kubernetes.io/zone`) at roughly 30% of the cost of a 6-node cluster, and it's what every other reference architecture in this demo assumes.
+The shipped architecture is a **compact 3-node OpenShift cluster** with a **dedicated GPU worker that's always present whenever the cluster is up**:
 
-For booth days (and on-demand testing) you can add a **4th GPU worker** to host a CUDA build of RHAIIS. Off-days, the GPU node stays at `replicas: 0` and RHAIIS runs on a CPU image on the converged nodes — no GPU charges, no demo behavior change.
+- 3 × `m6i.4xlarge` — control-plane AND workers (`compute.replicas: 0` in `install-config.yaml`). Multi-AZ via `topology.kubernetes.io/zone`. ~13 vCPU / 52 GiB usable per node after kube-control-plane + OS overhead → ~39 vCPU / 156 GiB across the cluster for everything except RHAIIS.
+- 1 × `g5.2xlarge` — GPU pool (1× A10G, 24 GiB VRAM, 8 vCPU, 32 GiB RAM). Dedicated to RHAIIS (`vllm-cuda-rhel9`). Provisioned by `openshift-install` at cluster-create time as a second compute pool — not a post-install MachineSet.
+- NVIDIA GPU operator (`certified-operators` source, NVIDIA-engineered + RH-certified) + Node Feature Discovery (RH-engineered) handle drivers, container-toolkit, device-plugin, and the `nvidia.com/gpu.present=true` label that RHAIIS's `nodeSelector` keys off.
 
-| Shape | Compute (us-east-1, on-demand) | NAT GW | ~$/24h | Multi-AZ HA story | Notes |
-|---|---|---|---|---|---|
-| **Compact 3-node converged (recommended)** — 3 × m6i.2xlarge as CP+worker | $1.152/hr | $0.135/hr | **~$31** | ✓ | CNPG instances=3 still works; no dedicated provisioner pool |
-| Compact 3 + 1 × g5.2xlarge GPU (booth days) | $2.364/hr | $0.135/hr | **~$60** | ✓ | RHAIIS on `vllm-cuda-rhel9` + `nvidia.com/gpu: 1` |
-| SNO (1 × m6i.4xlarge) | $0.768/hr | $0.045/hr | ~$20 | ✗ | No HA; CNPG must collapse to instances=1; one bad node = demo dead |
-| Full HA (current 3 CP + 3 worker) | $1.728/hr | $0.135/hr | ~$45 | ✓ | Dedicated provisioner pool; biggest footprint |
+There is **no CPU fallback path for RHAIIS** — when the cluster is up, the GPU node is up. If you want a "demo without GPU" mode for cost-sensitive testing, set `gpu_count = 0` in tfvars/env and edit `manifests/rhaiis/vllm-deployment.yaml` to use `vllm-cpu-rhel9` (not currently shipped — explicitly out of scope per the locked design).
 
-> **GPU vCPU is a separate AWS quota.** New accounts often start at 0 in `Running On-Demand G and VT instances vCPU` (quota code `L-DB2E81BA`). File the increase request at least a week before booth — case-based approval, not auto. `scripts/aws-quota-bootstrap.sh` files and tracks it for you.
+| Concern | Decision |
+|---|---|
+| Multi-AZ HA story | ✓ — 3 CP across us-east-1 a/b/c; CNPG `instances: 3` topology-spread; lose 1 node → 2/3 etcd quorum holds |
+| Dedicated worker pool | None — converged. Less moving parts, +30% cost savings vs the old 3 CP + 3 worker shape |
+| GPU node placement | Single AZ (`gpu_zone_index = 0` → `us-east-1a` by default) — g5 capacity is uneven across AZs; predictable launch beats AZ resilience here |
+| RHAIIS image | `registry.redhat.io/rhoai/vllm-cuda-rhel9:latest` |
+| Operator policy | RH-engineered where RH ships (NFD); NVIDIA-certified where they don't (GPU operator). Documented exception alongside CNPG |
+
+### Cost (us-east-1, on-demand, GPU always on)
+
+| Component | Hourly | Daily (24/7) |
+|---|---|---|
+| 3× m6i.4xlarge (converged) | $2.304 | $55 |
+| 1× g5.2xlarge (GPU, A10G) | $1.21 | $29 |
+| NAT gateways (3, one per AZ) | $0.135 | $3.24 |
+| EBS gp3 (~1 TiB total across nodes) | ~$0.10 | ~$2 |
+| **Total** | **~$3.65/hr** | **~$87/day** |
+
+For a 5-week prep+booth window:
+- 50 hr/wk schedule (Mon–Fri 9–5 with destroy/rebuild lifecycle): **~$912 total**
+- Always-up: ~$3,045 total
+
+> **GPU vCPU is a separate AWS quota.** New accounts often start at 0 in `Running On-Demand G and VT instances vCPU` (quota code `L-DB2E81BA`). File the increase request at least a week before booth — case-based approval, not auto. `scripts/aws-quota-bootstrap.sh` files and tracks it for you. (Note: in our existing sandbox this quota was already 768 vCPU, no request needed.)
 
 ### Lifecycle: declarative tear-down / rebuild, never `ec2 stop`
 
@@ -204,13 +232,12 @@ A future commit can wrap this in `make cluster-up` / `make cluster-down` plus a 
 | Cluster install — `openshift-install create cluster` | `terraform/main.tf` (local-exec) | **~30–45 min** | The single biggest line item; AWS image pull + bootstrap + CP nodes |
 | Operator subscriptions + CRD wait | `terraform/main.tf` (gitops_bootstrap) | ~3–5 min | OpenShift GitOps + cert-manager + CNPG |
 | Cluster Secrets bootstrap | same step | ~30 sec | route53-credentials, bedrock-credentials, redhat-pull-secret |
-| Argo CD app-of-apps sync | Argo (autonomous) | ~3–5 min | postgres (CNPG Cluster reconcile) → coder Helm → coder-routing → rhaiis |
+| Argo CD app-of-apps sync (postgres + gpu-stack in parallel, then coder, then rhaiis) | Argo (autonomous) | ~5–10 min | gpu-stack waits for the NVIDIA driver DaemonSet (~3–5 min on first boot); RHAIIS pod schedules once `nvidia.com/gpu` is allocatable |
 | TLS cert issuance (Let's Encrypt DNS-01) | cert-manager | ~2–5 min | After Coder Route exists |
 | First Coder admin login + GH Actions secrets | manual + `gh secret set` | ~2 min | `CODER_URL`, `CODER_SESSION_TOKEN` |
 | First template push | `.github/workflows/push-templates.yml` | ~2 min | Triggered by any `coder-templates/**` change |
 | Prebuilt-Workspace warm pool ready | Coder | ~3–5 min | One-time per template |
-| **First usable workspace from a fresh AWS account** | end-to-end | **~60–75 min** | Mostly the OCP installer |
-| **GPU node added (booth day)** | `oc scale machineset/...` | +4–5 min | EC2 spin-up + NVIDIA driver install |
+| **First usable workspace from a fresh AWS account** | end-to-end | **~70–85 min** | OCP installer (45 min) + GPU operator driver compile (5 min) + everything downstream |
 
 Subsequent booth-week rebuilds skip the one-time rows and land in **~50–60 min** end-to-end.
 

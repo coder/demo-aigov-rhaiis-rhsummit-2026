@@ -4,17 +4,22 @@
 # Flow:
 #   1. Read pull secret + ssh public key
 #   2. Create dedicated IAM users (cert-manager Route 53; Coder → Bedrock)
-#   3. Render install-config.yaml from template into <install_dir>
+#   3. Render install-config.yaml from template into <install_dir>. The
+#      template emits TWO compute pools: (a) `worker` with replicas 0 —
+#      placeholder, (b) `gpu` with `gpu_count` replicas of `gpu_instance_type`,
+#      pinned to one AZ. The 3 control-plane nodes are sized to be
+#      schedulable for general workloads (compact converged shape).
 #   4. Run `openshift-install create cluster --dir=<install_dir>` (~30–45 min)
-#   5. Apply RH-supported + community operator subscriptions (OpenShift
-#      GitOps + cert-manager + CloudNativePG)
+#   5. Apply RH-supported + community + certified operator subscriptions:
+#      OpenShift GitOps, cert-manager, CloudNativePG, NFD, NVIDIA GPU operator
 #   6. Bootstrap a few Kubernetes Secrets the cluster apps expect to find:
 #        - route53-credentials   (cert-manager → Route 53 DNS-01)
 #        - bedrock-credentials   (Coder server / AI Gateway → Bedrock)
 #        - redhat-pull-secret    (RHAIIS image pull from registry.redhat.io)
 #   7. Apply Argo CD root Application (app-of-apps bootstrap). CNPG operator
-#      then stands up an in-cluster Postgres Cluster that auto-generates the
-#      `coder-app` Secret consumed by the Coder Helm chart.
+#      stands up an in-cluster Postgres Cluster (auto-generates the
+#      `coder-app` Secret); the gpu-stack Argo app rolls NVIDIA drivers
+#      onto the GPU node so RHAIIS can schedule there.
 #
 # `terraform destroy` runs `openshift-install destroy cluster` first, then
 # tears down the AWS IAM users. The cluster install dir is preserved on disk
@@ -109,14 +114,14 @@ resource "aws_iam_access_key" "coder_bedrock" {
 
 data "aws_iam_policy_document" "cert_manager_route53" {
   statement {
-    sid     = "GetChange"
-    effect  = "Allow"
-    actions = ["route53:GetChange"]
+    sid       = "GetChange"
+    effect    = "Allow"
+    actions   = ["route53:GetChange"]
     resources = ["arn:aws:route53:::change/*"]
   }
   statement {
-    sid     = "ChangeResourceRecordSets"
-    effect  = "Allow"
+    sid    = "ChangeResourceRecordSets"
+    effect = "Allow"
     actions = [
       "route53:ChangeResourceRecordSets",
       "route53:ListResourceRecordSets",
@@ -160,6 +165,9 @@ resource "local_sensitive_file" "install_config" {
     control_plane_instance_type = var.control_plane_instance_type
     worker_count                = local.effective_worker_count
     worker_instance_type        = var.worker_instance_type
+    gpu_count                   = var.gpu_count
+    gpu_instance_type           = var.gpu_instance_type
+    gpu_zone                    = local.vpc_azs[var.gpu_zone_index]
     pull_secret                 = trimspace(data.local_file.pull_secret.content)
     ssh_pubkey                  = trimspace(data.local_file.ssh_pubkey.content)
     machine_cidr                = local.vpc_cidr
@@ -177,8 +185,8 @@ resource "null_resource" "openshift_install" {
   depends_on = [local_sensitive_file.install_config]
 
   triggers = {
-    install_dir       = var.install_dir
-    install_binary    = var.openshift_install_binary
+    install_dir        = var.install_dir
+    install_binary     = var.openshift_install_binary
     install_config_md5 = local_sensitive_file.install_config.content_md5
   }
 
@@ -259,6 +267,24 @@ resource "null_resource" "gitops_bootstrap" {
           break
         fi
         echo "    ...waiting for CNPG CRDs ($i/60)"
+        sleep 10
+      done
+
+      echo "==> Waiting for NFD CRDs (NodeFeatureDiscovery)..."
+      for i in $(seq 1 60); do
+        if ${var.oc_binary} get crd nodefeaturediscoveries.nfd.openshift.io 2>/dev/null | grep -q nodefeaturediscoveries; then
+          break
+        fi
+        echo "    ...waiting for NFD CRDs ($i/60)"
+        sleep 10
+      done
+
+      echo "==> Waiting for NVIDIA GPU operator CRDs (ClusterPolicy)..."
+      for i in $(seq 1 60); do
+        if ${var.oc_binary} get crd clusterpolicies.nvidia.com 2>/dev/null | grep -q clusterpolicies; then
+          break
+        fi
+        echo "    ...waiting for NVIDIA GPU operator CRDs ($i/60)"
         sleep 10
       done
 

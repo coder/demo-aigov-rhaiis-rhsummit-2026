@@ -3,8 +3,8 @@
 Provisions:
 - BYO-VPC (3 AZs) for the OCP cluster
 - AWS IAM users for cert-manager (Route 53 DNS-01) and Coder → Bedrock
-- OpenShift 4.21+ cluster via **Installer-Provisioned Infrastructure** (`openshift-install create cluster`)
-- Operator subscriptions: OpenShift GitOps + cert-manager (RH-supported) + CloudNativePG (community-operators, documented exception)
+- OpenShift 4.21+ cluster via **Installer-Provisioned Infrastructure** (`openshift-install create cluster`) — compact 3-node converged shape (`compute.replicas: 0`) plus a dedicated GPU compute pool (`gpu_count` × `gpu_instance_type`, default 1× g5.2xlarge in us-east-1a)
+- Operator subscriptions: OpenShift GitOps + cert-manager + NFD (RH-supported) + CloudNativePG (community-operators) + NVIDIA GPU operator (certified-operators, NVIDIA-engineered + RH-certified)
 - Cluster Secrets bootstrapped from this Terraform run: `route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`
 - Argo CD root Application (app-of-apps bootstrap)
 
@@ -35,12 +35,12 @@ terraform apply
 The `apply` will:
 1. Create IAM users for cert-manager + Bedrock (~30 sec)
 2. Create the BYO-VPC (~2 min)
-3. Render `install-config.yaml` into `./.cluster/`
+3. Render `install-config.yaml` into `./.cluster/` (3 CP + GPU compute pool)
 4. Run `openshift-install create cluster --dir=./.cluster` (~30–45 min)
-5. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG)
-6. Wait for operator CRDs to land
+5. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG + NFD + NVIDIA GPU operator)
+6. Wait for all operator CRDs to land (cert-manager, CNPG, NFD, NVIDIA ClusterPolicy)
 7. Create cluster Secrets (`route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`)
-8. Apply the Argo CD root Application (kicks off Postgres + Coder + RHAIIS + Agent Firewalls sync)
+8. Apply the Argo CD root Application (kicks off Postgres + GPU stack + Coder + RHAIIS + Agent Firewalls sync). NVIDIA drivers compile + load onto the GPU node (~3–5 min) before RHAIIS pod schedules.
 
 When done, follow the `next_steps` output.
 
@@ -56,15 +56,16 @@ If `openshift-install destroy` fails midway, inspect `./.cluster/` and re-run ma
 
 ## SNO mode
 
-For the cheapest possible demo (~$0.40–0.80/hr), switch to **Single-Node OpenShift**:
+For sizing experiments (no HA, no GPU, lowest cost), switch to **Single-Node OpenShift**:
 
 ```hcl
 control_plane_count         = 1
-control_plane_instance_type = "m6i.4xlarge"   # 16 vCPU / 64 GiB
+control_plane_instance_type = "m6i.8xlarge"   # 32 vCPU / 128 GiB — needed because RHAIIS-on-CPU lands here
 worker_count                = 0
+gpu_count                   = 0
 ```
 
-SNO is fine for the booth — Coder + RHAIIS + GitOps + monitoring all fit in 64 GiB. You lose HA stories but gain provisioning speed and cost. CNPG `instances: 3` will collapse onto the one node (pod-anti-affinity becomes a soft preference); for SNO consider dropping `instances` to 1 in `manifests/postgres/cluster.yaml`.
+NOTE: SNO loses the multi-AZ HA narrative AND the GPU narrative. CNPG must be dropped to `instances: 1`, and you'll need to swap RHAIIS to `vllm-cpu-rhel9` (the shipped manifest is GPU-only). Use only for non-booth experiments where cost dominates.
 
 ## Why no STIG/FIPS
 
