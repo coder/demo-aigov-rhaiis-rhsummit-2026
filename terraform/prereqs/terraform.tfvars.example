@@ -16,11 +16,18 @@ create_installer_iam = true
 # OCP IPI minimum policy. AdminAccess is fine for a throwaway demo account.
 installer_iam_policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 
-# Service quotas — MUST match cluster TF for the math to be right
+# Service quotas — MUST match cluster TF for the math to be right.
+# Defaults reflect the locked compact-3-converged + 1 GPU shape.
 control_plane_count         = 3
-control_plane_instance_type = "m6i.xlarge"
-worker_count                = 3
-worker_instance_type        = "m6i.2xlarge"
+control_plane_instance_type = "m6i.4xlarge"
+worker_count                = 0                   # converged — no dedicated worker pool
+worker_instance_type        = "m6i.2xlarge"       # placeholder, only used when worker_count > 0
+
+# GPU pool — separate AWS quota (L-DB2E81BA "Running On-Demand G and VT
+# instances vCPU"). New accounts often start at 0 and require case-based
+# approval. File the increase AT LEAST a week before booth.
+gpu_count          = 1
+gpu_instance_type  = "g5.2xlarge"
 
 # Quota handling
 request_quota_increases = false   # set true to file requests via the Service Quotas API

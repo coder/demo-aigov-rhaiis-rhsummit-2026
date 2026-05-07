@@ -17,8 +17,8 @@
 
 allowlist:
   # ── Coder control plane (required for the agent loop / Tasks / API) ──
-  - "domain=coder.apps.cluster.rh.coderdemo.io"      # update to your cluster_fqdn
-  - "domain=*.coder.apps.cluster.rh.coderdemo.io"
+  - "domain=coder.apps.cluster.rhsummit.coderdemo.io"      # update to your cluster_fqdn
+  - "domain=*.coder.apps.cluster.rhsummit.coderdemo.io"
 
   # ── LLM providers via AI Gateway ──
   # AI Gateway lives at the Coder URL above; calls to Anthropic / Bedrock
@@ -50,7 +50,7 @@ allowlist:
 
 # nsjail uses Linux network namespaces; requires CAP_NET_ADMIN on the pod
 # (configurable via OCP SCC). Strong bypass resistance.
-# Switch to landjail only if you're on a kernel ≥ 6.7 (RHEL 9 / OCP 4.20
+# Switch to landjail only if you're on a kernel ≥ 6.7 (RHEL 9 / OCP 4.21
 # nodes are 5.14 — landjail will fail at runtime).
 jail_type: nsjail
 

@@ -75,15 +75,18 @@ Only the specific ServiceAccount in the specific namespace can assume the role. 
 
 ---
 
-## AWS Bedrock model access — one-time, manual, human
+## AWS Bedrock model access — first-invoke auto-enable + Anthropic use-case form
 
-Bedrock is gated **per AWS account, per region, per model** by a human approval in the AWS console:
+AWS retired the per-model "Manage model access" console page in late 2025. Serverless foundation models on Bedrock are now **automatically enabled in your account when first invoked** — no manual activation step.
 
-```
-https://${AWS_REGION}.console.aws.amazon.com/bedrock/home?region=${AWS_REGION}#/modelaccess
-```
+Two caveats remain:
 
-The Terraform `bedrock_model_access_url` output is a direct link. Approval is typically instant for Anthropic models.
+1. **First-time Anthropic users** (no prior Anthropic-on-Bedrock invocation in this account) are prompted for a one-page use-case form when they open Claude in the Model catalog or first invoke it. Approval is typically minutes; the form is `https://${AWS_REGION}.console.aws.amazon.com/bedrock/home?region=${AWS_REGION}#/foundation-models` → click into the model.
+2. **AWS Marketplace models** (NOT Anthropic-direct, but third-party catalog entries) require an admin with Marketplace permissions to invoke the model once before account-wide access kicks in.
+
+Practically, our demo only needs Anthropic Claude (Sonnet/Opus tier) for the cloud provider behind AI Gateway. Smoke-test the activation with `aws bedrock-runtime invoke-model --model-id anthropic.claude-sonnet-4-...` once before the booth — if it returns content, you're set; if it errors with `AccessDeniedException` and a use-case-form pointer, fill the form and retry.
+
+After the first successful invocation, the `coder-bedrock` IAM role (assumed via IRSA) works without any further console interaction.
 
 ---
 
@@ -119,4 +122,6 @@ The Terraform `bedrock_model_access_url` output is a direct link. Approval is ty
 | What can the coder-bedrock role do? | Invoke Bedrock models (any). Nothing else. |
 | How does AI Gateway find Bedrock creds? | Pod identity webhook injects `AWS_ROLE_ARN` + token file from SA annotation. AWS SDK handles the rest. |
 | Can any pod assume any role? | No. OIDC trust is scoped to `system:serviceaccount:<ns>:<sa>`. Only the specific SA can assume its role. |
+| Where does the workspace get AWS creds? | It doesn't. Workspaces talk to AI Gateway only; AI Gateway is the AWS-aware piece. |
+| What if Bedrock is denied for the model I picked? | First-time Anthropic-on-Bedrock users get a one-page use-case form on first invoke. Submit once at `bedrock_model_catalog_url`; auto-enable on first invoke does the rest. |
 | What's the destroy story? | `terraform destroy` runs `openshift-install destroy cluster` then `ccoctl aws delete` then removes workload IAM roles + VPC. |

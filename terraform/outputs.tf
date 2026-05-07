@@ -64,9 +64,9 @@ output "coder_bedrock_role_arn" {
   value       = aws_iam_role.coder_bedrock.arn
 }
 
-output "bedrock_model_access_url" {
-  description = "Direct link to the Bedrock model-access page in the AWS console for this region. You must one-time-approve Anthropic models here before AI Gateway can invoke them."
-  value       = "https://${var.aws_region}.console.aws.amazon.com/bedrock/home?region=${var.aws_region}#/modelaccess"
+output "bedrock_model_catalog_url" {
+  description = "Direct link to the Bedrock Model catalog in the AWS console for this region. AWS retired the per-model approval page; serverless models now auto-enable on first invocation. First-time Anthropic users may be prompted for a one-page use-case form when opening the model — fill it in once, approval is typically minutes."
+  value       = "https://${var.aws_region}.console.aws.amazon.com/bedrock/home?region=${var.aws_region}#/foundation-models"
 }
 
 output "next_steps" {
@@ -99,7 +99,7 @@ output "next_steps" {
          open $(terraform output -raw cluster_console_url 2>/dev/null || echo "see cluster_console_url output")
 
     7. Request Bedrock model access (one-time, per-region):
-         open $(terraform output -raw bedrock_model_access_url)
+         open $(terraform output -raw bedrock_model_catalog_url)
          # Approve Anthropic Claude Sonnet 4.x for this region.
 
     8. Set Coder URL + admin token as GH Actions secrets:

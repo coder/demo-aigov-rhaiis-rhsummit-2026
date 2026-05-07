@@ -91,21 +91,33 @@ variable "control_plane_count" {
 }
 
 variable "control_plane_instance_type" {
-  description = "Must match the cluster TF."
+  description = "Must match the cluster TF. Default m6i.4xlarge for the compact 3-node converged cluster."
   type        = string
-  default     = "m6i.xlarge"
+  default     = "m6i.4xlarge"
 }
 
 variable "worker_count" {
-  description = "Must match the cluster TF (effective worker count, 0 for SNO)."
+  description = "Must match the cluster TF. Default 0 (compact converged cluster — no general-compute worker pool)."
   type        = number
-  default     = 3
+  default     = 0
 }
 
 variable "worker_instance_type" {
-  description = "Must match the cluster TF."
+  description = "Must match the cluster TF. Only used when worker_count > 0."
   type        = string
   default     = "m6i.2xlarge"
+}
+
+variable "gpu_count" {
+  description = "Must match the cluster TF. Default 1 (the GPU node hosts RHAIIS, always)."
+  type        = number
+  default     = 1
+}
+
+variable "gpu_instance_type" {
+  description = "Must match the cluster TF. Default g5.2xlarge (1× A10G)."
+  type        = string
+  default     = "g5.2xlarge"
 }
 
 variable "request_quota_increases" {

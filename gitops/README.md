@@ -5,10 +5,12 @@
 | App | Sync wave | What it deploys |
 |---|---|---|
 | `postgres` | 0 | CNPG `Cluster` CR (3 instances, multi-AZ via streaming replication) — auto-generates the `coder-app` Secret consumed by the Coder Helm chart |
+| `gpu-stack` | 0 | NodeFeatureDiscovery instance + NVIDIA GPU operator `ClusterPolicy`. Drivers + device-plugin + GPU Feature Discovery roll out onto the g5.2xlarge GPU node provisioned by the installer's `gpu` compute pool. |
 | `cert-manager` | 0 | ClusterIssuers (Let's Encrypt prod + staging) using DNS-01 over Route 53 with ambient IRSA credentials |
 | `coder` | 1 | Coder Helm chart (latest RC) — control plane + provisioner + AI Governance Add-On. Reads `coder-app/uri` for the Postgres URL. |
-| `rhaiis` | 2 | RHAIIS / vLLM Deployment + Service from `manifests/rhaiis/`. Image pulled with `redhat-pull-secret` (created by the cluster TF bootstrap step). |
+| `rhaiis` | 2 | RHAIIS / vLLM (CUDA build) Deployment + Service from `manifests/rhaiis/`. Image pulled with `redhat-pull-secret`; pod schedules on the GPU node via `nvidia.com/gpu.present=true` selector + `nvidia.com/gpu: 1` resource request. |
 | `coder-routing` | 2 | OpenShift Route(s) for Coder with cert-manager-issued wildcard TLS + ingress wildcard policy patch |
+| `coder-observability` | 3 | Grafana + Prometheus + Loki + Coder dashboards (Helm chart from `helm.coder.com/observability`). Bundled dashboards include AI Bridge model-invocation metrics + Agent Boundaries (Agent Firewall) activity — the "every model call is governed and logged" booth visual. Route at `grafana.apps.cluster.<base_domain>`. |
 
 ### What's NOT in GitOps
 
@@ -21,8 +23,18 @@ This demo prefers **Red-Hat-certified, RH-supported operators** wherever Red Hat
 | File | Source | Why |
 |---|---|---|
 | `openshift-gitops-subscription.yaml` | `redhat-operators` | Red Hat OpenShift GitOps (NOT upstream Argo CD operator) |
-| `cert-manager-subscription.yaml` | `redhat-operators` | cert-manager Operator for Red Hat OpenShift |
-| `cnpg-subscription.yaml` | `community-operators` | **Documented exception.** CloudNativePG is the de facto Kubernetes-native Postgres operator (CNCF Sandbox). |
+| `cert-manager-subscription.yaml` | `redhat-operators` | cert-manager Operator for Red Hat OpenShift (NOT upstream jetstack/cert-manager) |
+| `nfd-subscription.yaml` | `redhat-operators` | Node Feature Discovery — Red Hat-engineered. Required by the NVIDIA GPU operator to detect GPU PCI devices on each node. |
+| `cnpg-subscription.yaml` | `community-operators` | **Documented exception.** Red Hat does not ship a first-party in-cluster Postgres operator. CloudNativePG is the de facto Kubernetes-native Postgres operator (CNCF Sandbox) and is OpenShift-compatible. |
+| `nvidia-gpu-operator-subscription.yaml` | `certified-operators` | **Documented exception.** NVIDIA-engineered, Red Hat-certified for OpenShift. Red Hat does not engineer their own GPU operator and explicitly directs OCP customers to NVIDIA's certified build for GPU support — see RH docs on [GPU architecture](https://docs.openshift.com/container-platform/4.21/architecture/nvidia-gpu-architecture-overview.html). |
+
+Coder is a Red Hat partner and uses the partner pull-secret (the same `pull-secret.json` from console.redhat.com, tied to the partner subscription) for any RH-distributed image.
+
+## Adding a new app
+
+1. Drop a new file at `gitops/apps/<name>/application.yaml`
+2. Commit + push to `main`
+3. Argo CD root app picks it up on the next refresh
 
 ## Pre-requisites Argo CD won't manage for you
 

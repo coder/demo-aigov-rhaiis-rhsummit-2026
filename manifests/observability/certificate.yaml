@@ -1,0 +1,19 @@
+# Wildcard cert for Grafana, issued by Let's Encrypt via DNS-01. Same
+# pattern as manifests/coder/certificate.yaml — single-host cert in
+# the coder-observability namespace, consumed by the OCP Route via
+# tls.externalCertificate (OCP 4.16+).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-tls
+  namespace: coder-observability
+spec:
+  secretName: grafana-tls
+  duration: 2160h     # 90d (Let's Encrypt max)
+  renewBefore: 720h   # 30d
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: grafana.apps.cluster.rhsummit.coderdemo.io
+  dnsNames:
+    - grafana.apps.cluster.rhsummit.coderdemo.io

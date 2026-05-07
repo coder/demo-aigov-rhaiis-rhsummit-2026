@@ -1,0 +1,59 @@
+# NVIDIA GPU operator — NVIDIA-engineered, Red Hat–certified.
+#
+# IMPORTANT — operator-policy exception:
+# This is the *certified-operators* build (NVIDIA ships, Red Hat certifies
+# for OpenShift). NOT a redhat-operators package. We accept this exception
+# because Red Hat does not engineer their own GPU operator and explicitly
+# directs OpenShift customers to NVIDIA's certified build for GPU support
+# on AWS / Azure / on-prem GPU nodes. See
+# https://docs.openshift.com/container-platform/4.21/architecture/nvidia-gpu-architecture-overview.html
+#
+# What this installs into the cluster (managed via the ClusterPolicy CR
+# applied by the gpu-stack Argo app, NOT this Subscription):
+#   - NVIDIA driver DaemonSet (loads CUDA driver into the kernel of GPU nodes)
+#   - container-toolkit (configures CRI-O to expose /dev/nvidia* to pods)
+#   - device-plugin (advertises nvidia.com/gpu as an allocatable resource)
+#   - GPU Feature Discovery (labels nodes with nvidia.com/gpu.* attributes)
+#   - DCGM exporter (Prometheus metrics for GPU utilization)
+#
+# Source: certified-operators (NVIDIA-engineered, RH-certified for OCP).
+# Channel: stable. Pin to e.g., v25.6 for production stability; stable is
+# fine for booth.
+#
+# Package: gpu-operator-certified
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: gpu-operator-certified
+  namespace: nvidia-gpu-operator
+spec:
+  channel: stable
+  installPlanApproval: Automatic
+  name: gpu-operator-certified
+  source: certified-operators
+  sourceNamespace: openshift-marketplace
+---
+# The GPU operator ships with its own dedicated namespace (rather than
+# landing in openshift-operators) so the operator's NodeFeatureDiscovery
+# Helper Pods + ClusterPolicy CRs have a clean home.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nvidia-gpu-operator
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    openshift.io/cluster-monitoring: "true"
+  annotations:
+    description: "NVIDIA GPU operator + ClusterPolicy. Required for RHAIIS on a GPU node."
+---
+# OperatorGroup for the GPU operator's own namespace (required for any
+# subscription targeting a non-shared namespace).
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: nvidia-gpu-operator-group
+  namespace: nvidia-gpu-operator
+spec:
+  targetNamespaces:
+    - nvidia-gpu-operator

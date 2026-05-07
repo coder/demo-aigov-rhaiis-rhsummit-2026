@@ -4,7 +4,11 @@
 # Flow:
 #   1. Read pull secret + ssh public key
 #   2. Create scoped IAM roles for workloads (cert-manager, Coder Bedrock)
-#   3. Render install-config.yaml (credentialsMode: Manual) into <install_dir>
+#   3. Render install-config.yaml (credentialsMode: Manual) into <install_dir>.
+#      The template emits TWO compute pools: (a) `worker` with replicas 0 —
+#      placeholder, (b) `gpu` with `gpu_count` replicas of `gpu_instance_type`,
+#      pinned to one AZ. The 3 control-plane nodes are sized to be
+#      schedulable for general workloads (compact converged shape).
 #   4. Run `openshift-install create manifests`
 #   5. Extract ccoctl from the release image, run `ccoctl aws create-all` to
 #      create the OIDC provider (S3 bucket), signing keys, and platform IAM
@@ -12,13 +16,17 @@
 #   6. Run `openshift-install create cluster --dir=<install_dir>` (~30-45 min).
 #      The installer uses the pre-created STS manifests. The pod identity
 #      webhook is included automatically with STS mode.
-#   7. Apply RH-supported + community operator subscriptions (OpenShift
-#      GitOps + cert-manager + CloudNativePG)
+#   7. Apply RH-supported + community + certified operator subscriptions:
+#      OpenShift GitOps, cert-manager, CloudNativePG, NFD, NVIDIA GPU operator
 #   8. Annotate ServiceAccounts with IAM role ARNs so the pod identity
 #      webhook injects credentials (projected SA tokens + env vars):
 #        - cert-manager SA -> Route 53 IAM role
 #        - coder SA        -> Bedrock IAM role
-#   9. Apply Argo CD root Application (app-of-apps bootstrap).
+#   9. Create redhat-pull-secret in ocp-ai namespace (RHAIIS image pull)
+#  10. Apply Argo CD root Application (app-of-apps bootstrap). CNPG operator
+#      stands up an in-cluster Postgres Cluster (auto-generates the
+#      `coder-app` Secret); the gpu-stack Argo app rolls NVIDIA drivers
+#      onto the GPU node so RHAIIS can schedule there.
 #
 # `terraform destroy` runs `openshift-install destroy cluster` first, then
 # `ccoctl aws delete` to clean up the OIDC provider + platform IAM roles,
@@ -57,11 +65,12 @@ data "local_file" "ssh_pubkey" {
 # identity webhook injects projected SA tokens that the SDK exchanges
 # for temporary Bedrock-scoped credentials via sts:AssumeRoleWithWebIdentity.
 #
-# IMPORTANT: Bedrock model access is granted per-account, per-region,
-# per-model via a one-time AWS console step. After this Terraform applies,
-# go to the Bedrock console for ${var.aws_region} and request access to
-# the Anthropic models you'll use for the demo (Claude Sonnet 4.x at
-# minimum). Approval is typically instant for Anthropic on Bedrock.
+# NOTE: AWS retired the per-model "Manage model access" page in late 2025.
+# Serverless models on Bedrock now auto-enable on first invocation by any
+# IAM principal in the account. First-time Anthropic users are prompted
+# for a one-page use-case form on first open/invoke — fill it in once,
+# approval is typically minutes, and the entire account is unblocked.
+###############################################################################
 
 data "aws_iam_policy_document" "coder_bedrock" {
   statement {
@@ -90,14 +99,14 @@ data "aws_iam_policy_document" "coder_bedrock" {
 
 data "aws_iam_policy_document" "cert_manager_route53" {
   statement {
-    sid     = "GetChange"
-    effect  = "Allow"
-    actions = ["route53:GetChange"]
+    sid       = "GetChange"
+    effect    = "Allow"
+    actions   = ["route53:GetChange"]
     resources = ["arn:aws:route53:::change/*"]
   }
   statement {
-    sid     = "ChangeResourceRecordSets"
-    effect  = "Allow"
+    sid    = "ChangeResourceRecordSets"
+    effect = "Allow"
     actions = [
       "route53:ChangeResourceRecordSets",
       "route53:ListResourceRecordSets",
@@ -126,6 +135,9 @@ resource "local_sensitive_file" "install_config" {
     control_plane_instance_type = var.control_plane_instance_type
     worker_count                = local.effective_worker_count
     worker_instance_type        = var.worker_instance_type
+    gpu_count                   = var.gpu_count
+    gpu_instance_type           = var.gpu_instance_type
+    gpu_zone                    = local.vpc_azs[var.gpu_zone_index]
     pull_secret                 = trimspace(data.local_file.pull_secret.content)
     ssh_pubkey                  = trimspace(data.local_file.ssh_pubkey.content)
     machine_cidr                = local.vpc_cidr
@@ -350,6 +362,24 @@ resource "null_resource" "gitops_bootstrap" {
       echo "==> Restarting cert-manager to pick up IRSA annotation..."
       ${var.oc_binary} rollout restart -n cert-manager deployment/cert-manager 2>/dev/null || \
         echo "    Note: cert-manager deployment not yet ready; the operator will reconcile."
+
+      echo "==> Waiting for NFD CRDs (NodeFeatureDiscovery)..."
+      for i in $(seq 1 60); do
+        if ${var.oc_binary} get crd nodefeaturediscoveries.nfd.openshift.io 2>/dev/null | grep -q nodefeaturediscoveries; then
+          break
+        fi
+        echo "    ...waiting for NFD CRDs ($i/60)"
+        sleep 10
+      done
+
+      echo "==> Waiting for NVIDIA GPU operator CRDs (ClusterPolicy)..."
+      for i in $(seq 1 60); do
+        if ${var.oc_binary} get crd clusterpolicies.nvidia.com 2>/dev/null | grep -q clusterpolicies; then
+          break
+        fi
+        echo "    ...waiting for NVIDIA GPU operator CRDs ($i/60)"
+        sleep 10
+      done
 
       echo "==> Creating coder namespace if missing..."
       ${var.oc_binary} create namespace coder --dry-run=client -o yaml | ${var.oc_binary} apply -f -

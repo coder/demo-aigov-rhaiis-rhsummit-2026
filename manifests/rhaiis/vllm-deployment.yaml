@@ -1,10 +1,11 @@
 # Red Hat AI Inference Server (RHAIIS) — OpenAI-compatible inference endpoint
 #
-# Demo-grade Deployment. Hardening (STIG, FIPS, restricted-v2 overrides,
-# readOnlyRootFilesystem) is intentionally NOT applied here — booth demo
-# values simplicity. OCP applies its baseline restricted-v2 SCC by default
-# which is sufficient for the demo. Production deployments should re-add
-# explicit hardening; see docs/architecture.md.
+# Demo-grade Deployment running on a GPU node. Hardening (STIG, FIPS,
+# restricted-v2 overrides, readOnlyRootFilesystem) is intentionally NOT
+# applied here — booth demo values simplicity. OCP applies its baseline
+# restricted-v2 SCC by default which is sufficient for the demo.
+# Production deployments should re-add explicit hardening; see
+# docs/architecture.md.
 #
 # Verified to expose:
 #   POST /v1/chat/completions   (with tools / tool_choice for tool-calling)
@@ -19,19 +20,17 @@
 #   --tool-call-parser mistral       (Mistral / Mixtral Instruct)
 #   --tool-call-parser deepseek      (DeepSeek-V3 / DeepSeek-Coder-V2.5+)
 #
+# GPU node placement: this Deployment ALWAYS runs on the cluster's GPU
+# pool (provisioned by openshift-install via the `gpu` compute pool in
+# install-config.yaml). The nodeSelector `nvidia.com/gpu.present=true` is
+# auto-applied by the NVIDIA GPU operator's GPU Feature Discovery
+# DaemonSet once drivers are loaded. No CPU fallback path — RHAIIS
+# requires the GPU to be ready before pods schedule.
+#
 # Pull-secret expectation: a `redhat-pull-secret` of type
-# kubernetes.io/dockerconfigjson exists in this namespace, sourced from your
-# Red Hat subscription (registry.redhat.io). Create it with:
-#
-#   oc create secret docker-registry redhat-pull-secret \
-#     --docker-server=registry.redhat.io \
-#     --docker-username='<RH_USERNAME>' \
-#     --docker-password='<RH_TOKEN>' \
-#     --namespace=ocp-ai
-#
-# Sizing: CPU defaults below run Granite-3.1-8B-Instruct at low concurrency
-# (booth use). For production GPU serving, replace image with vllm-cuda-rhel9
-# and add `nvidia.com/gpu: 1` to limits + a node selector for the GPU pool.
+# kubernetes.io/dockerconfigjson exists in this namespace, sourced from
+# your Red Hat partner subscription (registry.redhat.io). Created at
+# cluster-bootstrap time by terraform/main.tf's gitops_bootstrap step.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -57,12 +56,17 @@ spec:
     spec:
       imagePullSecrets:
         - name: redhat-pull-secret
+      # Land on the GPU node only. The label is auto-applied by the
+      # NVIDIA GPU operator's GPU Feature Discovery DaemonSet after
+      # drivers are running.
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
       containers:
         - name: vllm
-          # `latest` per RH Summit 2026 demo preference. For production, pin
-          # to a specific tag from registry.redhat.io after verifying tool-call
-          # parser support in your target RHAIIS version.
-          image: registry.redhat.io/rhoai/vllm-cpu-rhel9:latest
+          # CUDA-enabled RHAIIS image. `latest` per RH Summit 2026 demo
+          # preference; pin to a specific tag for production after
+          # verifying tool-call parser support.
+          image: registry.redhat.io/rhoai/vllm-cuda-rhel9:latest
           imagePullPolicy: Always
           args:
             - --model
@@ -77,6 +81,8 @@ spec:
             - --max-model-len
             - "8192"
             - --disable-log-requests
+            - --tensor-parallel-size
+            - "1"            # 1 GPU per pod; A10G handles 8B fp16 alone
           ports:
             - name: http
               containerPort: 8000
@@ -85,13 +91,19 @@ spec:
               value: /tmp/hf-cache
             - name: HF_HUB_OFFLINE
               value: "0"
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
           resources:
             requests:
               cpu: "2"
               memory: "8Gi"
+              nvidia.com/gpu: "1"
             limits:
               cpu: "4"
               memory: "16Gi"
+              nvidia.com/gpu: "1"
           readinessProbe:
             httpGet:
               path: /v1/models

@@ -1,0 +1,27 @@
+# OpenShift Route for Grafana (the chart-created Service is targeted by
+# name + port). The Helm chart's built-in ingress is disabled in the
+# Argo app values; this Route is what we ship.
+#
+# Service name follows Bitnami / Coder-observability convention:
+#   <release-name>-grafana   →   coder-observability-grafana
+# If the chart changes that, update `to.name` here.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: grafana
+  namespace: coder-observability
+  annotations:
+    haproxy.router.openshift.io/timeout: "60s"
+spec:
+  host: grafana.apps.cluster.rhsummit.coderdemo.io
+  to:
+    kind: Service
+    name: coder-observability-grafana
+    weight: 100
+  port:
+    targetPort: http-web
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+    externalCertificate:
+      name: grafana-tls

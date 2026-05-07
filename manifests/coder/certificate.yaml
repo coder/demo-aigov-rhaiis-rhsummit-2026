@@ -25,7 +25,7 @@ spec:
   issuerRef:
     name: letsencrypt-prod
     kind: ClusterIssuer
-  commonName: coder.apps.cluster.rh.coderdemo.io
+  commonName: coder.apps.cluster.rhsummit.coderdemo.io
   dnsNames:
-    - coder.apps.cluster.rh.coderdemo.io
-    - "*.coder.apps.cluster.rh.coderdemo.io"
+    - coder.apps.cluster.rhsummit.coderdemo.io
+    - "*.coder.apps.cluster.rhsummit.coderdemo.io"
