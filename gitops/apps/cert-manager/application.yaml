@@ -3,8 +3,8 @@
 #
 # Pre-requisites NOT managed by Argo:
 #   - cert-manager Operator must be installed (gitops/operator/cert-manager-subscription.yaml)
-#   - Secret `route53-credentials` must exist in the `cert-manager` namespace
-#     (created by the cluster Terraform's bootstrap step)
+#   - The cert-manager ServiceAccount must be annotated with the IAM role
+#     ARN for Route 53 access (done by the cluster Terraform bootstrap step)
 #
 # Sync wave 0 — runs before any app that depends on a Certificate.
 ---

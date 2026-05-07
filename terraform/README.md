@@ -1,25 +1,27 @@
-# Terraform — OpenShift 4.21 IPI on AWS + supporting infra
+# Terraform — OpenShift 4.21 IPI on AWS with STS + IRSA
 
 Provisions:
 - BYO-VPC (3 AZs) for the OCP cluster
-- AWS IAM users for cert-manager (Route 53 DNS-01) and Coder → Bedrock
-- OpenShift 4.21+ cluster via **Installer-Provisioned Infrastructure** (`openshift-install create cluster`) — compact 3-node converged shape (`compute.replicas: 0`) plus a dedicated GPU compute pool (`gpu_count` × `gpu_instance_type`, default 1× g5.2xlarge in us-east-1a)
+- OIDC provider + platform IAM roles via `ccoctl` (STS mode)
+- Workload IAM roles for cert-manager (Route 53) and Coder (Bedrock) with OIDC-federated trust
+- OpenShift 4.21+ cluster via **Installer-Provisioned Infrastructure** in `credentialsMode: Manual` — compact 3-node converged shape (`compute.replicas: 0`) plus a dedicated GPU compute pool (`gpu_count` × `gpu_instance_type`, default 1× g5.2xlarge in us-east-1a)
 - Operator subscriptions: OpenShift GitOps + cert-manager + NFD (RH-supported) + CloudNativePG (community-operators) + NVIDIA GPU operator (certified-operators, NVIDIA-engineered + RH-certified)
-- Cluster Secrets bootstrapped from this Terraform run: `route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`
+- IRSA ServiceAccount annotations for workload credential injection
 - Argo CD root Application (app-of-apps bootstrap)
 
 After `terraform apply` finishes, Argo CD takes over and syncs the cluster apps from `gitops/apps/` (Postgres CNPG cluster, Coder Helm chart, RHAIIS, Agent Firewalls). The CNPG operator generates Coder's DB connection Secret (`coder-app` in the `coder` namespace) on its own — there is no out-of-band DB URL to manage.
 
 ## Prereqs
 
-- AWS account with admin perms (or scoped enough for OCP IPI: VPC, IAM, EC2, ELB, S3, Route 53)
+- AWS account with admin perms (or scoped enough for OCP IPI + `ccoctl`)
 - AWS credentials in shell (`aws sts get-caller-identity` succeeds)
+- **`aws` CLI**, **`oc`**, and **`openshift-install`** (4.21+) on `PATH`
 - A **public Route 53 hosted zone** for the cluster's parent domain (e.g., `rh.coderdemo.io`)
 - Red Hat **pull secret** at `~/.openshift/pull-secret.json` — download from <https://console.redhat.com/openshift/install/pull-secret>
 - An **SSH public key** for OCP node access (e.g., `~/.ssh/id_ed25519.pub`)
-- **`openshift-install`** binary (4.21+) on `PATH` — download from <https://mirror.openshift.com/pub/openshift-v4/clients/ocp/>
-- **`oc`** binary on `PATH`
 - Terraform ≥ 1.7 or OpenTofu ≥ 1.7
+
+Note: `ccoctl` is extracted automatically from the OCP release image during apply.
 
 ## Usage
 
@@ -33,14 +35,17 @@ terraform apply
 ```
 
 The `apply` will:
-1. Create IAM users for cert-manager + Bedrock (~30 sec)
+1. Create workload IAM roles for cert-manager + Bedrock (~30 sec)
 2. Create the BYO-VPC (~2 min)
-3. Render `install-config.yaml` into `./.cluster/` (3 CP + GPU compute pool)
-4. Run `openshift-install create cluster --dir=./.cluster` (~30–45 min)
-5. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG + NFD + NVIDIA GPU operator)
-6. Wait for all operator CRDs to land (cert-manager, CNPG, NFD, NVIDIA ClusterPolicy)
-7. Create cluster Secrets (`route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`)
-8. Apply the Argo CD root Application (kicks off Postgres + GPU stack + Coder + RHAIIS + Agent Firewalls sync). NVIDIA drivers compile + load onto the GPU node (~3–5 min) before RHAIIS pod schedules.
+3. Render `install-config.yaml` with `credentialsMode: Manual` (3 CP + GPU compute pool)
+4. Run `openshift-install create manifests`
+5. Extract `ccoctl` from release image, run `ccoctl aws create-all` (OIDC provider + platform IAM roles)
+6. Copy ccoctl manifests into install dir
+7. Run `openshift-install create cluster` (~30-45 min, uses STS manifests)
+8. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG + NFD + NVIDIA GPU operator)
+9. Wait for all operator CRDs to land
+10. Annotate cert-manager and coder ServiceAccounts with IAM role ARNs
+11. Apply Argo CD root Application (kicks off Postgres + GPU stack + Coder + RHAIIS sync). NVIDIA drivers compile + load onto the GPU node (~3–5 min) before RHAIIS pod schedules.
 
 When done, follow the `next_steps` output.
 
@@ -50,7 +55,10 @@ When done, follow the `next_steps` output.
 terraform destroy
 ```
 
-This runs `openshift-install destroy cluster` first (which removes the OCP-installer-managed EC2 / ELB / S3 / IAM created by the installer), then tears down the IAM users + VPC.
+This runs:
+1. `openshift-install destroy cluster` (removes OCP-managed AWS resources)
+2. `ccoctl aws delete` (removes OIDC S3 bucket + IAM OIDC provider + platform IAM roles)
+3. Terraform removes workload IAM roles + VPC
 
 If `openshift-install destroy` fails midway, inspect `./.cluster/` and re-run manually before letting Terraform proceed.
 
@@ -67,12 +75,9 @@ gpu_count                   = 0
 
 NOTE: SNO loses the multi-AZ HA narrative AND the GPU narrative. CNPG must be dropped to `instances: 1`, and you'll need to swap RHAIIS to `vllm-cpu-rhel9` (the shipped manifest is GPU-only). Use only for non-booth experiments where cost dominates.
 
-## Why no STIG/FIPS
-
-Demo simplicity. The `install-config.yaml.tftpl` doesn't set `fips: true` and the deployed manifests don't override OCP's default `restricted-v2` SCC with anything stricter. For production deployments, see `docs/architecture.md` for the hardening pattern (LMCO POV / UDS Core JREN reference).
-
 ## What's NOT here
 
-- **No RDS / ECR / AWS Secrets Manager.** Postgres runs in-cluster (CNPG operator); workspace base images live on GHCR; the few Secrets the cluster needs are created in-line by this Terraform's bootstrap step.
-- **No GitHub Actions OIDC role.** GHCR pushes use the workflow's built-in `GITHUB_TOKEN`.
+- **No static IAM users or access keys.** All credentials are STS temporary tokens via IRSA.
+- **No RDS / ECR / AWS Secrets Manager.** Postgres runs in-cluster (CNPG operator); workspace base images live on GHCR.
+- **No GitHub Actions OIDC role.** GHCR pushes use `GITHUB_TOKEN`.
 - **STIG/FIPS posture, OCP `restricted-v2` SCC overrides, air-gap config** — production-only.

@@ -17,6 +17,10 @@
 #   - The chart version + image tag track Coder release-candidate releases.
 #     Bump as new RCs ship. Linear: project `0e26deb1` (Coder Agents) —
 #     verify the May Beta milestone before booth.
+#   - AWS Bedrock credentials are provided via IRSA. The cluster runs in
+#     STS mode with a pod identity webhook. The bootstrap step annotates
+#     the `coder` ServiceAccount with the Bedrock IAM role ARN, and the
+#     webhook injects AWS_ROLE_ARN + token into the pod automatically.
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -63,24 +67,11 @@ spec:
             - name: CODER_DISABLE_USAGE_STATS
               value: "true"
             # ── Bedrock provider for AI Gateway ─────────────────────────
-            # AI Gateway's Bedrock provider reads ambient AWS env vars
-            # (per coder/coder #24397, v2.33-rc.3). Secret is created by
-            # the cluster Terraform's bootstrap step.
-            - name: AWS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: bedrock-credentials
-                  key: aws-access-key-id
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: bedrock-credentials
-                  key: aws-secret-access-key
+            # The pod identity webhook injects AWS_ROLE_ARN and
+            # AWS_WEB_IDENTITY_TOKEN_FILE from the ServiceAccount
+            # annotation. Only AWS_REGION needs to be set explicitly.
             - name: AWS_REGION
-              valueFrom:
-                secretKeyRef:
-                  name: bedrock-credentials
-                  key: aws-region
+              value: "us-east-1"
 
           replicaCount: 3     # multi-AZ HA — one pod per AZ via topology spread below
 

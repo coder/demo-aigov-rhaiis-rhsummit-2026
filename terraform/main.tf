@@ -1,29 +1,36 @@
 ###############################################################################
-# OpenShift IPI install + supporting AWS infra
+# OpenShift IPI install with STS (manual credentials mode) + supporting infra
 #
 # Flow:
 #   1. Read pull secret + ssh public key
-#   2. Create dedicated IAM users (cert-manager Route 53; Coder → Bedrock)
-#   3. Render install-config.yaml from template into <install_dir>. The
-#      template emits TWO compute pools: (a) `worker` with replicas 0 —
+#   2. Create scoped IAM roles for workloads (cert-manager, Coder Bedrock)
+#   3. Render install-config.yaml (credentialsMode: Manual) into <install_dir>.
+#      The template emits TWO compute pools: (a) `worker` with replicas 0 —
 #      placeholder, (b) `gpu` with `gpu_count` replicas of `gpu_instance_type`,
 #      pinned to one AZ. The 3 control-plane nodes are sized to be
 #      schedulable for general workloads (compact converged shape).
-#   4. Run `openshift-install create cluster --dir=<install_dir>` (~30–45 min)
-#   5. Apply RH-supported + community + certified operator subscriptions:
+#   4. Run `openshift-install create manifests`
+#   5. Extract ccoctl from the release image, run `ccoctl aws create-all` to
+#      create the OIDC provider (S3 bucket), signing keys, and platform IAM
+#      roles. Copy generated manifests + TLS keys into the install dir.
+#   6. Run `openshift-install create cluster --dir=<install_dir>` (~30-45 min).
+#      The installer uses the pre-created STS manifests. The pod identity
+#      webhook is included automatically with STS mode.
+#   7. Apply RH-supported + community + certified operator subscriptions:
 #      OpenShift GitOps, cert-manager, CloudNativePG, NFD, NVIDIA GPU operator
-#   6. Bootstrap a few Kubernetes Secrets the cluster apps expect to find:
-#        - route53-credentials   (cert-manager → Route 53 DNS-01)
-#        - bedrock-credentials   (Coder server / AI Gateway → Bedrock)
-#        - redhat-pull-secret    (RHAIIS image pull from registry.redhat.io)
-#   7. Apply Argo CD root Application (app-of-apps bootstrap). CNPG operator
+#   8. Annotate ServiceAccounts with IAM role ARNs so the pod identity
+#      webhook injects credentials (projected SA tokens + env vars):
+#        - cert-manager SA -> Route 53 IAM role
+#        - coder SA        -> Bedrock IAM role
+#   9. Create redhat-pull-secret in ocp-ai namespace (RHAIIS image pull)
+#  10. Apply Argo CD root Application (app-of-apps bootstrap). CNPG operator
 #      stands up an in-cluster Postgres Cluster (auto-generates the
 #      `coder-app` Secret); the gpu-stack Argo app rolls NVIDIA drivers
 #      onto the GPU node so RHAIIS can schedule there.
 #
 # `terraform destroy` runs `openshift-install destroy cluster` first, then
-# tears down the AWS IAM users. The cluster install dir is preserved on disk
-# for debugging — wipe it manually after destroy if you need a clean slate.
+# `ccoctl aws delete` to clean up the OIDC provider + platform IAM roles,
+# then tears down the workload IAM roles + VPC.
 ###############################################################################
 
 ###############################################################################
@@ -48,14 +55,15 @@ data "local_file" "ssh_pubkey" {
 }
 
 ###############################################################################
-# IAM user for Coder server / AI Gateway → AWS Bedrock
+# IAM policy documents (consumed by roles in irsa.tf)
+###############################################################################
+
+# Bedrock invoke permissions for Coder AI Gateway.
 #
-# AI Gateway picks up ambient AWS credentials from env vars on the Coder
-# server pod (per PR coder/coder#24397 in v2.33-rc.3). The bootstrap step
-# materializes these creds as Kubernetes Secret `bedrock-credentials` in
-# the `coder` namespace; the Helm values mount AWS_ACCESS_KEY_ID /
-# AWS_SECRET_ACCESS_KEY from that Secret as env vars. AWS_REGION is set
-# to the cluster region.
+# AI Gateway picks up ambient AWS credentials from the Coder server pod
+# (per PR coder/coder#24397 in v2.33-rc.3). With STS mode, the pod
+# identity webhook injects projected SA tokens that the SDK exchanges
+# for temporary Bedrock-scoped credentials via sts:AssumeRoleWithWebIdentity.
 #
 # NOTE: AWS retired the per-model "Manage model access" page in late 2025.
 # Serverless models on Bedrock now auto-enable on first invocation by any
@@ -84,33 +92,10 @@ data "aws_iam_policy_document" "coder_bedrock" {
   }
 }
 
-resource "aws_iam_user" "coder_bedrock" {
-  name = "${var.cluster_name}-coder-bedrock"
-  path = "/demo/"
-}
-
-resource "aws_iam_user_policy" "coder_bedrock" {
-  name   = "bedrock-invoke"
-  user   = aws_iam_user.coder_bedrock.name
-  policy = data.aws_iam_policy_document.coder_bedrock.json
-}
-
-resource "aws_iam_access_key" "coder_bedrock" {
-  user = aws_iam_user.coder_bedrock.name
-}
-
-###############################################################################
-# IAM user for cert-manager Route 53 DNS-01 challenges
-#
-# cert-manager runs in the cluster and calls Route 53 to create + remove
-# `_acme-challenge.<domain>` TXT records during ACME wildcard cert issuance.
-# Production should use IRSA (IAM Roles for Service Accounts) instead of
-# static keys, but that requires installing OCP in STS / manual cred mode
-# which is out of scope for the booth.
+# Route 53 permissions for cert-manager DNS-01 ACME challenges.
 #
 # Permissions follow the cert-manager docs:
 # https://cert-manager.io/docs/configuration/acme/dns01/route53/
-###############################################################################
 
 data "aws_iam_policy_document" "cert_manager_route53" {
   statement {
@@ -134,21 +119,6 @@ data "aws_iam_policy_document" "cert_manager_route53" {
     actions   = ["route53:ListHostedZonesByName"]
     resources = ["*"]
   }
-}
-
-resource "aws_iam_user" "cert_manager" {
-  name = "${var.cluster_name}-cert-manager"
-  path = "/demo/"
-}
-
-resource "aws_iam_user_policy" "cert_manager_route53" {
-  name   = "route53-acme-challenge"
-  user   = aws_iam_user.cert_manager.name
-  policy = data.aws_iam_policy_document.cert_manager_route53.json
-}
-
-resource "aws_iam_access_key" "cert_manager" {
-  user = aws_iam_user.cert_manager.name
 }
 
 ###############################################################################
@@ -178,22 +148,112 @@ resource "local_sensitive_file" "install_config" {
 }
 
 ###############################################################################
-# Run openshift-install
+# STS setup: create manifests, run ccoctl, prepare install dir
+#
+# This must run BEFORE `openshift-install create cluster` because the
+# installer needs the ccoctl-generated credential manifests and signing
+# keys in the install directory.
+#
+# Steps:
+#   1. `openshift-install create manifests` (consumes install-config.yaml)
+#   2. Extract ccoctl binary from the release image
+#   3. `ccoctl aws create-all` (creates S3 OIDC bucket, IAM OIDC provider,
+#      platform IAM roles, signing keys)
+#   4. Copy ccoctl output manifests + TLS keys into install dir
 ###############################################################################
 
-resource "null_resource" "openshift_install" {
+resource "null_resource" "sts_setup" {
   depends_on = [local_sensitive_file.install_config]
 
   triggers = {
-    install_dir        = var.install_dir
-    install_binary     = var.openshift_install_binary
+    install_dir    = var.install_dir
+    cluster_name   = var.cluster_name
+    aws_region     = var.aws_region
+    aws_profile    = var.aws_profile != null ? var.aws_profile : ""
+    install_binary = var.openshift_install_binary
     install_config_md5 = local_sensitive_file.install_config.content_md5
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       set -euo pipefail
-      echo "Running openshift-install create cluster (this takes 30–45 min)..."
+%{ if var.aws_profile != null ~}
+      export AWS_PROFILE="${var.aws_profile}"
+%{ endif ~}
+      export AWS_REGION="${var.aws_region}"
+      INSTALL_DIR="${var.install_dir}"
+      PULL_SECRET="${pathexpand(var.pull_secret_path)}"
+
+      echo "==> Creating OpenShift manifests (consumes install-config.yaml)..."
+      ${var.openshift_install_binary} create manifests --dir="$INSTALL_DIR"
+
+      echo "==> Extracting ccoctl from release image..."
+      RELEASE_IMAGE=$(${var.openshift_install_binary} version | awk '/release image/ {print $3}')
+      CCO_IMAGE=$(${var.oc_binary} adm release info --image-for='cloud-credential-operator' "$RELEASE_IMAGE" -a "$PULL_SECRET")
+      ${var.oc_binary} image extract "$CCO_IMAGE" --file="/usr/bin/ccoctl" -a "$PULL_SECRET"
+      chmod +x ./ccoctl
+
+      echo "==> Extracting CredentialsRequests from release image..."
+      mkdir -p "$INSTALL_DIR/cred-reqs"
+      ${var.oc_binary} adm release extract \
+        --credentials-requests --cloud=aws \
+        --to="$INSTALL_DIR/cred-reqs" \
+        --from="$RELEASE_IMAGE" -a "$PULL_SECRET"
+
+      echo "==> Running ccoctl aws create-all (OIDC provider + platform IAM roles)..."
+      ./ccoctl aws create-all \
+        --name="${var.cluster_name}" \
+        --region="${var.aws_region}" \
+        --credentials-requests-dir="$INSTALL_DIR/cred-reqs" \
+        --output-dir="$INSTALL_DIR/ccoctl-output"
+
+      echo "==> Copying ccoctl manifests + TLS keys into install dir..."
+      cp "$INSTALL_DIR/ccoctl-output/manifests/"* "$INSTALL_DIR/manifests/"
+      cp -a "$INSTALL_DIR/ccoctl-output/tls" "$INSTALL_DIR/tls/"
+
+      echo "==> STS setup complete. Ready for openshift-install create cluster."
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      set -euo pipefail
+%{ if self.triggers.aws_profile != "" ~}
+      export AWS_PROFILE="${self.triggers.aws_profile}"
+%{ endif ~}
+      export AWS_REGION="${self.triggers.aws_region}"
+
+      echo "==> Cleaning up ccoctl-created AWS resources (OIDC provider + platform IAM roles)..."
+      if [ -x ./ccoctl ]; then
+        ./ccoctl aws delete \
+          --name="${self.triggers.cluster_name}" \
+          --region="${self.triggers.aws_region}" || true
+      else
+        echo "    ccoctl binary not found; skipping OIDC cleanup."
+        echo "    If the S3 bucket ${self.triggers.cluster_name}-oidc still exists, delete it manually."
+      fi
+    EOT
+  }
+}
+
+###############################################################################
+# Run openshift-install
+###############################################################################
+
+resource "null_resource" "openshift_install" {
+  depends_on = [null_resource.sts_setup]
+
+  triggers = {
+    install_dir    = var.install_dir
+    install_binary = var.openshift_install_binary
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -euo pipefail
+      echo "Running openshift-install create cluster (this takes 30-45 min)..."
+      echo "The installer will use the pre-created STS manifests from ccoctl."
       ${var.openshift_install_binary} create cluster \
         --dir="${var.install_dir}" \
         --log-level=info
@@ -213,7 +273,13 @@ resource "null_resource" "openshift_install" {
 }
 
 ###############################################################################
-# Bootstrap operators + cluster Secrets + Argo CD root Application
+# Bootstrap operators + IRSA ServiceAccount annotations + Argo CD root app
+#
+# This step runs immediately after the cluster is up. It:
+#   1. Installs OLM operator subscriptions (GitOps, cert-manager, CNPG)
+#   2. Annotates ServiceAccounts with IAM role ARNs so the pod identity
+#      webhook (included with STS mode) injects projected SA tokens
+#   3. Applies the Argo CD root Application (app-of-apps)
 ###############################################################################
 
 resource "null_resource" "gitops_bootstrap" {
@@ -270,6 +336,33 @@ resource "null_resource" "gitops_bootstrap" {
         sleep 10
       done
 
+      # ── IRSA ServiceAccount annotations ───────────────────────────
+      # The pod identity webhook (installed with STS mode) watches for
+      # the eks.amazonaws.com/role-arn annotation on ServiceAccounts.
+      # When a pod uses an annotated SA, the webhook mutates the pod to
+      # inject AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE, and a
+      # projected SA token volume. The AWS SDK picks these up to call
+      # sts:AssumeRoleWithWebIdentity for temporary credentials.
+
+      echo "==> Waiting for cert-manager ServiceAccount to be created by the operator..."
+      for i in $(seq 1 30); do
+        if ${var.oc_binary} get serviceaccount cert-manager -n cert-manager 2>/dev/null; then
+          break
+        fi
+        echo "    ...waiting for cert-manager SA ($i/30)"
+        sleep 10
+      done
+
+      echo "==> Annotating cert-manager SA with Route 53 IAM role ARN..."
+      ${var.oc_binary} annotate serviceaccount cert-manager \
+        -n cert-manager \
+        eks.amazonaws.com/role-arn="${aws_iam_role.cert_manager.arn}" \
+        --overwrite
+
+      echo "==> Restarting cert-manager to pick up IRSA annotation..."
+      ${var.oc_binary} rollout restart -n cert-manager deployment/cert-manager 2>/dev/null || \
+        echo "    Note: cert-manager deployment not yet ready; the operator will reconcile."
+
       echo "==> Waiting for NFD CRDs (NodeFeatureDiscovery)..."
       for i in $(seq 1 60); do
         if ${var.oc_binary} get crd nodefeaturediscoveries.nfd.openshift.io 2>/dev/null | grep -q nodefeaturediscoveries; then
@@ -288,23 +381,21 @@ resource "null_resource" "gitops_bootstrap" {
         sleep 10
       done
 
-      echo "==> Creating Route 53 credentials Secret in cert-manager namespace..."
-      ${var.oc_binary} create secret generic route53-credentials \
-        --namespace=cert-manager \
-        --from-literal=access-key-id='${aws_iam_access_key.cert_manager.id}' \
-        --from-literal=secret-access-key='${aws_iam_access_key.cert_manager.secret}' \
-        --dry-run=client -o yaml | ${var.oc_binary} apply -f -
-
       echo "==> Creating coder namespace if missing..."
       ${var.oc_binary} create namespace coder --dry-run=client -o yaml | ${var.oc_binary} apply -f -
 
-      echo "==> Creating Bedrock credentials Secret in coder namespace (AI Gateway picks these up via ambient AWS env vars)..."
-      ${var.oc_binary} create secret generic bedrock-credentials \
-        --namespace=coder \
-        --from-literal=aws-access-key-id='${aws_iam_access_key.coder_bedrock.id}' \
-        --from-literal=aws-secret-access-key='${aws_iam_access_key.coder_bedrock.secret}' \
-        --from-literal=aws-region='${var.aws_region}' \
-        --dry-run=client -o yaml | ${var.oc_binary} apply -f -
+      echo "==> Pre-creating coder ServiceAccount with Bedrock IAM role annotation..."
+      cat <<SA_EOF | ${var.oc_binary} apply -f -
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: coder
+        namespace: coder
+        annotations:
+          eks.amazonaws.com/role-arn: "${aws_iam_role.coder_bedrock.arn}"
+      SA_EOF
+
+      # ── RHAIIS pull secret ────────────────────────────────────────
 
       echo "==> Creating ocp-ai namespace if missing..."
       ${var.oc_binary} create namespace ocp-ai --dry-run=client -o yaml | ${var.oc_binary} apply -f -
@@ -314,6 +405,8 @@ resource "null_resource" "gitops_bootstrap" {
         --namespace=ocp-ai \
         --from-file=.dockerconfigjson=${pathexpand(var.pull_secret_path)} \
         --dry-run=client -o yaml | ${var.oc_binary} apply -f -
+
+      # ── Argo CD root Application ──────────────────────────────────
 
       echo "==> Bootstrapping Argo CD root Application (app-of-apps)..."
       ${var.oc_binary} apply -f ${path.module}/../gitops/bootstrap/root-app.yaml
