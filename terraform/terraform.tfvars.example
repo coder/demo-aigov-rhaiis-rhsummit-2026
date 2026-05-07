@@ -8,7 +8,7 @@
 # VPC is BYO and created in <region>{a,b,c}; if you change region, change
 # the prereqs/terraform.tfvars region to match.
 aws_region   = "us-east-1"
-aws_profile  = null            # null = default credential chain
+aws_profile  = "aws-rh-openshift-demo-env"   # cluster account
 owner_email  = "austen@coder.com"
 
 ###############################################################################
@@ -16,7 +16,7 @@ owner_email  = "austen@coder.com"
 ###############################################################################
 
 cluster_name             = "cluster"
-base_domain              = "rh.coderdemo.io"   # YOUR public Route 53 zone
+base_domain              = "rhsummit.coderdemo.io"   # YOUR public Route 53 zone
 openshift_version        = "stable-4.21"
 openshift_install_binary = "openshift-install" # path to 4.21+ binary
 oc_binary                = "oc"

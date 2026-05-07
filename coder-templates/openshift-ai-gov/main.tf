@@ -225,13 +225,27 @@ resource "kubernetes_pod" "main" {
   }
 
   spec {
-    restart_policy = "Always"
+    restart_policy       = "Always"
+    service_account_name = "coder-workspace"
 
     container {
       name              = "dev"
       image             = "${var.image_registry}/${data.coder_parameter.image.value}"
       image_pull_policy = "Always"
       command           = ["sh", "-c", coder_agent.main.init_script]
+
+      security_context {
+        run_as_non_root            = true
+        run_as_user                = 1000
+        allow_privilege_escalation = false
+        capabilities {
+          add  = ["NET_ADMIN"]
+          drop = ["ALL"]
+        }
+        seccomp_profile {
+          type = "RuntimeDefault"
+        }
+      }
 
       env {
         name  = "CODER_AGENT_TOKEN"

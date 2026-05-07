@@ -1,0 +1,13 @@
+# Namespace for Coder workspace pods.
+#
+# The workspace template (coder-templates/openshift-ai-gov/main.tf) deploys
+# pods into this namespace. Created here via GitOps so it exists before any
+# template push or workspace creation.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coder-workspaces
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo
+  annotations:
+    description: "Coder workspace pods land here."

@@ -61,6 +61,10 @@ spec:
       # drivers are running.
       nodeSelector:
         nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: vllm
           # CUDA-enabled RHAIIS image. `latest` per RH Summit 2026 demo

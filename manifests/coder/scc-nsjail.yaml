@@ -1,0 +1,75 @@
+# Custom SCC for Coder workspace pods running Agent Firewall (nsjail).
+#
+# nsjail requires CAP_NET_ADMIN to create network namespaces for process
+# isolation. This SCC extends restricted-v2 with only that one capability.
+#
+# Bound to the `coder-workspace` ServiceAccount in the `coder-workspaces`
+# namespace via the ClusterRoleBinding below.
+---
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: coder-workspace-nsjail
+  annotations:
+    description: "restricted-v2 + NET_ADMIN for Agent Firewall nsjail"
+# Start from restricted-v2 defaults
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegeEscalation: false
+allowPrivilegedContainer: false
+allowedCapabilities:
+  - NET_ADMIN
+defaultAddCapabilities: []
+requiredDropCapabilities:
+  - ALL
+fsGroup:
+  type: MustRunAs
+runAsUser:
+  type: MustRunAsRange
+seLinuxContext:
+  type: MustRunAs
+seccompProfiles:
+  - runtime/default
+supplementalGroups:
+  type: RunAsAny
+volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - ephemeral
+  - persistentVolumeClaim
+  - projected
+  - secret
+priority: 10
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coder-workspace
+  namespace: coder-workspaces
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: coder-workspace-nsjail-scc
+rules:
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["coder-workspace-nsjail"]
+    verbs: ["use"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: coder-workspace-nsjail-scc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: coder-workspace-nsjail-scc
+subjects:
+  - kind: ServiceAccount
+    name: coder-workspace
+    namespace: coder-workspaces

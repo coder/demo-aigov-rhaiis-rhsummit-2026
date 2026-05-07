@@ -194,7 +194,8 @@ resource "null_resource" "openshift_install" {
     command = <<-EOT
       set -euo pipefail
       echo "Running openshift-install create cluster (this takes 30–45 min)..."
-      ${var.openshift_install_binary} create cluster \
+      # RH docs: installer waits up to 30m API + 30m bootstrap + 30m init + 10m console.
+      timeout 3600 ${var.openshift_install_binary} create cluster \
         --dir="${var.install_dir}" \
         --log-level=info
     EOT

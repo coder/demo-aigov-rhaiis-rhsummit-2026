@@ -1,14 +1,14 @@
 # Copy to terraform.tfvars and fill in.
 
 aws_region   = "us-east-1"
-aws_profile  = null            # null = default credential chain
+aws_profile  = "aws-rh-openshift-demo-env"   # cluster/sandbox account
 owner_email  = "austen@coder.com"
 
 cluster_name = "cluster"   # MUST match cluster TF
 
 # Route 53
 manage_hosted_zone = true
-base_domain        = "rh.coderdemo.io"   # YOUR public domain
+base_domain        = "rhsummit.coderdemo.io"   # child zone in sandbox account
 
 # IAM
 create_installer_iam = true

@@ -48,10 +48,9 @@ allowlist:
   - "domain=ghcr.io"
   - "domain=*.ghcr.io"
 
-# nsjail uses Linux network namespaces; requires CAP_NET_ADMIN on the pod
-# (configurable via OCP SCC). Strong bypass resistance.
-# Switch to landjail only if you're on a kernel ≥ 6.7 (RHEL 9 / OCP 4.21
-# nodes are 5.14 — landjail will fail at runtime).
+# nsjail uses Linux network namespaces for process isolation. Requires
+# CAP_NET_ADMIN on the workspace pod — granted via the custom SCC
+# `coder-workspace-nsjail` (see manifests/coder/scc-nsjail.yaml).
 jail_type: nsjail
 
 log_dir: /tmp/boundary_logs

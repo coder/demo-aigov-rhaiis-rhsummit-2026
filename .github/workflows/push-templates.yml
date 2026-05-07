@@ -51,9 +51,10 @@ jobs:
           cd coder-templates/${{ matrix.template }}
           coder templates push ${{ matrix.template }} \
             --directory . \
+            --create \
             --variable namespace="$NAMESPACE" \
             --variable image_registry="$IMAGE_REGISTRY" \
-            --variable ai_gateway_url="$AI_GATEWAY_URL" \
+            --variable ai_gateway_url="${AI_GATEWAY_URL:-http://coder.coder.svc.cluster.local:7080/v1}" \
             --yes \
             --message "GH Actions push from ${{ github.sha }}"
 
