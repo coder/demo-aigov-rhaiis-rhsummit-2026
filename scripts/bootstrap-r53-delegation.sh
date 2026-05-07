@@ -13,10 +13,10 @@
 # Usage:
 #   ./bootstrap-r53-delegation.sh \
 #     --child-zone rhsummit.coderdemo.io \
-#     --child-profile sandbox \
+#     --child-profile ocp-deploy \
 #     [--parent-zone coderdemo.io] \
-#     [--parent-profile parent]    # if omitted: prints the JSON change-batch
-#                                  # for whoever owns the parent zone to run
+#     [--parent-profile r53-parent]    # if omitted: prints the JSON change-batch
+#                                      # for whoever owns the parent zone to run
 #
 # Behavior:
 #   1. Look up or create the child hosted zone in --child-profile's account.
@@ -65,7 +65,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$CHILD_PROFILE" ]]; then
-  echo "ERROR: --child-profile is required (the AWS profile for the child/sandbox account)." >&2
+  echo "ERROR: --child-profile is required (the AWS profile for the child/OCP deployment account)." >&2
   exit 1
 fi
 

@@ -292,7 +292,7 @@ get_usage_igws() {
 # Conservative: total NAT GWs (≥ max per AZ). Quota dimension is per-AZ;
 # if you have 1 NAT GW per AZ across 3 AZs, the per-AZ usage is 1.
 # Reporting total here over-states usage in the worst case but is
-# correct for the most common single-cluster sandbox.
+# correct for the most common single-cluster deployment account.
 get_usage_nat_per_az() {
   local subs az_counts max
   subs=$(aws_ec2 describe-nat-gateways \

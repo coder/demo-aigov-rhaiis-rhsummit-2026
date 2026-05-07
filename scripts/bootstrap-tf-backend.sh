@@ -15,7 +15,7 @@
 #       * pay-per-request billing
 #
 # After running, terraform/backend.tf and terraform/prereqs/backend.tf can
-# `terraform init` against these resources and any teammate with sandbox
+# `terraform init` against these resources and any teammate with ocp-deploy
 # SSO access can plan/apply from their own laptop. DynamoDB lock prevents
 # concurrent applies stepping on each other.
 #
@@ -23,7 +23,7 @@
 #   source .env && scripts/bootstrap-tf-backend.sh
 #
 # Or:
-#   scripts/bootstrap-tf-backend.sh --aws-profile sandbox --aws-region us-east-1
+#   scripts/bootstrap-tf-backend.sh --aws-profile ocp-deploy --aws-region us-east-1
 #
 # Flags (env-var fallbacks in parens):
 #   --aws-profile NAME    AWS CLI profile (env AWS_PROFILE)

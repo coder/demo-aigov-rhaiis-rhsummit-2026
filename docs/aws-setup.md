@@ -7,10 +7,10 @@ You're configuring **two** AWS profiles on this machine:
 
 | Profile | What it owns | What you'll do with it |
 |---|---|---|
-| **`sandbox`** (Account B) | The demo cluster (compute, networking, IAM users, child Route 53 zone) | `terraform apply` for the cluster + every script in `scripts/` |
-| **`parent`** (Account A) | The parent Route 53 zone `coderdemo.io` | Add **one** NS record to delegate `rhsummit.coderdemo.io` to the sandbox account. After this is done, the parent profile isn't needed again. |
+| **`ocp-deploy`** (Account B) | The demo cluster (compute, networking, IAM users, child Route 53 zone) | `terraform apply` for the cluster + every script in `scripts/` |
+| **`r53-parent`** (Account A) | The parent Route 53 zone `coderdemo.io` | Add **one** NS record to delegate `rhsummit.coderdemo.io` to the ocp-deploy account. After this is done, the r53-parent profile isn't needed again. |
 
-If you don't have direct access to Account A, you can skip the parent profile — `scripts/bootstrap-r53-delegation.sh` will emit a JSON change-batch you hand to whoever does (e.g., Greg).
+If you don't have direct access to Account A, you can skip the r53-parent profile — `scripts/bootstrap-r53-delegation.sh` will emit a JSON change-batch you hand to whoever does (e.g., Greg).
 
 ---
 
@@ -48,24 +48,24 @@ brew install terraform   # or: brew install opentofu
 
 ---
 
-## 1. Configure Account B (sandbox) — the cluster lives here
+## 1. Configure Account B (ocp-deploy) — the cluster lives here
 
 ### 1a. Pick your auth path
 
-There are three common ways orgs hand out AWS access. Pick the one your sandbox uses:
+There are three common ways orgs hand out AWS access. Pick the one your account uses:
 
 | Auth model | Looks like | Setup command |
 |---|---|---|
-| **AWS IAM Identity Center (SSO)** | Browser login flow, short-lived creds rotated automatically | `aws configure sso --profile sandbox` |
-| **Static IAM user access keys** | You have an `AKIA...` access key + secret | `aws configure --profile sandbox` |
-| **Assume role from a base account** | You have a base profile and assume into the sandbox via STS | Edit `~/.aws/config` directly with `role_arn` + `source_profile` |
+| **AWS IAM Identity Center (SSO)** | Browser login flow, short-lived creds rotated automatically | `aws configure sso --profile ocp-deploy` |
+| **Static IAM user access keys** | You have an `AKIA...` access key + secret | `aws configure --profile ocp-deploy` |
+| **Assume role from a base account** | You have a base profile and assume into the target via STS | Edit `~/.aws/config` directly with `role_arn` + `source_profile` |
 
 If your org uses Identity Center, **prefer that path** — short-lived creds, no key rotation, no static secrets on disk.
 
 ### 1b. SSO path (recommended if available)
 
 ```bash
-aws configure sso --profile sandbox
+aws configure sso --profile ocp-deploy
 # Prompts:
 #   SSO session name (Recommended): coder-sso
 #   SSO start URL:                  https://<your-org>.awsapps.com/start
@@ -77,13 +77,13 @@ aws configure sso --profile sandbox
 After it opens the browser and you approve, the profile is registered. To refresh creds when they expire (default 8 hours):
 
 ```bash
-aws sso login --profile sandbox
+aws sso login --profile ocp-deploy
 ```
 
 ### 1c. Static-key path
 
 ```bash
-aws configure --profile sandbox
+aws configure --profile ocp-deploy
 # Prompts:
 #   AWS Access Key ID:     AKIA...
 #   AWS Secret Access Key: ...
@@ -98,7 +98,7 @@ This writes `~/.aws/credentials` and `~/.aws/config`. Static keys never rotate t
 Edit `~/.aws/config` directly:
 
 ```ini
-[profile sandbox]
+[profile ocp-deploy]
 role_arn       = arn:aws:iam::<SANDBOX_ACCOUNT_ID>:role/<ROLE_NAME>
 source_profile = base
 region         = us-east-1
@@ -116,12 +116,12 @@ Or set `aws_access_key_id`/`aws_secret_access_key` on the `base` profile if you 
 ### 1e. Verify
 
 ```bash
-aws --profile sandbox sts get-caller-identity
+aws --profile ocp-deploy sts get-caller-identity
 # Expect a clean JSON with Account = <SANDBOX_ACCOUNT_ID>, plus your principal.
 ```
 
 If you see `Unable to locate credentials` → step 1b/1c didn't write the profile.
-If you see `An error occurred (ExpiredToken)` → run `aws sso login --profile sandbox`.
+If you see `An error occurred (ExpiredToken)` → run `aws sso login --profile ocp-deploy`.
 If you see a different account ID → you're talking to the wrong account; double-check the role/account in your SSO config.
 
 ---
@@ -132,16 +132,16 @@ OpenShift IPI needs a long list of permissions across EC2, IAM, Route 53, ELB, S
 
 ### 2a. Easy path — `AdministratorAccess`
 
-If the sandbox is genuinely a sandbox (no other workloads, you're the sole user), grant your principal the AWS-managed `AdministratorAccess` policy. That's what `terraform/prereqs/main.tf` would have created for the optional `ocp-installer-<cluster_name>` IAM user (`var.create_installer_iam = true`).
+If the account is genuinely dedicated (no other workloads, you're the sole user), grant your principal the AWS-managed `AdministratorAccess` policy. That's what `terraform/prereqs/main.tf` would have created for the optional `ocp-installer-<cluster_name>` IAM user (`var.create_installer_iam = true`).
 
-For SSO-managed accounts, this is a permission set assignment in Identity Center — your IAM admin attaches the `AdministratorAccess` permission set to your group on the sandbox account.
+For SSO-managed accounts, this is a permission set assignment in Identity Center — your IAM admin attaches the `AdministratorAccess` permission set to your group on the ocp-deploy account.
 
 ### 2b. Scoped path — IPI installer policy
 
 Red Hat publishes a scoped IAM policy for the installer at:
 <https://docs.redhat.com/en/documentation/openshift_container_platform/4.21/html/installing_on_aws/installation-config-aws#installation-aws-permissions-iam-roles_installing-aws-account>
 
-The list is long (~60 statements across `ec2:*Vpc*`, `ec2:*Subnet*`, `iam:CreateRole`, `route53:*`, `s3:*`, `elasticloadbalancing:*`, plus quota read perms). It's the right answer for a shared / production AWS account — overkill for a real sandbox.
+The list is long (~60 statements across `ec2:*Vpc*`, `ec2:*Subnet*`, `iam:CreateRole`, `route53:*`, `s3:*`, `elasticloadbalancing:*`, plus quota read perms). It's the right answer for a shared / production AWS account — overkill for a dedicated demo account.
 
 ### 2c. Quota requests need an extra permission either way
 
@@ -169,11 +169,11 @@ For `scripts/aws-quota-bootstrap.sh request` and `terraform/prereqs/main.tf`'s o
 ```bash
 # These are the calls TF and the scripts make most often. If any fail with
 # AccessDenied, your principal is missing perms.
-aws --profile sandbox ec2 describe-vpcs                                     --region us-east-1 --max-items 1
-aws --profile sandbox iam list-users                                        --max-items 1
-aws --profile sandbox route53 list-hosted-zones                             --max-items 1
-aws --profile sandbox service-quotas get-service-quota                      --service-code ec2 --quota-code L-1216C47A
-aws --profile sandbox bedrock list-foundation-models                        --region us-east-1 --max-items 1
+aws --profile ocp-deploy ec2 describe-vpcs                                     --region us-east-1 --max-items 1
+aws --profile ocp-deploy iam list-users                                        --max-items 1
+aws --profile ocp-deploy route53 list-hosted-zones                             --max-items 1
+aws --profile ocp-deploy service-quotas get-service-quota                      --service-code ec2 --quota-code L-1216C47A
+aws --profile ocp-deploy bedrock list-foundation-models                        --region us-east-1 --max-items 1
 ```
 
 The Bedrock call confirms you have model-access read. If `bedrock` itself isn't enabled on the account, that's a separate one-time activation in the AWS console for the region — see [the Bedrock setup section](aws-creds.md#aws-bedrock-model-access--one-time-manual-human) of `docs/aws-creds.md`.
@@ -186,10 +186,10 @@ Skip this section if Greg / whoever owns `coderdemo.io` will apply the change-ba
 
 ### 3a. Configure the profile
 
-Same auth options as Account B (`aws configure sso --profile parent`, or `aws configure --profile parent`). Use whatever auth your CS account hands out.
+Same auth options as Account B (`aws configure sso --profile r53-parent`, or `aws configure --profile r53-parent`). Use whatever auth your CS account hands out.
 
 ```bash
-aws --profile parent sts get-caller-identity
+aws --profile r53-parent sts get-caller-identity
 # Expect Account = <PARENT_ACCOUNT_ID>
 ```
 
@@ -221,14 +221,14 @@ Tiny scope — only Route 53 changes on the parent zone:
 }
 ```
 
-Replace `<PARENT_ZONE_ID>` with the hosted-zone ID of `coderdemo.io` (find it via `aws --profile parent route53 list-hosted-zones-by-name --dns-name coderdemo.io. --query 'HostedZones[0].Id' --output text`).
+Replace `<PARENT_ZONE_ID>` with the hosted-zone ID of `coderdemo.io` (find it via `aws --profile r53-parent route53 list-hosted-zones-by-name --dns-name coderdemo.io. --query 'HostedZones[0].Id' --output text`).
 
 `AdministratorAccess` works too if Account A is freely editable for you — but for the parent zone you almost certainly want the minimum scope above.
 
 ### 3c. Smoke test
 
 ```bash
-aws --profile parent route53 list-hosted-zones-by-name \
+aws --profile r53-parent route53 list-hosted-zones-by-name \
   --dns-name coderdemo.io. \
   --query 'HostedZones[?Name==`coderdemo.io.`].{Id:Id, Records:ResourceRecordSetCount}' \
   --output table
@@ -247,11 +247,11 @@ cd ~/code/coder/demo-aigov-rhaiis-rhsummit-2026
 cp .env.example .env
 
 # Edit .env:
-#   AWS_PROFILE_SANDBOX="sandbox"     ← whatever you named it in step 1
-#   AWS_PROFILE_PARENT="parent"       ← or "" if you skipped Account A
+#   AWS_PROFILE_OCP_DEPLOY="ocp-deploy"     ← whatever you named it in step 1
+#   AWS_PROFILE_R53_PARENT="r53-parent"       ← or "" if you skipped Account A
 ```
 
-Then `source .env` in your shell before running TF or any of the scripts. Every script in `scripts/` honors these env vars; Terraform picks up `AWS_PROFILE` (which `.env` sets to `AWS_PROFILE_SANDBOX`).
+Then `source .env` in your shell before running TF or any of the scripts. Every script in `scripts/` honors these env vars; Terraform picks up `AWS_PROFILE` (which `.env` sets to `AWS_PROFILE_OCP_DEPLOY`).
 
 ---
 
@@ -264,7 +264,7 @@ source .env
 scripts/verify-aws-access.sh
 ```
 
-Expected output is all-green for the sandbox profile and either all-green or `(skipped)` for the parent profile depending on whether you set `AWS_PROFILE_PARENT`.
+Expected output is all-green for the ocp-deploy profile and either all-green or `(skipped)` for the r53-parent profile depending on whether you set `AWS_PROFILE_R53_PARENT`.
 
 ---
 
@@ -273,7 +273,7 @@ Expected output is all-green for the sandbox profile and either all-green or `(s
 Once both profiles verify cleanly:
 
 1. **R53 cross-account delegation** — `scripts/bootstrap-r53-delegation.sh` (one-time, ~2 min)
-2. **Service quotas** — `scripts/aws-quota-bootstrap.sh check` then `... request` if anything is short. **Run this at least a week before the booth** if your sandbox is new — GPU vCPU (`L-DB2E81BA`) approval is case-based, not auto.
+2. **Service quotas** — `scripts/aws-quota-bootstrap.sh check` then `... request` if anything is short. **Run this at least a week before the booth** if your account is new — GPU vCPU (`L-DB2E81BA`) approval is case-based, not auto.
 3. **Bedrock first-invoke + Anthropic use-case form** — AWS retired per-model approval in late 2025. Open the URL printed by `terraform output -raw bedrock_model_catalog_url`, click into Claude Sonnet 4, fill the one-page use-case form if prompted (first-time Anthropic-on-Bedrock users only). Or smoke-test directly with `aws bedrock-runtime invoke-model`.
 4. **Account-level prereqs** — `cd terraform/prereqs && terraform apply`. With `manage_hosted_zone = false` (default in `.env`), this only creates the optional installer IAM user.
 5. **Cluster install** — `cd terraform && terraform apply`. ~60 minutes; see the [startup-time table](../README.md#startup-time-cold-start-to-first-usable-workspace) in the main README.
@@ -285,12 +285,12 @@ Once both profiles verify cleanly:
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `Unable to locate credentials` from any `aws` command | Profile not set, or shell didn't pick up `.env` | Re-run `source .env`; verify `echo $AWS_PROFILE` is the right name |
-| `ExpiredToken` after a few hours | SSO creds expired | `aws sso login --profile sandbox` (and `parent` if you have one) |
+| `ExpiredToken` after a few hours | SSO creds expired | `aws sso login --profile ocp-deploy` (and `parent` if you have one) |
 | `AccessDenied` on `iam:CreateUser` from `terraform apply` | Sandbox principal missing IAM perms | Need at least IAM user/policy/key creation — see §2a/§2b |
 | `AccessDenied` on `support:CreateCase` from `aws-quota-bootstrap.sh request` | Quota increase fell through to a support case but principal lacks `support:*` | Add `support:*` to your scoped policy or use `AdministratorAccess` |
 | `bedrock list-foundation-models` returns empty / 404 | Bedrock not enabled for this region on the account | One-time enable in the AWS console; see [`docs/aws-creds.md`](aws-creds.md) |
 | `aws configure sso` step prompts for a different region than expected | Identity Center home region ≠ workload region | The SSO region is where Identity Center lives (often `us-east-1`); the *default region* it asks for next is where you'll deploy (also `us-east-1` for this demo) |
 | `terraform apply` fails with `cluster: cluster name length should not exceed ... characters` | `cluster_name + base_domain` is too long | Shorten one of them; OCP IPI has a strict combined limit |
-| Terraform sees stale state after a session rotation | Old SSO token still cached | `aws sso logout` then `aws sso login --profile sandbox` |
+| Terraform sees stale state after a session rotation | Old SSO token still cached | `aws sso logout` then `aws sso login --profile ocp-deploy` |
 
 If you get stuck on a step, [`docs/aws-creds.md`](aws-creds.md) explains *why* each cred exists; this doc is the *how*.

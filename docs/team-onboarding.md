@@ -13,7 +13,7 @@ This is the demo build environment for **Red Hat Summit + AnsibleFest 2026** (At
 | Access | How to get it |
 |---|---|
 | Coder Identity Center login (the awsapps.com SSO portal) | You probably already have this. If `aws configure sso` doesn't recognize you in step 2, ping `#it` to be added. |
-| Sandbox AWS account (`342934376218`) `AWSAdministratorAccess` permission set | Comes with the SSO entitlement above. Verify with `aws --profile sandbox sts get-caller-identity` after step 2. |
+| OpenShift Deployment AWS account (`342934376218`) `AWSAdministratorAccess` permission set | Comes with the SSO entitlement above. Verify with `aws --profile ocp-deploy sts get-caller-identity` after step 2. |
 | GitHub access to `coder/demo-aigov-rhaiis-rhsummit-2026` | Push access on `coder/*` repos. If you can already PR into `coder/coder`, you're set. |
 | Red Hat partner pull-secret | Download from <https://console.redhat.com/openshift/install/pull-secret>. Tied to your personal RH account; everyone on the team needs their own download. |
 | SSH keypair on your laptop | `~/.ssh/id_ed25519.pub` or similar. `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""` if missing. |
@@ -57,19 +57,19 @@ git clone git@github.com:coder/demo-sbom-verifier.git ~/code/coder/demo-sbom-ver
 
 ---
 
-## 2. AWS profiles (sandbox + parent)
+## 2. AWS profiles (ocp-deploy + r53-parent)
 
 Configure the same SSO profiles Austen uses. The exact SSO start URL is `https://d-9066325a54.awsapps.com/start/` — this is Coder's Identity Center.
 
 ```bash
-aws configure sso --profile sandbox
+aws configure sso --profile ocp-deploy
 # Prompts:
 #   SSO session name:         rh-account
 #   SSO start URL:            https://d-9066325a54.awsapps.com/start/
 #   SSO region:               us-east-1
 #   SSO registration scopes:  sso:account:access  (default — accept)
 # Browser opens. Approve.
-# Account list appears — pick the sandbox account (342934376218).
+# Account list appears — pick the ocp-deploy account (342934376218).
 # Role:                       AWSAdministratorAccess
 # Default region:             us-east-1
 # Output:                     json
@@ -83,11 +83,11 @@ aws configure sso --profile parent
 Verify:
 
 ```bash
-aws --profile sandbox sts get-caller-identity
+aws --profile ocp-deploy sts get-caller-identity
 # Account: 342934376218
 ```
 
-When your token expires (8h default), `aws sso login --profile sandbox` refreshes it. No need to re-run `aws configure sso`.
+When your token expires (8h default), `aws sso login --profile ocp-deploy` refreshes it. No need to re-run `aws configure sso`.
 
 ---
 
@@ -96,8 +96,8 @@ When your token expires (8h default), `aws sso login --profile sandbox` refreshe
 ```bash
 cp .env.example .env
 # Edit .env:
-#   AWS_PROFILE_SANDBOX="sandbox"
-#   AWS_PROFILE_PARENT="parent"   # or "" if you skipped it in §2
+#   AWS_PROFILE_OCP_DEPLOY="ocp-deploy"
+#   AWS_PROFILE_R53_PARENT="parent"   # or "" if you skipped it in §2
 #   TF_VAR_pull_secret_path="$HOME/.openshift/pull-secret.json"
 #   TF_VAR_ssh_pubkey_path="$HOME/.ssh/id_ed25519.pub"
 #   (the rest can stay at the locked-architecture defaults)
@@ -129,13 +129,13 @@ Expected: green checks for both profiles, with `bedrock:ListFoundationModels` as
 scripts/aws-quota-bootstrap.sh check
 ```
 
-Expected: all `OK` rows. The locked architecture needs 64 std vCPU + 8 GPU vCPU; the sandbox has 640 / 768.
+Expected: all `OK` rows. The locked architecture needs 64 std vCPU + 8 GPU vCPU; the account has 640 / 768.
 
 ---
 
 ## 5. Initialize Terraform (uses shared S3 remote state)
 
-The demo's Terraform state lives in **S3 + DynamoDB locking** in the sandbox account. Anyone with sandbox SSO can plan/apply from their own laptop. The DynamoDB lock prevents two people running `terraform apply` at the same time.
+The demo's Terraform state lives in **S3 + DynamoDB locking** in the ocp-deploy account. Anyone with ocp-deploy SSO can plan/apply from their own laptop. The DynamoDB lock prevents two people running `terraform apply` at the same time.
 
 ```bash
 cd terraform/prereqs && terraform init && cd -
@@ -147,7 +147,7 @@ That's it — the backend is already configured in `backend.tf` files in both di
 Verify state is shared:
 
 ```bash
-aws --profile sandbox s3 ls s3://tfstate-coder-demo-aigov-rhsummit-2026-342934376218/ --recursive
+aws --profile ocp-deploy s3 ls s3://tfstate-coder-demo-aigov-rhsummit-2026-342934376218/ --recursive
 # You should see prereqs/terraform.tfstate (13K-ish, applied by Austen)
 # and cluster/terraform.tfstate once the cluster install lands.
 ```
@@ -221,7 +221,7 @@ git status
 git push
 
 # Confirm state is unlocked
-aws --profile sandbox dynamodb scan --table-name tfstate-coder-demo-aigov-rhsummit-2026-tflock
+aws --profile ocp-deploy dynamodb scan --table-name tfstate-coder-demo-aigov-rhsummit-2026-tflock
 # (no items = unlocked)
 
 # Drop a Slack message: "Cluster's still up at https://coder.apps.cluster.rhsummit.coderdemo.io
@@ -234,7 +234,7 @@ aws --profile sandbox dynamodb scan --table-name tfstate-coder-demo-aigov-rhsumm
 
 | Symptom | Where to look |
 |---|---|
-| AWS auth errors (`ExpiredToken`, `Unable to locate credentials`) | `aws sso login --profile sandbox` to refresh; verify with `aws --profile sandbox sts get-caller-identity` |
+| AWS auth errors (`ExpiredToken`, `Unable to locate credentials`) | `aws sso login --profile ocp-deploy` to refresh; verify with `aws --profile ocp-deploy sts get-caller-identity` |
 | `terraform apply` fails on cluster install | `./.cluster/.openshift_install.log` — the most useful log; usually shows whether it's a quota issue, IAM perm, or AWS timeout |
 | OCP cluster up but Argo apps red | `oc get applications -n openshift-gitops` then `oc describe application <name>` — usually a CRD-not-yet-installed retry that will resolve on its own in a few minutes |
 | RHAIIS pod won't schedule | `oc describe pod -n ocp-ai vllm-...` — most likely the GPU node isn't yet labeled `nvidia.com/gpu.present=true` (NVIDIA driver still compiling, ~3–5 min after first boot) |

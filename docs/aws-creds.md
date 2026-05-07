@@ -19,8 +19,8 @@ GitHub Actions has **no AWS creds** after the GHCR migration. CI pushes use `GIT
 
 | Cred | Source | Consumed by | Scope |
 |---|---|---|---|
-| **Sandbox profile** in `~/.aws/credentials` (or `AWS_PROFILE_SANDBOX` in `.env`) | You — pre-existing in your shell | `terraform apply` (AWS provider + `ccoctl` + `openshift-install`); every `aws` CLI call in `scripts/*` | Account-admin in the sandbox AWS account — effectively required for OCP IPI |
-| **Parent profile** (optional) | You — separate `~/.aws/credentials` profile in the parent account | `scripts/bootstrap-r53-delegation.sh --parent-profile` only | `route53:ChangeResourceRecordSets` on the parent (`coderdemo.io`) hosted zone. |
+| **OpenShift Deployment profile** in `~/.aws/credentials` (or `AWS_PROFILE_OCP_DEPLOY` in `.env`) | You — pre-existing in your shell | `terraform apply` (AWS provider + `ccoctl` + `openshift-install`); every `aws` CLI call in `scripts/*` | Account-admin in the OCP deployment AWS account — effectively required for OCP IPI |
+| **R53 Parent profile** (optional) | You — separate `~/.aws/credentials` profile in the parent account | `scripts/bootstrap-r53-delegation.sh --parent-profile` only | `route53:ChangeResourceRecordSets` on the parent (`coderdemo.io`) hosted zone. |
 | **GitHub PAT** (`gh auth login`) | You | `gh repo create`, `gh secret set`, repo workflows | Repo-scoped for `coder/*`. Not AWS. |
 
 ---
@@ -95,7 +95,7 @@ After the first successful invocation, the `coder-bedrock` IAM role (assumed via
 - **IAM roles** (workload): managed by Terraform. `terraform destroy` deletes them.
 - **OIDC provider + platform roles**: managed by `ccoctl`. The Terraform destroy provisioner runs `ccoctl aws delete` to clean them up.
 - **No credential rotation needed.** STS tokens auto-expire (1 hour) and are refreshed by the AWS SDK and the projected token volume.
-- **Sandbox profile rotation** is on you / your AWS Org policy.
+- **OCP deploy profile rotation** is on you / your AWS Org policy.
 
 ---
 
@@ -103,7 +103,7 @@ After the first successful invocation, the `coder-bedrock` IAM role (assumed via
 
 | Where | What | Sensitivity |
 |---|---|---|
-| `~/.aws/credentials` | Sandbox + parent profile (yours) | High — your laptop |
+| `~/.aws/credentials` | OCP deploy + R53 parent profile (yours) | High — your laptop |
 | `terraform/.terraform.tfstate` | IAM role ARNs, OIDC provider ARN (no secrets) | Low |
 | `${install_dir}/auth/kubeconfig` | Cluster kubeadmin kubeconfig | High |
 | `${install_dir}/auth/kubeadmin-password` | Initial kubeadmin password | High |
@@ -116,7 +116,7 @@ After the first successful invocation, the `coder-bedrock` IAM role (assumed via
 
 | Question | Answer |
 |---|---|
-| Who needs AWS creds to run `terraform apply`? | You — sandbox profile, account-admin level. |
+| Who needs AWS creds to run `terraform apply`? | You — ocp-deploy profile, account-admin level. |
 | Who needs AWS creds in GitHub Actions? | Nobody. GHCR uses `GITHUB_TOKEN`. |
 | What can the cert-manager role do? | Edit Route 53 records in the cluster's `base_domain` zone. Nothing else. |
 | What can the coder-bedrock role do? | Invoke Bedrock models (any). Nothing else. |

@@ -3,33 +3,33 @@
 # verify-aws-access.sh
 #
 # Sanity-check the two AWS profiles this demo expects:
-#   AWS_PROFILE_SANDBOX   — Account B (cluster lives here)
-#   AWS_PROFILE_PARENT    — Account A (parent R53 zone). Optional.
+#   AWS_PROFILE_OCP_DEPLOY — Account B (cluster lives here)
+#   AWS_PROFILE_R53_PARENT — Account A (parent R53 zone). Optional.
 #
 # Runs sts:GetCallerIdentity + a couple of representative API calls per
 # profile to confirm the principal has the perms the demo actually uses.
 # Reports a green/red checklist and exits non-zero if anything's missing.
 #
 # Usage:
-#   source .env             # sets AWS_PROFILE_SANDBOX / AWS_PROFILE_PARENT
+#   source .env             # sets AWS_PROFILE_OCP_DEPLOY / AWS_PROFILE_R53_PARENT
 #   scripts/verify-aws-access.sh
 #
 # Or pass profiles inline:
-#   scripts/verify-aws-access.sh --sandbox myprofile [--parent otherprofile]
+#   scripts/verify-aws-access.sh --ocp-deploy myprofile [--r53-parent otherprofile]
 #
 # Requires: aws CLI v2.
 
 set -uo pipefail
 
-SANDBOX="${AWS_PROFILE_SANDBOX:-}"
-PARENT="${AWS_PROFILE_PARENT:-}"
+SANDBOX="${AWS_PROFILE_OCP_DEPLOY:-}"
+PARENT="${AWS_PROFILE_R53_PARENT:-}"
 REGION="${AWS_REGION:-us-east-1}"
 PARENT_ZONE="${PARENT_ZONE:-coderdemo.io}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --sandbox) SANDBOX="$2"; shift 2 ;;
-    --parent)  PARENT="$2";  shift 2 ;;
+    --ocp-deploy) SANDBOX="$2"; shift 2 ;;
+    --r53-parent) PARENT="$2";  shift 2 ;;
     --region)  REGION="$2";  shift 2 ;;
     -h|--help)
       sed -n '2,/^$/p' "$0" | sed 's/^# \?//'; exit 0 ;;
@@ -41,8 +41,8 @@ command -v aws >/dev/null \
   || { echo "ERROR: aws CLI not on PATH." >&2; exit 1; }
 
 if [[ -z "$SANDBOX" ]]; then
-  echo "ERROR: AWS_PROFILE_SANDBOX is not set (and --sandbox flag not provided)." >&2
-  echo "       Either source .env or pass --sandbox <profile-name>." >&2
+  echo "ERROR: AWS_PROFILE_OCP_DEPLOY is not set (and --ocp-deploy flag not provided)." >&2
+  echo "       Either source .env or pass --ocp-deploy <profile-name>." >&2
   exit 1
 fi
 
@@ -94,7 +94,7 @@ skip() {
 # Sandbox profile
 ###############################################################################
 
-printf '\n=== Sandbox profile (%s) — region %s ===\n\n' "$SANDBOX" "$REGION"
+printf '\n=== OpenShift Deployment profile (%s) — region %s ===\n\n' "$SANDBOX" "$REGION"
 
 if ! aws --profile "$SANDBOX" sts get-caller-identity >/dev/null 2>&1; then
   echo "  $(printf '%b' "$FAIL") sts:GetCallerIdentity — profile not configured or creds expired"
@@ -139,10 +139,10 @@ soft_check "bedrock:ListFoundationModels" \
 # Parent profile (optional)
 ###############################################################################
 
-printf '\n=== Parent profile (%s) ===\n\n' "${PARENT:-<not set>}"
+printf '\n=== R53 Parent profile (%s) ===\n\n' "${PARENT:-<not set>}"
 
 if [[ -z "$PARENT" ]]; then
-  skip "Parent profile checks" "AWS_PROFILE_PARENT not set — handoff mode (bootstrap-r53-delegation.sh will emit JSON)"
+  skip "R53 Parent profile checks" "AWS_PROFILE_R53_PARENT not set — handoff mode (bootstrap-r53-delegation.sh will emit JSON)"
 else
   if ! aws --profile "$PARENT" sts get-caller-identity >/dev/null 2>&1; then
     printf "  %b sts:GetCallerIdentity — profile not configured or creds expired\n" "$FAIL"
@@ -195,7 +195,7 @@ if (( FAIL_COUNT == 0 )); then
 else
   printf "%b  %d check(s) failed (%d skipped, %d soft-warning).\n" \
     "$FAIL" "$FAIL_COUNT" "$SKIP_COUNT" "$WARN_COUNT"
-  echo "    See docs/aws-setup.md §2 (sandbox perms) or §3b (parent perms)."
+  echo "    See docs/aws-setup.md §2 (ocp-deploy perms) or §3b (r53-parent perms)."
   echo "    docs/aws-creds.md explains *why* each permission is needed."
   exit 3
 fi

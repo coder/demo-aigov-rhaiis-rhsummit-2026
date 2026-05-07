@@ -216,7 +216,7 @@ For a 5-week prep+booth window:
 - 50 hr/wk schedule (Mon–Fri 9–5 with destroy/rebuild lifecycle): **~$912 total**
 - Always-up: ~$3,045 total
 
-> **GPU vCPU is a separate AWS quota.** New accounts often start at 0 in `Running On-Demand G and VT instances vCPU` (quota code `L-DB2E81BA`). File the increase request at least a week before booth — case-based approval, not auto. `scripts/aws-quota-bootstrap.sh` files and tracks it for you. (Note: in our existing sandbox this quota was already 768 vCPU, no request needed.)
+> **GPU vCPU is a separate AWS quota.** New accounts often start at 0 in `Running On-Demand G and VT instances vCPU` (quota code `L-DB2E81BA`). File the increase request at least a week before booth — case-based approval, not auto. `scripts/aws-quota-bootstrap.sh` files and tracks it for you. (Note: in our existing ocp-deploy account this quota was already 768 vCPU, no request needed.)
 
 ### Lifecycle: declarative tear-down / rebuild, never `ec2 stop`
 

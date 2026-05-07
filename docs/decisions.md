@@ -133,9 +133,9 @@ If you change a decision, update this file in the same PR.
 
 ## 9. Cross-account R53 delegation (not single-account everything)
 
-**Picked:** Parent zone `coderdemo.io` lives in a CS-owned AWS account. Child zone `rhsummit.coderdemo.io` lives in the demo sandbox account. Account A delegates the child to Account B's awsdns nameservers via a single NS record. Pure DNS — no IAM cross-account roles.
+**Picked:** Parent zone `coderdemo.io` lives in a CS-owned AWS account. Child zone `rhsummit.coderdemo.io` lives in the demo ocp-deploy account. Account A delegates the child to Account B's awsdns nameservers via a single NS record. Pure DNS — no IAM cross-account roles.
 
-**Considered:** Move the parent zone into the sandbox account (would have required IT to migrate domain ownership), or run the entire demo in the CS account (mixes demo cluster lifecycle with shared account state).
+**Considered:** Move the parent zone into the ocp-deploy account (would have required IT to migrate domain ownership), or run the entire demo in the CS account (mixes demo cluster lifecycle with shared account state).
 
 **Why:** Cleanest separation. Sandbox is throwaway, parent zone is shared infra. Delegation is one NS record on the parent's side; no IAM trust to maintain.
 
@@ -217,7 +217,7 @@ If you change a decision, update this file in the same PR.
 - Local state (start-of-project default) — doesn't scale to a 3-person team
 - Terraform Cloud — extra account, extra friction for a short-lived demo
 
-**Why:** Standard pattern. Shared TF state means any teammate with sandbox SSO can plan/apply from their own laptop. DynamoDB lock prevents concurrent applies stepping on each other. Bucket has versioning + AES256 + public-access fully blocked.
+**Why:** Standard pattern. Shared TF state means any teammate with ocp-deploy SSO can plan/apply from their own laptop. DynamoDB lock prevents concurrent applies stepping on each other. Bucket has versioning + AES256 + public-access fully blocked.
 
 **Tradeoffs:** $0 cost (DynamoDB pay-per-request, S3 GB-cents). `terraform destroy` on the prereqs/ won't auto-clean the bucket — that needs a separate cleanup script post-event.
 

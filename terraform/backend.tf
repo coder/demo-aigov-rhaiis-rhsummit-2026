@@ -1,9 +1,9 @@
 # Terraform remote state for the cluster TF.
 #
-# State + locking live in the demo's sandbox AWS account
+# State + locking live in the demo's ocp-deploy AWS account
 # (342934376218). The S3 bucket and DynamoDB lock table are created by
 # scripts/bootstrap-tf-backend.sh — run that ONCE per account before any
-# `terraform init` here. After that, every teammate with sandbox SSO
+# `terraform init` here. After that, every teammate with ocp-deploy SSO
 # access can plan/apply/destroy from their own laptop; the DynamoDB
 # lock prevents concurrent applies stepping on each other.
 #
