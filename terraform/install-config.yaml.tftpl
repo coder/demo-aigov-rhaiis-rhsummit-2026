@@ -39,10 +39,10 @@ compute:
 # nodeSelector + nvidia.com/gpu resource request guarantee it lands here.
 # Pinned to one AZ because g5 capacity is unevenly distributed and we want
 # predictable launch behavior at booth time.
+%{ if gpu_count > 0 ~}
 - hyperthreading: Enabled
   name: gpu
   replicas: ${gpu_count}
-%{ if gpu_count > 0 ~}
   platform:
     aws:
       type: ${gpu_instance_type}

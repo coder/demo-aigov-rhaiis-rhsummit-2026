@@ -30,14 +30,14 @@ spec:
   source:
     repoURL: https://helm.coder.com/v2
     chart: coder
-    targetRevision: 2.33.0-rc.3       # latest tagged RC (commit 3362b5ae, Apr 22 2026)
+    targetRevision: 2.33.1       # latest tagged RC (commit 3e34ba7, May 6 2026)
     helm:
       releaseName: coder
       values: |
         coder:
           image:
             repo: ghcr.io/coder/coder
-            tag: v2.33.0-rc.3          # match chart targetRevision
+            tag: v2.33.1          # match chart targetRevision
             pullPolicy: IfNotPresent
 
           env:
