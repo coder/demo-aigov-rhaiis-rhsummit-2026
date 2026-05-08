@@ -1,5 +1,22 @@
 name: Push templates to Coder
 
+# Pushes Coder workspace templates to the cluster's Coder server via
+# `coder templates push`. Authenticates with a long-lived API token
+# stored as the CODER_SESSION_TOKEN secret (see
+# CODER_MAX_ADMIN_TOKEN_LIFETIME=8760h in
+# gitops/apps/coder/application.yaml).
+#
+# Templates currently pushed:
+#  - openshift-ai-gov            — original demo template, custom Dockerfile
+#  - ai-dev-ocp                  — UBI9 enterprise-node base + Claude/Codex/Gemini/Kiro
+#  - agents-dev-ocp              — UBI9 + Coder Agents Early Access
+#  - demo-ai-gov-firewall-ocp    — UBI9 + agent boundary firewall (NET_ADMIN)
+#  - demo-ai-gov-no-firewall-ocp — UBI9, same demo flow but no boundary
+#
+# Each template gets its variable list passed explicitly — different
+# templates declare different variables; passing an undeclared variable
+# fails the push.
+
 on:
   push:
     branches: [main]
@@ -9,29 +26,51 @@ on:
   workflow_dispatch:
     inputs:
       template:
-        description: "Template directory under coder-templates/ to push (e.g., openshift-ai-gov)"
+        description: "Template directory to push (or 'all')"
         required: true
-        default: "openshift-ai-gov"
+        default: "all"
+        type: choice
+        options:
+          - all
+          - openshift-ai-gov
+          - ai-dev-ocp
+          - agents-dev-ocp
+          - demo-ai-gov-firewall-ocp
+          - demo-ai-gov-no-firewall-ocp
 
 permissions:
   contents: read
 
+env:
+  IMAGE_REGISTRY: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026
+  WORKSPACE_NAMESPACE: coder-workspaces
+  CODER_VERSION: 2.33.0-rc.3
+
 jobs:
   push:
-    name: coder templates push
+    name: coder templates push (${{ matrix.template }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        template: ${{ fromJSON(inputs.template && format('["{0}"]', inputs.template) || '["openshift-ai-gov"]') }}
-
+        template:
+          - openshift-ai-gov
+          - ai-dev-ocp
+          - agents-dev-ocp
+          - demo-ai-gov-firewall-ocp
+          - demo-ai-gov-no-firewall-ocp
+    # workflow_dispatch: filter to selected template (or run all).
+    # push: matrix runs all; coder CLI is fast enough that re-pushing
+    # unchanged templates is cheap. If we want change-aware push later,
+    # add a discover job similar to the GitLab CI we cribbed from.
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.template == 'all' || inputs.template == matrix.template }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install coder CLI
         run: |
-          curl -L https://coder.com/install.sh | sh -s -- --version 2.33.0-rc.3
+          curl -L https://coder.com/install.sh | sh -s -- --version "${CODER_VERSION}"
           coder --version
 
       - name: coder login
@@ -44,21 +83,52 @@ jobs:
 
       - name: coder templates push
         env:
-          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY || 'ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026' }}
           AI_GATEWAY_URL: ${{ secrets.AI_GATEWAY_URL }}
-          NAMESPACE: ${{ vars.WORKSPACE_NAMESPACE || 'coder-workspaces' }}
         run: |
-          cd coder-templates/${{ matrix.template }}
-          coder templates push ${{ matrix.template }} \
+          set -euo pipefail
+          cd "coder-templates/${{ matrix.template }}"
+
+          # Per-template variable list. Keep this in sync with the
+          # `variable "..."` blocks in each main.tf. The original
+          # openshift-ai-gov template takes ai_gateway_url; the -ocp
+          # templates construct AI Bridge URLs from
+          # data.coder_workspace.me.access_url and don't need it.
+          case "${{ matrix.template }}" in
+            openshift-ai-gov)
+              EXTRA_VARS=( --variable "ai_gateway_url=${AI_GATEWAY_URL}" )
+              ;;
+            *)
+              EXTRA_VARS=()
+              ;;
+          esac
+
+          coder templates push "${{ matrix.template }}" \
             --directory . \
-            --variable namespace="$NAMESPACE" \
-            --variable image_registry="$IMAGE_REGISTRY" \
-            --variable ai_gateway_url="$AI_GATEWAY_URL" \
+            --variable "namespace=${WORKSPACE_NAMESPACE}" \
+            --variable "image_registry=${IMAGE_REGISTRY}" \
+            "${EXTRA_VARS[@]}" \
             --yes \
             --message "GH Actions push from ${{ github.sha }}"
 
+          # Apply template metadata (icon, display name) post-push.
+          # The chart image doesn't have jq, but we already have it
+          # available here on the GH runner.
+          if [ -f metadata.json ]; then
+            ICON=$(jq -r '.icon // empty' metadata.json)
+            DISPLAY=$(jq -r '.display_name // empty' metadata.json)
+            EDIT_ARGS=()
+            [ -n "$ICON" ] && EDIT_ARGS+=( --icon "$ICON" )
+            [ -n "$DISPLAY" ] && EDIT_ARGS+=( --display-name "$DISPLAY" )
+            if [ ${#EDIT_ARGS[@]} -gt 0 ]; then
+              coder templates edit "${{ matrix.template }}" "${EDIT_ARGS[@]}" --yes
+            fi
+          fi
+
       - name: Summary
         run: |
-          echo "## Pushed template" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ matrix.template }}\` → ${{ secrets.CODER_URL }}/templates" >> $GITHUB_STEP_SUMMARY
-          echo "- Source commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Pushed template"
+            echo ""
+            echo "- \`${{ matrix.template }}\` → ${{ secrets.CODER_URL }}/templates"
+            echo "- Source commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

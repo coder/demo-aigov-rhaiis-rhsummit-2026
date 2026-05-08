@@ -1,18 +1,47 @@
 name: Build + push workspace images
 
+# Two image lineages live under coder-templates/:
+#
+#  1. Per-template images at coder-templates/<template>/images/Dockerfile.
+#     The original openshift-ai-gov template ships its own image this way.
+#
+#  2. Shared images at coder-templates/images/<image>/Dockerfile.
+#     The 4 -ocp templates (ai-dev-ocp, agents-dev-ocp,
+#     demo-ai-gov-firewall-ocp, demo-ai-gov-no-firewall-ocp) all FROM the
+#     `enterprise-node` shared image, which itself FROM `workspace-base`.
+#     Both shared images are UBI9.
+#
+# This workflow has two jobs:
+#
+#  - build-shared:    builds workspace-base and enterprise-node in order
+#                     (the latter FROM the former). Triggered by changes
+#                     under coder-templates/images/**.
+#
+#  - build-template:  builds per-template images. Triggered by changes
+#                     under coder-templates/<template>/Dockerfile or
+#                     coder-templates/<template>/images/**.
+#
+# Tag scheme (both jobs): `:latest` and `:$sha`.
+
 on:
   push:
     branches: [main]
     paths:
       - "coder-templates/**/Dockerfile"
       - "coder-templates/**/images/**"
+      - "coder-templates/images/**"
       - ".github/workflows/build-images.yml"
   workflow_dispatch:
     inputs:
-      template:
-        description: "Template directory to build (e.g., openshift-ai-gov)"
+      target:
+        description: "What to build: shared, openshift-ai-gov, or all"
         required: true
-        default: "openshift-ai-gov"
+        default: "all"
+        type: choice
+        options:
+          - all
+          - shared
+          - openshift-ai-gov
 
 permissions:
   contents: read
@@ -22,13 +51,77 @@ env:
   IMAGE_REGISTRY: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026
 
 jobs:
-  build:
-    name: Build + push to GHCR
+  # Shared images: workspace-base, then enterprise-node FROM it.
+  # Sequential within a single job — the second build needs the first
+  # tag pushed and resolvable at FROM-time.
+  build-shared:
+    name: Shared images (UBI9)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        template: ${{ fromJSON(inputs.template && format('["{0}"]', inputs.template) || '["openshift-ai-gov"]') }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'shared' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build + push workspace-base
+        uses: docker/build-push-action@v6
+        with:
+          context: coder-templates/images/workspace-base
+          file: coder-templates/images/workspace-base/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/workspace-base:latest
+            ${{ env.IMAGE_REGISTRY }}/workspace-base:${{ github.sha }}
+          cache-from: type=gha,scope=workspace-base
+          cache-to: type=gha,scope=workspace-base,mode=max
+
+      - name: Build + push enterprise-node (FROM workspace-base)
+        uses: docker/build-push-action@v6
+        with:
+          context: coder-templates/images/enterprise-node
+          file: coder-templates/images/enterprise-node/Dockerfile
+          platforms: linux/amd64
+          push: true
+          # Pin enterprise-node's FROM to the just-pushed sha so we
+          # always layer on a known-good base, not a moving :latest.
+          build-args: |
+            WORKSPACE_BASE=${{ env.IMAGE_REGISTRY }}/workspace-base:${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/enterprise-node:latest
+            ${{ env.IMAGE_REGISTRY }}/enterprise-node:${{ github.sha }}
+          cache-from: type=gha,scope=enterprise-node
+          cache-to: type=gha,scope=enterprise-node,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "## Shared images pushed"
+            echo ""
+            echo "- \`${{ env.IMAGE_REGISTRY }}/workspace-base:latest\` (also \`:${{ github.sha }}\`)"
+            echo "- \`${{ env.IMAGE_REGISTRY }}/enterprise-node:latest\` (also \`:${{ github.sha }}\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Per-template images. Currently just openshift-ai-gov; matrix is
+  # extensible — add an entry per template that ships its own
+  # images/Dockerfile.
+  build-template:
+    name: Per-template image (${{ matrix.template }})
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'openshift-ai-gov' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [openshift-ai-gov]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,12 +146,14 @@ jobs:
           tags: |
             ${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:latest
             ${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.template }}
+          cache-to: type=gha,scope=${{ matrix.template }},mode=max
 
       - name: Summary
         run: |
-          echo "## Pushed image" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Pushed image"
+            echo ""
+            echo "- \`${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:latest\`"
+            echo "- \`${{ env.IMAGE_REGISTRY }}/${{ matrix.template }}-base:${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
