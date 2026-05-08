@@ -25,9 +25,30 @@ spec:
   dnsNames:
     - "*.apps.cluster.rhsummit.coderdemo.io"
 ---
-# Patch the default IngressController to use the Let's Encrypt wildcard
-# instead of the self-signed cert. After this, console, oauth, argocd UI,
-# and any Route without its own cert get a trusted cert automatically.
+# Patch the default IngressController.
+#
+# Two distinct things are set here:
+#   1. defaultCertificate — point at the Let's Encrypt wildcard above
+#      so console, oauth, argocd UI, and any Route without its own
+#      cert get a trusted cert automatically (instead of the
+#      self-signed default).
+#   2. routeAdmission.wildcardPolicy: WildcardsAllowed — required
+#      for Coder workspace subdomain Routes
+#      (`*.coder.apps.<fqdn>`). OCP defaults to WildcardsDisallowed.
+#
+# Both fields live in this one manifest, owned by the `cert-manager`
+# Argo app. A previous version had the wildcardPolicy in
+# `manifests/coder/ingress-wildcard-policy.yaml` (managed by the
+# `coder-routing` Argo app). Two Argo apps applying SSA to the same
+# IngressController triggered Argo's SharedResourceWarning and a
+# reconcile flap: each app's apply briefly cleared the OTHER app's
+# fields, leaving spec.defaultCertificate empty long enough for the
+# ingress-operator to schedule a new router pod expecting the OCP
+# auto-managed `router-certs-default` Secret (which doesn't exist
+# on this cluster), failing readiness, and rolling back. Symptoms:
+# transient `MountVolume.SetUp failed for volume default-certificate:
+# secret router-certs-default not found` events on intermittent
+# router-default pods.
 apiVersion: operator.openshift.io/v1
 kind: IngressController
 metadata:
@@ -40,6 +61,8 @@ metadata:
 spec:
   defaultCertificate:
     name: apps-wildcard-cert
+  routeAdmission:
+    wildcardPolicy: WildcardsAllowed
 ---
 # API server certificate (api.<cluster_fqdn>).
 #
