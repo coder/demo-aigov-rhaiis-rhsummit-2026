@@ -41,6 +41,7 @@ resource "aws_iam_role" "cert_manager" {
       Condition = {
         StringEquals = {
           "${local.oidc_provider_url}:sub" = "system:serviceaccount:cert-manager:cert-manager"
+          "${local.oidc_provider_url}:aud" = "sts.amazonaws.com"
         }
       }
     }]
@@ -73,6 +74,7 @@ resource "aws_iam_role" "coder_bedrock" {
       Condition = {
         StringEquals = {
           "${local.oidc_provider_url}:sub" = "system:serviceaccount:coder:coder-server"
+          "${local.oidc_provider_url}:aud" = "sts.amazonaws.com"
         }
       }
     }]
