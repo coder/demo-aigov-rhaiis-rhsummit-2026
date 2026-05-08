@@ -213,7 +213,10 @@ spec:
             # coder-observability namespace's
             # openshift.io/sa.scc.uid-range (1000800000/10000). The
             # SCC mutating admission accepts an explicit UID inside
-            # the range.
+            # the range. The chart has BOTH a podSecurityContext AND a
+            # container-level securityContext (chart default
+            # runAsUser: 65534 for the latter) — both need the
+            # in-range value.
             alertmanager:
               podSecurityContext:
                 runAsNonRoot: true
@@ -222,6 +225,10 @@ spec:
                 fsGroup: 1000800000
                 seccompProfile:
                   type: RuntimeDefault
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000800000
+                runAsGroup: 1000800000
 
             # kube-state-metrics has the same schema constraint.
             kube-state-metrics:
@@ -260,6 +267,28 @@ spec:
                 tag: 1.6.23-alpine
             memcachedExporter:
               enabled: false
+
+            # The umbrella chart's `loki:` block enables the bundled
+            # minio subchart as the S3 backend (loki-storage SS).
+            # minio's chart hardcodes runAsUser: 1000 / fsGroup: 1000
+            # (also schema-strict integer). Pin to the namespace's
+            # uid-range. Also trim its 16Gi memory request — way more
+            # than a demo with a single bucket needs and would block
+            # scheduling on a constrained 3-node converged cluster.
+            minio:
+              securityContext:
+                enabled: true
+                runAsUser: 1000800000
+                runAsGroup: 1000800000
+                fsGroup: 1000800000
+                fsGroupChangePolicy: OnRootMismatch
+              resources:
+                requests:
+                  memory: 1Gi
+                  cpu: 100m
+                limits:
+                  memory: 2Gi
+                  cpu: 500m
             # The loki SUBCHART has its own `loki:` block for the
             # Loki app's pod-level securityContext (chart default
             # 10001). Path: loki.loki.podSecurityContext.
