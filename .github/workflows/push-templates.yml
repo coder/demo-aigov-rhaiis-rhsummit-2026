@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       template:
-        description: "Template directory to push (or 'all')"
+        description: "Template to push, or 'all' for every template"
         required: true
         default: "all"
         type: choice
@@ -45,6 +45,7 @@ env:
   IMAGE_REGISTRY: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026
   WORKSPACE_NAMESPACE: coder-workspaces
   CODER_VERSION: 2.33.0-rc.3
+  ALL_TEMPLATES: '["openshift-ai-gov","ai-dev-ocp","agents-dev-ocp","demo-ai-gov-firewall-ocp","demo-ai-gov-no-firewall-ocp"]'
 
 jobs:
   push:
@@ -52,18 +53,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # On push: build the full list. On workflow_dispatch: respect the
+      # input — "all" expands to the full list, anything else is a
+      # single-template matrix. Same fromJSON trick the existing
+      # build-images.yml uses.
       matrix:
-        template:
-          - openshift-ai-gov
-          - ai-dev-ocp
-          - agents-dev-ocp
-          - demo-ai-gov-firewall-ocp
-          - demo-ai-gov-no-firewall-ocp
-    # workflow_dispatch: filter to selected template (or run all).
-    # push: matrix runs all; coder CLI is fast enough that re-pushing
-    # unchanged templates is cheap. If we want change-aware push later,
-    # add a discover job similar to the GitLab CI we cribbed from.
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.template == 'all' || inputs.template == matrix.template }}
+        template: ${{ fromJSON(inputs.template == '' || inputs.template == 'all' && env.ALL_TEMPLATES || format('["{0}"]', inputs.template)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
