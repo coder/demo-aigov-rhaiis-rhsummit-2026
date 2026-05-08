@@ -5,23 +5,18 @@ name: Build + push workspace images
 #  1. Per-template images at coder-templates/<template>/images/Dockerfile.
 #     The original openshift-ai-gov template ships its own image this way.
 #
-#  2. Shared images at coder-templates/images/<image>/Dockerfile.
+#  2. Shared UBI9 images at coder-templates/images/<image>/Dockerfile:
+#       - ubi9-base-workspace : UBI 9.7 base + dev tooling + dotfiles deps
+#       - ubi9-node-workspace : FROM ubi9-base-workspace, adds Node 22 LTS
+#
 #     The 4 -ocp templates (ai-dev-ocp, agents-dev-ocp,
-#     demo-ai-gov-firewall-ocp, demo-ai-gov-no-firewall-ocp) all FROM the
-#     `enterprise-node` shared image, which itself FROM `workspace-base`.
-#     Both shared images are UBI9.
+#     demo-ai-gov-firewall-ocp, demo-ai-gov-no-firewall-ocp) all FROM
+#     ubi9-node-workspace.
 #
-# This workflow has two jobs:
-#
-#  - build-shared:    builds workspace-base and enterprise-node in order
-#                     (the latter FROM the former). Triggered by changes
-#                     under coder-templates/images/**.
-#
-#  - build-template:  builds per-template images. Triggered by changes
-#                     under coder-templates/<template>/Dockerfile or
-#                     coder-templates/<template>/images/**.
-#
-# Tag scheme (both jobs): `:latest` and `:$sha`.
+# Tag scheme for shared images: every successful build pushes three tags:
+#   - <name>:<UBI9_VERSION>            (e.g. 9.7, moves to latest minor build)
+#   - <name>:<UBI9_VERSION>-<git-sha>  (immutable, pinable)
+#   - <name>:latest                    (alias)
 
 on:
   push:
@@ -49,13 +44,14 @@ permissions:
 
 env:
   IMAGE_REGISTRY: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026
+  UBI9_VERSION: "9.7"
 
 jobs:
-  # Shared images: workspace-base, then enterprise-node FROM it.
+  # Shared images: ubi9-base-workspace, then ubi9-node-workspace FROM it.
   # Sequential within a single job — the second build needs the first
   # tag pushed and resolvable at FROM-time.
   build-shared:
-    name: Shared images (UBI9)
+    name: Shared UBI9 images
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'shared' }}
     steps:
@@ -72,43 +68,45 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build + push workspace-base
+      - name: Build + push ubi9-base-workspace
         uses: docker/build-push-action@v6
         with:
-          context: coder-templates/images/workspace-base
-          file: coder-templates/images/workspace-base/Dockerfile
+          context: coder-templates/images/ubi9-base-workspace
+          file: coder-templates/images/ubi9-base-workspace/Dockerfile
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.IMAGE_REGISTRY }}/workspace-base:latest
-            ${{ env.IMAGE_REGISTRY }}/workspace-base:${{ github.sha }}
-          cache-from: type=gha,scope=workspace-base
-          cache-to: type=gha,scope=workspace-base,mode=max
+            ${{ env.IMAGE_REGISTRY }}/ubi9-base-workspace:latest
+            ${{ env.IMAGE_REGISTRY }}/ubi9-base-workspace:${{ env.UBI9_VERSION }}
+            ${{ env.IMAGE_REGISTRY }}/ubi9-base-workspace:${{ env.UBI9_VERSION }}-${{ github.sha }}
+          cache-from: type=gha,scope=ubi9-base-workspace
+          cache-to: type=gha,scope=ubi9-base-workspace,mode=max
 
-      - name: Build + push enterprise-node (FROM workspace-base)
+      - name: Build + push ubi9-node-workspace (FROM ubi9-base-workspace)
         uses: docker/build-push-action@v6
         with:
-          context: coder-templates/images/enterprise-node
-          file: coder-templates/images/enterprise-node/Dockerfile
+          context: coder-templates/images/ubi9-node-workspace
+          file: coder-templates/images/ubi9-node-workspace/Dockerfile
           platforms: linux/amd64
           push: true
-          # Pin enterprise-node's FROM to the just-pushed sha so we
-          # always layer on a known-good base, not a moving :latest.
+          # Pin node-workspace's FROM to the just-pushed sha so we always
+          # layer on a known-good base, not a moving :latest.
           build-args: |
-            WORKSPACE_BASE=${{ env.IMAGE_REGISTRY }}/workspace-base:${{ github.sha }}
+            WORKSPACE_BASE=${{ env.IMAGE_REGISTRY }}/ubi9-base-workspace:${{ env.UBI9_VERSION }}-${{ github.sha }}
           tags: |
-            ${{ env.IMAGE_REGISTRY }}/enterprise-node:latest
-            ${{ env.IMAGE_REGISTRY }}/enterprise-node:${{ github.sha }}
-          cache-from: type=gha,scope=enterprise-node
-          cache-to: type=gha,scope=enterprise-node,mode=max
+            ${{ env.IMAGE_REGISTRY }}/ubi9-node-workspace:latest
+            ${{ env.IMAGE_REGISTRY }}/ubi9-node-workspace:${{ env.UBI9_VERSION }}
+            ${{ env.IMAGE_REGISTRY }}/ubi9-node-workspace:${{ env.UBI9_VERSION }}-${{ github.sha }}
+          cache-from: type=gha,scope=ubi9-node-workspace
+          cache-to: type=gha,scope=ubi9-node-workspace,mode=max
 
       - name: Summary
         run: |
           {
-            echo "## Shared images pushed"
+            echo "## Shared images pushed (UBI ${{ env.UBI9_VERSION }})"
             echo ""
-            echo "- \`${{ env.IMAGE_REGISTRY }}/workspace-base:latest\` (also \`:${{ github.sha }}\`)"
-            echo "- \`${{ env.IMAGE_REGISTRY }}/enterprise-node:latest\` (also \`:${{ github.sha }}\`)"
+            echo "- \`${{ env.IMAGE_REGISTRY }}/ubi9-base-workspace:latest\` (also \`:${{ env.UBI9_VERSION }}\`, \`:${{ env.UBI9_VERSION }}-${{ github.sha }}\`)"
+            echo "- \`${{ env.IMAGE_REGISTRY }}/ubi9-node-workspace:latest\` (also \`:${{ env.UBI9_VERSION }}\`, \`:${{ env.UBI9_VERSION }}-${{ github.sha }}\`)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Per-template images. Currently just openshift-ai-gov; matrix is

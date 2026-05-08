@@ -1,8 +1,8 @@
-# Workspace base image — UBI9 + dev tooling.
+# ubi9-base-workspace — UBI 9.7 + dev tooling for Coder workspaces on OCP.
 #
-# Used as the FROM for enterprise-node (the Node-flavored equivalent of
-# upstream `codercom/enterprise-node:ubuntu`). The 4 -ocp Coder templates
-# all consume enterprise-node, not this base directly.
+# Used as the FROM for ubi9-node-workspace (the Node-flavored sibling that
+# replaces upstream codercom/enterprise-node:ubuntu). The 4 -ocp Coder
+# templates all consume ubi9-node-workspace, not this base directly.
 #
 # OpenShift `restricted-v2` SCC compliance: at runtime OCP injects a random
 # UID from the namespace's `openshift.io/sa.scc.uid-range`. The image's
@@ -17,8 +17,14 @@
 # Pushed to GHCR by .github/workflows/build-images.yml on changes under
 # coder-templates/images/**/Dockerfile.
 #
-# Tag scheme: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/workspace-base:{latest,$sha}
-FROM registry.access.redhat.com/ubi9/ubi:latest
+# Tag scheme:
+#   ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/ubi9-base-workspace:9.7
+#   ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/ubi9-base-workspace:9.7-<sha>
+#   ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/ubi9-base-workspace:latest
+#
+# UBI minor pinned for reproducibility — bump when Red Hat ships a new
+# minor (currently RHEL 9.7).
+FROM registry.access.redhat.com/ubi9/ubi:9.7
 
 ARG USER=coder
 ARG UID=1001
@@ -74,13 +80,16 @@ RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 
-# 3) tmux — not in UBI9 baseos/appstream. EPEL 9's tmux depends on
-#    CRB (CodeReady Builder) which UBI9 doesn't ship, so EPEL's
-#    package can't install. Pull the Rocky Linux 9 AppStream RPM
-#    directly — same upstream RHEL 9 source, same ABI, no CRB
-#    needed.
+# 3) tmux — not in any UBI9 repo. UBI9 stripped tmux from the
+#    redistributable subset. EPEL 9 doesn't ship it either (only
+#    `tmux-powerline`). It IS in upstream RHEL 9's BaseOS, which
+#    Rocky Linux mirrors verbatim — pull the Rocky 9 BaseOS RPM
+#    directly. Same ABI, same source, no extra repo setup needed.
+#    (Verified path May 2026 against `dnf info tmux` on a real
+#    Rocky 9.7 container; bump the version when Rocky ships
+#    `tmux-3.5a` or later for el9.)
 RUN dnf install -y --nodocs \
-        https://download.rockylinux.org/pub/rocky/9/AppStream/x86_64/os/Packages/t/tmux-3.2a-5.el9.x86_64.rpm \
+        https://download.rockylinux.org/pub/rocky/9/BaseOS/x86_64/os/Packages/t/tmux-3.2a-5.el9.x86_64.rpm \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 

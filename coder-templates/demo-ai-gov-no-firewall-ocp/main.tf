@@ -522,7 +522,7 @@ resource "kubernetes_pod_v1" "workspace" {
   spec {
     container {
       name              = "dev"
-      image             = "${var.image_registry}/enterprise-node:latest"
+      image             = "${var.image_registry}/ubi9-node-workspace:latest"
       image_pull_policy = "Always"
       command           = ["/usr/local/bin/uid_entrypoint", "sh", "-c", coder_agent.main.init_script]
 

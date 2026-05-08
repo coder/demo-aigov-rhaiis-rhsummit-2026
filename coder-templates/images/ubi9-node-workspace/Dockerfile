@@ -1,19 +1,22 @@
-# enterprise-node — UBI9 equivalent of upstream `codercom/enterprise-node:ubuntu`.
+# ubi9-node-workspace — UBI 9.7 equivalent of `codercom/enterprise-node:ubuntu`.
 #
 # All 4 -ocp Coder templates (ai-dev-ocp, agents-dev-ocp,
 # demo-ai-gov-firewall-ocp, demo-ai-gov-no-firewall-ocp) FROM this image.
 # Source upstream that we're replacing:
-# https://hub.docker.com/r/codercom/enterprise-node — it's an Ubuntu-based
-# image with Node 22, npm, yarn, and Coder agent prereqs. We rebuild on UBI9
-# so the workspace runtime fits the rest of the demo's "RHEL inside
-# OpenShift" story.
+# https://hub.docker.com/r/codercom/enterprise-node — Ubuntu-based, with
+# Node 22, npm, yarn, Coder agent prereqs. We rebuild on UBI9 so the
+# workspace runtime fits the rest of the demo's "RHEL inside OpenShift"
+# story (and we control the security posture / SCC compliance).
 #
 # Pushed to GHCR by .github/workflows/build-images.yml on changes under
 # coder-templates/images/**/Dockerfile.
 #
-# Tag scheme: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/enterprise-node:{latest,$sha}
+# Tag scheme:
+#   ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/ubi9-node-workspace:9.7
+#   ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/ubi9-node-workspace:9.7-<sha>
+#   ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/ubi9-node-workspace:latest
 
-ARG WORKSPACE_BASE=ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/workspace-base:latest
+ARG WORKSPACE_BASE=ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/ubi9-base-workspace:latest
 FROM ${WORKSPACE_BASE}
 
 USER 0
