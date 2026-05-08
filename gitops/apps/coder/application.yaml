@@ -76,9 +76,15 @@ spec:
               value: "us-east-1"
             # ── GitHub OAuth SSO ────────────────────────────────────────
             - name: CODER_OAUTH2_GITHUB_CLIENT_ID
-              value: "Ov23liA7hex419EN5SRs"
+              valueFrom:
+                secretKeyRef:
+                  name: coder-github-oauth
+                  key: client-id
             - name: CODER_OAUTH2_GITHUB_CLIENT_SECRET
-              value: "b9bf8988bb1586087e0a1b81e1ebd6b5df07ed02"
+              valueFrom:
+                secretKeyRef:
+                  name: coder-github-oauth
+                  key: client-secret
             - name: CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS
               value: "true"
             - name: CODER_OAUTH2_GITHUB_ALLOWED_ORGS

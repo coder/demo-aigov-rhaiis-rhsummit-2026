@@ -417,6 +417,13 @@ resource "null_resource" "gitops_bootstrap" {
           eks.amazonaws.com/role-arn: "${aws_iam_role.coder_bedrock.arn}"
       SA_EOF
 
+      echo "==> Creating coder-github-oauth Secret..."
+      ${var.oc_binary} create secret generic coder-github-oauth \
+        --namespace=coder \
+        --from-literal=client-id="${var.github_oauth_client_id}" \
+        --from-literal=client-secret="${var.github_oauth_client_secret}" \
+        --dry-run=client -o yaml | ${var.oc_binary} apply -f -
+
       # ── RHAIIS pull secret ────────────────────────────────────────
 
       echo "==> Creating ocp-ai namespace if missing..."

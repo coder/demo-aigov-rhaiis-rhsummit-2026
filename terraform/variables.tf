@@ -148,3 +148,20 @@ variable "coder_oidc_provider_url" {
   type        = string
   default     = ""
 }
+
+###############################################################################
+# GitHub OAuth (for Coder SSO)
+###############################################################################
+
+variable "github_oauth_client_id" {
+  description = "GitHub OAuth App client ID for Coder SSO. Created at github.com/settings/developers."
+  type        = string
+  default     = ""
+}
+
+variable "github_oauth_client_secret" {
+  description = "GitHub OAuth App client secret for Coder SSO."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
