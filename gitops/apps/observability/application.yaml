@@ -107,16 +107,29 @@ spec:
               size: 5Gi
               # storageClass omitted → uses OCP default (gp3-csi on AWS IPI)
 
-            # OpenShift restricted-v2: nullify the chart's hardcoded
-            # 472 UID so SCC admission injects from the namespace
-            # uid-range.
+            # OpenShift restricted-v2 SCC compliance.
+            # The chart's init-chown-data init container references
+            # `.Values.securityContext.runAsUser` directly in its
+            # chown command, so we can't use the null-then-inject
+            # trick (it would render `chown :` and break the
+            # statefulset YAML). Pin to a UID inside the
+            # coder-observability namespace's
+            # openshift.io/sa.scc.uid-range (1000800000/10000); SCC
+            # admission accepts an explicit in-range UID.
+            #
+            # initChownData is also explicitly disabled below — OCP's
+            # CSI driver chgrps the PV at mount time using the SCC's
+            # fsGroup, so manual chown isn't needed.
             securityContext:
               runAsNonRoot: true
-              runAsUser: null
-              runAsGroup: null
-              fsGroup: null
+              runAsUser: 1000800000
+              runAsGroup: 1000800000
+              fsGroup: 1000800000
               seccompProfile:
                 type: RuntimeDefault
+
+            initChownData:
+              enabled: false
 
             # GitHub OAuth client ID / secret as env vars
             # (GF_AUTH_GITHUB_CLIENT_ID / _CLIENT_SECRET) — sealed
