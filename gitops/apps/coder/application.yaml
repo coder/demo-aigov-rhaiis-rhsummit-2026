@@ -49,6 +49,8 @@ spec:
               value: "https://coder.apps.cluster.rhsummit.coderdemo.io"   # update to your cluster_fqdn
             - name: CODER_WILDCARD_ACCESS_URL
               value: "*.coder.apps.cluster.rhsummit.coderdemo.io"
+            - name: CODER_CACHE_DIRECTORY
+              value: /tmp/coder
             - name: CODER_PG_CONNECTION_URL
               valueFrom:
                 secretKeyRef:
@@ -83,6 +85,28 @@ spec:
             name: coder-server
             workspacePerms: true
             enableDeployments: true
+
+          # OpenShift restricted-v2 SCC compliance (per docs.coder.com/install/openshift)
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: null
+            runAsGroup: null
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+
+          volumes:
+            - name: cache
+              emptyDir:
+                sizeLimit: 1Gi
+
+          volumeMounts:
+            - name: cache
+              mountPath: /tmp
+              readOnly: false
+
+          service:
+            type: ClusterIP
 
           resources:
             requests:
