@@ -30,6 +30,8 @@ If you change a decision, update this file in the same PR.
 
 **Picked:** 3 × m6i.4xlarge as control-plane AND workers (`compute.replicas: 0` in `install-config.yaml`) + 1 × g5.2xlarge GPU compute pool, always-on whenever the cluster is up.
 
+**Converged scheduler config (post-install):** `Scheduler/cluster` is patched with `spec.mastersSchedulable: true`, owned by `gitops/apps/cluster-config/`. Without that, masters keep the `node-role.kubernetes.io/master:NoSchedule` taint and only pods that explicitly tolerate it can land — defeating the converged shape. The masters are also given the `node-role.kubernetes.io/worker` label so they show up in `oc get nodes` as `control-plane,master,worker` (cosmetic + matches what node-selectors targeting `worker` expect). Setting `mastersSchedulable: true` is non-disruptive (no MCO-driven reboot); reverting it WOULD evict untolerated pods from masters, so don't flip back without intent.
+
 **Considered:**
 - 3 CP m6i.xlarge + 3 worker m6i.2xlarge (the original default)
 - 3 CP + 2 worker + 1 GPU

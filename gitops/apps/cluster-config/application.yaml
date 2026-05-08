@@ -1,0 +1,46 @@
+# Cluster-scoped configuration owned via GitOps.
+#
+# Today this is just the converged-cluster Scheduler patch
+# (`mastersSchedulable: true`). Future cluster-scoped IdP /
+# OAuth / cluster-network manifests can land in
+# `manifests/cluster-config/` alongside it.
+#
+# Sync wave -2 — runs before sealed-secrets (wave -1) and platform
+# apps (wave 0). The scheduler config affects where every other pod
+# can land, so it has to be in place first. (No reboot is triggered
+# by setting mastersSchedulable=true on a freshly-installed cluster
+# whose masters were never marked schedulable, but apply early
+# regardless.)
+#
+# Server-side apply is critical here: the Scheduler/cluster CR is a
+# singleton pre-created by the OpenShift installer. SSA lets Argo
+# claim only the fields it sets (spec.mastersSchedulable) without
+# fighting the installer over unrelated fields.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-config
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/cluster-config
+  destination:
+    server: https://kubernetes.default.svc
+    # Cluster-scoped resources don't have a namespace; this is just
+    # where Argo records the Application itself.
+    namespace: openshift-gitops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

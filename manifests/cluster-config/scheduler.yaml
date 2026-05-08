@@ -1,0 +1,30 @@
+# Cluster Scheduler — converged-cluster configuration.
+#
+# `mastersSchedulable: true` removes the
+# `node-role.kubernetes.io/master:NoSchedule` taint from the three
+# control-plane nodes. Combined with the install-config's
+# `compute.replicas: 0` (decision #2), this is what actually makes
+# the cluster a 3-node converged shape: control-plane and worker
+# workloads on the same nodes.
+#
+# Without this, masters carry the NoSchedule taint and only pods
+# with a matching toleration can land on them. Earlier app-level
+# tolerations (gitops/apps/coder/application.yaml,
+# gitops/apps/coder-provisioner/application.yaml) were a workaround
+# that's now unnecessary — leaving them in place as defense in
+# depth, in case this Scheduler config drifts.
+#
+# Switching this is non-disruptive: the MCO removes the master
+# taint without rebooting nodes. Reverting to false WOULD evict
+# untolerated pods from masters, so don't flip it back casually.
+#
+# This is a singleton CR pre-created by the OpenShift installer.
+# We claim the `spec.mastersSchedulable` field via Argo's
+# server-side apply; the installer keeps ownership of everything
+# else on this object.
+apiVersion: config.openshift.io/v1
+kind: Scheduler
+metadata:
+  name: cluster
+spec:
+  mastersSchedulable: true
