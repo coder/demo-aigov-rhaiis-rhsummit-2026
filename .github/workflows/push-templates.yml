@@ -45,7 +45,6 @@ env:
   IMAGE_REGISTRY: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026
   WORKSPACE_NAMESPACE: coder-workspaces
   CODER_VERSION: 2.33.0-rc.3
-  ALL_TEMPLATES: '["openshift-ai-gov","ai-dev-ocp","agents-dev-ocp","demo-ai-gov-firewall-ocp","demo-ai-gov-no-firewall-ocp"]'
 
 jobs:
   push:
@@ -53,12 +52,14 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # On push: build the full list. On workflow_dispatch: respect the
-      # input — "all" expands to the full list, anything else is a
-      # single-template matrix. Same fromJSON trick the existing
-      # build-images.yml uses.
+      # On push: matrix expands to the full template list (push events
+      # have no `inputs.*` so the first clause picks `all`-equivalent).
+      # On workflow_dispatch with "all": same.
+      # On workflow_dispatch with a specific template: 1-element matrix.
+      # `env.X` can't be referenced inside `strategy.matrix` per GH docs,
+      # so the JSON array is inlined.
       matrix:
-        template: ${{ fromJSON(inputs.template == '' || inputs.template == 'all' && env.ALL_TEMPLATES || format('["{0}"]', inputs.template)) }}
+        template: ${{ fromJSON((github.event_name == 'push' || inputs.template == 'all') && '["openshift-ai-gov","ai-dev-ocp","agents-dev-ocp","demo-ai-gov-firewall-ocp","demo-ai-gov-no-firewall-ocp"]' || format('["{0}"]', inputs.template)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
