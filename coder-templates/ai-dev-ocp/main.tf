@@ -82,11 +82,6 @@ data "coder_external_auth" "github" {
   optional = true
 }
 
-data "coder_external_auth" "gitlab" {
-  id       = "gitlab"
-  optional = true
-}
-
 # -----------------------------------------------------------------------------
 # Parameters — workspace sizing and optional features
 # -----------------------------------------------------------------------------
