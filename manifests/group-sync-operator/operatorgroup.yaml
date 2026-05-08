@@ -1,11 +1,18 @@
-# OperatorGroup for the group-sync-operator's namespace. The operator
-# runs cluster-scoped (it watches GitHub and reconciles
-# cluster-scoped Groups), so the OperatorGroup MUST omit
-# `spec.targetNamespaces` — that's how OLM signals "AllNamespaces"
-# install mode, which the group-sync-operator CSV requires.
+# OperatorGroup for the group-sync-operator's namespace.
+#
+# The CSV's spec.installModes only allows OwnNamespace and
+# SingleNamespace — NOT AllNamespaces. We use OwnNamespace by
+# pointing `targetNamespaces` at the operator's own namespace.
+# The operator still reconciles cluster-scoped OpenShift Groups
+# (the install mode controls only what the operator's controller
+# WATCHES — which for this operator is its own GroupSync CRs in
+# this namespace, plus the cluster-scoped Group resources it
+# manages globally).
 apiVersion: operators.coreos.com/v1
 kind: OperatorGroup
 metadata:
   name: group-sync-operator
   namespace: group-sync-operator
-spec: {}
+spec:
+  targetNamespaces:
+    - group-sync-operator
