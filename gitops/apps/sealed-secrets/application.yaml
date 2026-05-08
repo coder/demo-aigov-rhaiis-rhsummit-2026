@@ -57,6 +57,28 @@ spec:
           limits:
             cpu: 200m
             memory: 256Mi
+        # OpenShift restricted-v2 SCC compliance — same pattern as the
+        # `coder` Helm values. The chart's defaults (`fsGroup: 65534`,
+        # `runAsUser: 1001`) fall outside the per-namespace
+        # `openshift.io/sa.scc.uid-range` and are rejected by admission.
+        # Nullify them so the SCC mutating admission injects valid IDs
+        # from the namespace range. seccompProfile is required by
+        # restricted-v2.
+        securityContext:
+          runAsNonRoot: true
+          fsGroup: null
+          seccompProfile:
+            type: RuntimeDefault
+        containerSecurityContext:
+          runAsNonRoot: true
+          runAsUser: null
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+          seccompProfile:
+            type: RuntimeDefault
   destination:
     server: https://kubernetes.default.svc
     namespace: sealed-secrets
