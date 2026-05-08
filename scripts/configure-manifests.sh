@@ -99,3 +99,22 @@ sed -i "s|grafana\\.apps\\.[a-z0-9.-]*coderdemo\\.io|${GRAFANA_DOMAIN}|g" \
 echo ""
 echo "==> Done. Manifests configured for cluster: $CLUSTER_FQDN"
 echo "    Commit the changes and push to trigger Argo CD sync."
+
+# ── Apply root app ──────────────────────────────────────────────────────────
+# The root app is intentionally NOT applied by terraform. It's applied here
+# after manifests are configured so Argo CD never syncs stale/wrong values.
+
+KUBECONFIG="${TF_DIR}/.cluster/auth/kubeconfig"
+if [[ -f "$KUBECONFIG" ]]; then
+  echo ""
+  echo "==> Applying Argo CD root Application (app-of-apps)..."
+  export KUBECONFIG
+  oc apply -f "$REPO_ROOT/gitops/bootstrap/root-app.yaml"
+  echo "==> Root app applied. Watch sync with:"
+  echo "       oc get applications -n openshift-gitops -w"
+else
+  echo ""
+  echo "    NOTE: kubeconfig not found at $KUBECONFIG"
+  echo "    Apply the root app manually after committing:"
+  echo "       oc apply -f gitops/bootstrap/root-app.yaml"
+fi

@@ -449,11 +449,9 @@ resource "null_resource" "gitops_bootstrap" {
       echo "==> Granting cluster-admin to Argo CD application controller..."
       ${var.oc_binary} apply -f ${path.module}/../gitops/bootstrap/argocd-cluster-admin.yaml
 
-      echo "==> Bootstrapping Argo CD root Application (app-of-apps)..."
-      ${var.oc_binary} apply -f ${path.module}/../gitops/bootstrap/root-app.yaml
-
-      echo "==> GitOps bootstrap complete. Watch sync with:"
-      echo "       oc get applications -n openshift-gitops -w"
+      echo "==> GitOps bootstrap complete (root app NOT applied yet)."
+      echo "    Run ./scripts/configure-manifests.sh to patch manifests, then commit+push."
+      echo "    The script will apply the root app after manifests are configured."
     EOT
   }
 }
