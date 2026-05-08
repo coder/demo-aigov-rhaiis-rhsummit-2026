@@ -331,6 +331,57 @@ If you change a decision, update this file in the same PR.
 
 ---
 
+## 22. coder-observability translated from k3s ref to OpenShift (in-place fixes, not OpenShift Logging operator)
+
+**Picked:** Run the upstream `coder-observability` Helm chart (`helm.coder.com/observability`, v0.7.1) on OCP with values overrides for every OCP-specific incompatibility. Same story zambruhni-refs/k3s-infra deploys, adapted in `gitops/apps/observability/application.yaml`. Grafana served at `https://graf-coder.apps.cluster.rhsummit.coderdemo.io` via OCP Route + cert-manager Certificate, GitHub OAuth gated to `demo-rhsummit-users`, admin team mapped to Grafana Admin role.
+
+**Considered:**
+- **OpenShift Logging operator (Vector + LokiStack)** — the canonical RH way. Operator-managed install, signed SCCs, integrated with the cluster-monitoring stack. Right answer for production. Rejected for the demo because the chart we're reusing from k3s carries the Coder-specific dashboards, AI Bridge panels, agent-boundaries panels, and alert rules — re-implementing those on top of LokiStack would be a separate project.
+- **Skip log shipping** — keep just Grafana + Prometheus, drop Loki + grafana-agent. Smaller surface but the AI Gateway / AI Bridge dashboards lean on log queries to surface tool-call traces, so this would degrade the demo narrative.
+
+**Why:** Chart re-use is the dominant story — same dashboards, same alerts, same workflow as the existing K3s lab. Demo audience sees one stack across both clusters, with the only operational delta being "OCP needs these SCC overrides" — itself a useful talking point about restricted-v2.
+
+**Translation work (every override has a comment in `application.yaml`):**
+
+- **SCC compliance** — chart subcharts hardcode UIDs that violate the namespace's `openshift.io/sa.scc.uid-range` (1000800000/10000 for `coder-observability`). Overrides:
+  - `grafana.securityContext` — chart default UID 472 → pin to 1000800000 (chart's init-chown-data init container references runAsUser inline in its `chown` command, so null-then-inject would break the rendered StatefulSet).
+  - `grafana.initChownData.enabled: false` — OCP's CSI driver chgrps the PV at mount time using SCC-injected fsGroup, so manual chown is redundant. Avoids the init container entirely.
+  - `prometheus.server.securityContext` — chart default 65534 → null (schema permits null here).
+  - `prometheus.alertmanager.{podSecurityContext,securityContext}` — chart default 65534 → 1000800000 (schema strict-types as integer; null fails).
+  - `prometheus.kube-state-metrics.securityContext` — chart default 65534 → 1000800000 (same reason).
+  - `loki.loki.podSecurityContext` — chart default 10001 → null.
+  - `loki.gateway.podSecurityContext` — chart default 101 → null.
+  - `loki.minio.securityContext` — chart default 1000 → 1000800000 (same schema-strict-integer pattern as alertmanager).
+
+- **DNS resolver** — `loki.gateway` is nginx and embeds `<dnsService>.<dnsNamespace>.svc.cluster.local` from chart globals. Defaults are `kube-dns.kube-system` (k3s/vanilla k8s naming); OCP's CoreDNS Service is `dns-default.openshift-dns`. Override `loki.global.{dnsService,dnsNamespace}` so nginx resolves at boot.
+
+- **Image registries** — Docker Hub anonymous rate-limit catches three subcharts on a fresh-cluster sync:
+  - `loki.memcached.image.repository: mirror.gcr.io/library/memcached` (was `docker.io/library/memcached`).
+  - `loki.memcachedExporter.enabled: false` — `prom/memcached-exporter` has no published mirror; we lose memcached-self metrics, cache function still works.
+  - `sqlExporter.enabled: false` — `burningalchemist/sql_exporter` is DH-only. Disabling drops Coder-specific Postgres SQL business metrics; control-plane Prometheus metrics still come from Coder pods directly via `prometheus.io/scrape`.
+
+- **Postgres exporter** — `global.postgres.exporter.enabled: false`. Chart wants a `secret-postgres` Secret with `PGUSER`/`PGPASSWORD`/etc. CNPG's auto-generated `coder-app` Secret uses different keys (`uri`, `host`, `port`, `dbname`, `user`, `password`, `jdbc-uri`). Wiring a translation Secret/Job is follow-up work; for the booth Prom + Loki + Grafana dashboards work without postgres metrics.
+
+- **MinIO memory request** — `loki.minio.resources.requests.memory: 1Gi` (was 16Gi chart default). 16Gi is sized for a production object-store replica; one demo bucket with no real data load doesn't need it, and the request would block scheduling on the converged 3-node cluster.
+
+- **OCP node-exporter collision** — `prometheus.prometheus-node-exporter.enabled: false` because OCP ships its own as part of the cluster-monitoring stack on port 9100.
+
+- **grafana-agent SCC binding** — the agent DaemonSet ships node + container logs to Loki via hostPath mounts (`/var/log`, `/var/lib/docker/containers`). `restricted-v2` blocks hostPath. `manifests/observability/grafana-agent-scc.yaml` binds the agent's SA to the `hostmount-anyuid` SCC — narrower than `privileged`, the OCP-standard for log/metric shippers. Production should switch to OpenShift Logging (operator-managed SCCs).
+
+- **Grafana OAuth** — sealed `manifests/secrets/grafana-github-oauth.yaml` (keys `GF_AUTH_GITHUB_CLIENT_ID` / `_CLIENT_SECRET`) fed via `grafana.envFromSecret`. `grafana.ini.auth.github.role_attribute_path` maps `@demo-rhsummit-users/admin` membership to Grafana Admin role; everyone else lands as Viewer. `skip_org_role_sync: true` so the path is evaluated on every login. Same admin team that drives OpenShift cluster-admin (decision #21) — one team change covers both.
+
+- **OCP Route** — `manifests/observability/route.yaml` targets Service `grafana` (not the chart's older `<release>-grafana` convention) on port name `service`. Cert-manager Certificate at `manifests/observability/certificate.yaml` issues `graf-coder.apps...` from the Let's Encrypt cluster issuer.
+
+**Tradeoffs:**
+- We lose `sql-exporter` (Coder SQL business metrics) and the `memcached_exporter` self-metrics — both deferred until we mirror their DH images to a registry we control.
+- `postgres-exporter` is disabled; postgres-specific Grafana dashboards will be empty.
+- `grafana-agent` uses a broader-than-restricted-v2 SCC. Acceptable for the demo where the agent is the only pod that needs hostPath; production swaps to operator-managed bindings.
+- A small set of resources still report `OutOfSync` in Argo (orphan grafana PVC from a chart-template artifact, SSA managedFields cosmetic diffs on three StatefulSets, ClusterRole/CRB tracking-id labels). All Healthy; cosmetic-only.
+
+**Trigger to revisit:** A federal customer requires operator-managed observability — swap to OpenShift Logging (Vector + LokiStack) and consume the same dashboards via dual-source Argo. Also revisit if the Coder team publishes a non-DH `sql-exporter` mirror.
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":
