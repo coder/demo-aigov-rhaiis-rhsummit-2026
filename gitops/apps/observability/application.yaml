@@ -193,23 +193,31 @@ spec:
               enabled: false
 
             # Restricted-v2 SCC compliance for alertmanager.
+            # The alertmanager subchart's values.schema.json STRICTLY
+            # types runAsUser/runAsGroup as integer (no null), so we
+            # can't use the null+admission-injection trick the other
+            # subcharts allow. Pin to a UID in the
+            # coder-observability namespace's
+            # openshift.io/sa.scc.uid-range (1000800000/10000). The
+            # SCC mutating admission accepts an explicit UID inside
+            # the range.
             alertmanager:
               podSecurityContext:
                 runAsNonRoot: true
-                runAsUser: null
-                runAsGroup: null
-                fsGroup: null
+                runAsUser: 1000800000
+                runAsGroup: 1000800000
+                fsGroup: 1000800000
                 seccompProfile:
                   type: RuntimeDefault
 
-            # kube-state-metrics also defaults to UID 65534.
+            # kube-state-metrics has the same schema constraint.
             kube-state-metrics:
               securityContext:
                 enabled: true
                 runAsNonRoot: true
-                runAsUser: null
-                runAsGroup: null
-                fsGroup: null
+                runAsUser: 1000800000
+                runAsGroup: 1000800000
+                fsGroup: 1000800000
                 seccompProfile:
                   type: RuntimeDefault
 
