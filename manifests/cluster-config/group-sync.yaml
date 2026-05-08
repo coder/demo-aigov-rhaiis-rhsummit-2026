@@ -1,10 +1,9 @@
 # GroupSync — pulls `demo-rhsummit-users:admin` GitHub team
 # membership into an OpenShift Group every 5 minutes.
 #
-# Output Group name: `demo-rhsummit-users-admin` (matches what
-# cluster-admin-binding.yaml binds to). The
-# `org-team` → `<org>-<team>` rename is the operator's default;
-# leaving it implicit so the binding stays predictable.
+# Output Group name: `admin` (the team slug — the operator's
+# GitHub provider default). cluster-admin-binding.yaml binds to
+# that name verbatim.
 #
 # Auth: a fine-grained or classic GitHub PAT with `read:org`
 # scope, sealed at manifests/secrets/github-group-sync-token.yaml

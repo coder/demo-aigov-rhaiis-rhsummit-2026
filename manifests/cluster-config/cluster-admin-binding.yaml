@@ -6,10 +6,11 @@
 # Group won't exist and this binding is harmless (RBAC binds by
 # name; missing subjects are silently ignored at authz time).
 #
-# Group-sync naming: redhat-cop/group-sync-operator names synced
-# Groups `<org>-<team>` by default. We pin it explicitly via
-# `prune` + an output transform in the GroupSync spec for
-# determinism.
+# Group-sync naming: redhat-cop/group-sync-operator's GitHub
+# provider names the synced Group after the team slug (`admin`),
+# NOT `<org>-<team>`. If we ever sync more than one org's `admin`
+# team they'd collide; for the demo's single-org config that's
+# fine and we get a short, readable Group name.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -21,4 +22,4 @@ roleRef:
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
-    name: demo-rhsummit-users-admin
+    name: admin
