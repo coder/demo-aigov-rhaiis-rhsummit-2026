@@ -30,11 +30,11 @@ spec:
       - dns01:
           route53:
             region: us-east-1
-            # The OCP installer creates a dedicated hosted zone for
-            # cluster.rhsummit.coderdemo.io — that's the authoritative zone
-            # for all *.apps.cluster.rhsummit.coderdemo.io names. ACME TXT
-            # records must land here, not in the parent zone.
-            hostedZoneID: Z04493273NIFQWUDV8ZIL
+            # Use the PARENT zone (rhsummit.coderdemo.io) for ACME challenges.
+            # The cluster zone is PRIVATE (VPC-only); public resolvers cant see it.
+            # The parent zone is public and handles _acme-challenge.* resolution.
+            
+            hostedZoneID: Z09303733CS2DYKR4RF7S
 ---
 # Staging issuer (Let's Encrypt staging). Use this for early dry-runs to avoid
 # rate-limiting; switch Coder Certificate to letsencrypt-prod for booth day.
@@ -52,4 +52,4 @@ spec:
       - dns01:
           route53:
             region: us-east-1
-            hostedZoneID: Z04493273NIFQWUDV8ZIL
+            hostedZoneID: Z09303733CS2DYKR4RF7S
