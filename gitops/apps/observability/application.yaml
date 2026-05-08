@@ -239,6 +239,15 @@ spec:
             persistence:
               enabled: true
               size: 20Gi
+            # The loki subchart hardcodes `kube-dns.kube-system.svc`
+            # as the DNS resolver in its nginx-gateway config.
+            # OpenShift's CoreDNS lives at
+            # `dns-default.openshift-dns`, so without these overrides
+            # the loki-gateway pod fails to start with
+            # `[emerg] host not found in resolver "kube-dns..."`.
+            global:
+              dnsService: "dns-default"
+              dnsNamespace: "openshift-dns"
             # The loki SUBCHART has its own `loki:` block for the
             # Loki app's pod-level securityContext (chart default
             # 10001). Path: loki.loki.podSecurityContext.
