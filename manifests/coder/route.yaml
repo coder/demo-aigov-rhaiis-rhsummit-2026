@@ -53,3 +53,38 @@ spec:
     insecureEdgeTerminationPolicy: Redirect
     externalCertificate:
       name: coder-tls
+---
+# The router SA needs explicit permission to read externalCertificate
+# secrets in namespaces outside openshift-ingress (OCP 4.16+ requirement).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: router-tls-reader
+  namespace: coder
+  labels:
+    app.kubernetes.io/name: coder
+    app.kubernetes.io/component: routing
+    app.kubernetes.io/part-of: coder
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["coder-tls"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: router-tls-reader
+  namespace: coder
+  labels:
+    app.kubernetes.io/name: coder
+    app.kubernetes.io/component: routing
+    app.kubernetes.io/part-of: coder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: router-tls-reader
+subjects:
+  - kind: ServiceAccount
+    name: router
+    namespace: openshift-ingress

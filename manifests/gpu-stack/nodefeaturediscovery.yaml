@@ -22,10 +22,6 @@ spec:
     image: registry.redhat.io/openshift4/ose-node-feature-discovery-rhel9:v4.21
     imagePullPolicy: Always
     servicePort: 12000
-  customConfig:
-    configData: |
-      - name: "openshift-default-rules"
-        labels: {}
   workerConfig:
     configData: |
       core:
