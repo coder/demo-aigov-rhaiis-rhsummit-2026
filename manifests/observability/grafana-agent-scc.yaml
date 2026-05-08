@@ -1,0 +1,26 @@
+# grafana-agent (the chart's log/metric shipper DaemonSet) needs
+# hostPath access for /var/log and /var/lib/docker/containers — that's
+# how it reaches container log files on each node. OpenShift's
+# `restricted-v2` SCC blocks hostPath. Bind the agent's SA to
+# `hostmount-anyuid`, which is the standard OCP SCC for log/metric
+# shippers (allows hostPath; lets the kubelet inject UID via
+# securityContext).
+#
+# This is a deliberate security trade-off documented in
+# decisions.md §22 — log shipping requires reading host paths, so
+# the agent gets a slightly broader SCC than restricted-v2.
+# Production deployments typically use OpenShift Logging (Vector +
+# LokiStack via the cluster-logging operator), which uses signed
+# SCC bindings shipped by the operator.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: grafana-agent-hostmount-anyuid
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:hostmount-anyuid
+subjects:
+  - kind: ServiceAccount
+    name: grafana-agent
+    namespace: coder-observability
