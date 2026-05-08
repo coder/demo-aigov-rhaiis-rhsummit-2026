@@ -283,6 +283,8 @@ If you change a decision, update this file in the same PR.
 
 **Note (OpenShift compat):** The upstream Bitnami chart hardcodes `podSecurityContext.fsGroup: 65534` and `containerSecurityContext.runAsUser: 1001`. Those IDs fall outside the per-namespace `openshift.io/sa.scc.uid-range` and are rejected by `restricted-v2` admission, leaving the Deployment in `ReplicaFailure`. The Helm values in `gitops/apps/sealed-secrets/application.yaml` disable the pod-level block entirely (`podSecurityContext.enabled: false`) and null `containerSecurityContext.runAsUser`, so the SCC mutating admission injects valid IDs from the namespace range while the chart's other container hardening (drop ALL caps, readOnlyRootFilesystem, RuntimeDefault seccomp) is preserved.
 
+**Note (registry):** The same Helm values override the chart's default `docker.io/bitnami/sealed-secrets-controller` image to `ghcr.io/bitnami-labs/sealed-secrets-controller`. Docker Hub's anonymous pull rate limit trips reliably during a fresh-cluster sync (multiple nodes pulling the same image simultaneously → 429). The upstream `bitnami-labs/sealed-secrets` project publishes the same controller binary to GHCR; using it stays consistent with decision #4's GHCR-first registry policy.
+
 ---
 
 ## 20. GitHub OAuth into Coder, scoped to the `demo-rhsummit-users` org (not Coder built-in user/pass, not OIDC/Keycloak)

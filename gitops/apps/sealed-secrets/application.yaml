@@ -47,6 +47,15 @@ spec:
         # `kube-system` works on K3s but on OpenShift `kube-system`
         # has restrictive SCCs and isn't where user workloads belong.
         fullnameOverride: sealed-secrets
+        # Pull from the upstream registry on GHCR rather than the chart's
+        # default `docker.io/bitnami/...`. Docker Hub's anonymous pull rate
+        # limit reliably trips on a fresh cluster (every node pulling the
+        # same image at once = 429 toomanyrequests). Same controller binary,
+        # same release cadence — bitnami-labs is the project's own org.
+        # Consistent with decision #4 (GHCR-first registry policy).
+        image:
+          registry: ghcr.io
+          repository: bitnami-labs/sealed-secrets-controller
         # Match the chart's default Service name so kubeseal's
         # --controller-name=sealed-secrets / --controller-namespace=sealed-secrets
         # works without extra flags.
