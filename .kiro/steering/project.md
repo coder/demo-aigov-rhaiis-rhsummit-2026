@@ -29,8 +29,13 @@ Booth demo for Coder + Red Hat at Red Hat Summit 2026. Deploys a governed agenti
 - `ServerSideApply=true` and `CreateNamespace=true` in syncOptions.
 
 ### Operator policy
-- Red Hat-certified operators only. Two documented exceptions: NVIDIA GPU operator (certified-operators source) and CloudNativePG (community-operators source). Both have inline rationale in their subscription YAML.
+- Red Hat-certified operators only. Two documented exceptions: NVIDIA GPU operator (certified-operators source) and CloudNativePG (certified-operators source, EDB-engineered). Both have inline rationale in their subscription YAML.
 - Never use upstream community operators when Red Hat ships an equivalent (e.g., use `openshift-gitops-operator` not `argocd-operator`; use `openshift-cert-manager-operator` not `cert-manager`).
+
+### Manifest configuration
+- Manifests use cluster-specific values (domain names, zone IDs) that are patched by `scripts/configure-manifests.sh` after `terraform apply`.
+- The Argo CD root app is applied by the script (not terraform) to avoid race conditions.
+- Workflow: `terraform apply` → `./scripts/configure-manifests.sh` → `git commit && push`.
 
 ### Scripts (bash)
 - `set -euo pipefail` at the top.

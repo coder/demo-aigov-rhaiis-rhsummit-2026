@@ -171,6 +171,7 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │   └── coder/
 │
 ├── scripts/
+│   ├── configure-manifests.sh         # patch manifests with cluster-specific values + apply root app
 │   ├── tool-call-smoke-test.sh        # validate RHAIIS tool-call parser end-to-end
 │   ├── bootstrap-r53-delegation.sh    # cross-account R53 subdomain delegation
 │   ├── aws-quota-bootstrap.sh         # compute / request / track AWS quotas
@@ -238,10 +239,11 @@ A future commit can wrap this in `make cluster-up` / `make cluster-down` plus a 
 | Account-level prereqs (one-time per account) | `terraform/prereqs apply` | ~3–5 min | IAM users + (optional) hosted-zone create |
 | Cluster install — VPC + IAM | `terraform/main.tf` (early stages) | ~3 min | BYO-VPC, NAT gateways per AZ |
 | Cluster install — `openshift-install create cluster` | `terraform/main.tf` (local-exec) | **~30–45 min** | The single biggest line item; AWS image pull + bootstrap + CP nodes |
-| Operator subscriptions + CRD wait | `terraform/main.tf` (gitops_bootstrap) | ~3–5 min | OpenShift GitOps + cert-manager + CNPG |
-| Cluster Secrets bootstrap | same step | ~30 sec | route53-credentials, bedrock-credentials, redhat-pull-secret |
+| Operator subscriptions + CRD wait | `terraform/main.tf` (gitops_bootstrap) | ~3–5 min | OpenShift GitOps + cert-manager + CNPG + NFD + NVIDIA GPU |
+| Cluster Secrets + IRSA bootstrap | same step | ~30 sec | SA annotations, pull secrets, NS delegation |
+| Configure manifests + activate GitOps | `scripts/configure-manifests.sh` | ~1 min | Patches domains/zone IDs, applies root app, commit+push |
 | Argo CD app-of-apps sync (postgres + gpu-stack in parallel, then coder, then rhaiis) | Argo (autonomous) | ~5–10 min | gpu-stack waits for the NVIDIA driver DaemonSet (~3–5 min on first boot); RHAIIS pod schedules once `nvidia.com/gpu` is allocatable |
-| TLS cert issuance (Let's Encrypt DNS-01) | cert-manager | ~2–5 min | After Coder Route exists |
+| TLS cert issuance (Let's Encrypt DNS-01) | cert-manager | ~2–5 min | After Routes exist; uses cluster zone for ACME challenges |
 | First Coder admin login + GH Actions secrets | manual + `gh secret set` | ~2 min | `CODER_URL`, `CODER_SESSION_TOKEN` |
 | First template push | `.github/workflows/push-templates.yml` | ~2 min | Triggered by any `coder-templates/**` change |
 | Prebuilt-Workspace warm pool ready | Coder | ~3–5 min | One-time per template |
@@ -292,23 +294,46 @@ terraform apply
 ```
 
 This will:
-1. Create the BYO-VPC + IAM users (cert-manager → Route 53; Coder → Bedrock)
+1. Create the BYO-VPC + IAM roles (cert-manager → Route 53; Coder → Bedrock via IRSA)
 2. Generate `install-config.yaml` from the template
-3. Run `openshift-install create cluster` (~30–45 min)
-4. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG)
-5. Wait for cert-manager + CNPG CRDs
-6. Bootstrap cluster Secrets (`route53-credentials`, `bedrock-credentials`, `redhat-pull-secret`)
-7. Apply the Argo CD root Application (app-of-apps bootstrap)
+3. Run `ccoctl aws create-all` (OIDC provider + platform IAM roles for STS)
+4. Run `openshift-install create cluster` (~30–45 min)
+5. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG + NFD + NVIDIA GPU)
+6. Wait for all operator CRDs
+7. Bootstrap cluster Secrets + IRSA ServiceAccount annotations
+8. Create NS delegation for the cluster zone in the parent Route 53 zone
 
 After `apply` finishes you'll have:
-- A live OCP 4.21 cluster with three operators installed (GitOps + cert-manager + CNPG)
-- Argo CD running, with Applications for `postgres` (CNPG Cluster) + cert-manager (ClusterIssuers) + Coder + RHAIIS + coder-routing
-- Coder using a CNPG-generated `coder-app` Secret for its DB connection — no manual DB-URL plumbing
-- Wildcard TLS cert in flight for `*.coder.apps.<fqdn>` (Let's Encrypt prod, DNS-01 over Route 53)
+- A live OCP 4.21 cluster (STS/IRSA mode) with all operators installed
+- Argo CD running but **idle** (no root app applied yet — avoids race conditions)
+
+### 2b. Configure manifests and activate GitOps
+
+```bash
+cd ..   # back to repo root
+./scripts/configure-manifests.sh --terraform-dir ./terraform
+```
+
+This script:
+1. Reads `cluster_fqdn` and `cluster_zone_id` from terraform outputs
+2. Patches all manifests and gitops files with the correct domain names and zone IDs
+3. Applies the Argo CD root Application (app-of-apps) — GitOps is now active
+
+Then commit and push so Argo CD syncs from the repo:
+
+```bash
+git add -A
+git commit -m "chore: configure manifests for $(terraform -chdir=terraform output -raw cluster_fqdn)"
+git push origin main
+```
+
+After this you'll have:
+- Argo CD syncing all apps: postgres, cert-manager, coder, rhaiis, gpu-stack, coder-routing, observability
+- Wildcard TLS certs in flight for `*.apps.<fqdn>`, `*.coder.apps.<fqdn>`, and `api.<fqdn>` (Let's Encrypt prod, DNS-01)
 - Coder reachable at `https://coder.apps.<cluster-domain>`
 - RHAIIS reachable cluster-internally at `http://vllm.ocp-ai.svc:8000`
 
-### 2. Configure Coder providers (one-time)
+### 3. Configure Coder providers (one-time)
 
 Once Coder is up, log in as the first admin user, grab a session token, then:
 
