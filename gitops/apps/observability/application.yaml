@@ -136,6 +136,17 @@ spec:
             # manifest at manifests/secrets/grafana-github-oauth.yaml.
             envFromSecret: grafana-github-oauth
 
+            # PG password env var ($PGPASSWORD) referenced by the
+            # postgres datasource configmap
+            # (manifests/observability/postgres-datasource-configmap.yaml).
+            # Sealed Secret materializes from
+            # manifests/secrets/secret-postgres.yaml (key
+            # PGPASSWORD; value sourced from the CNPG-generated
+            # `coder-app` Secret in the `coder` namespace).
+            envFromSecrets:
+              - name: secret-postgres
+                optional: false
+
             grafana.ini:
               server:
                 root_url: https://graf-coder.apps.cluster.rhsummit.coderdemo.io

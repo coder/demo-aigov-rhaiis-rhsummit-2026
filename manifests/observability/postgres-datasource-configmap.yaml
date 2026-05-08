@@ -1,0 +1,42 @@
+# Grafana PostgreSQL datasource for the AI Bridge dashboard's
+# leaderboard / per-user / interception-detail panels. The dashboard
+# JSON (manifests/observability/aibridge-dashboard-configmap.yaml)
+# references `uid: postgres` for every PG-backed panel.
+#
+# The Coder server writes its AI Bridge interception data to the
+# CNPG cluster `coder/coder` — this datasource points Grafana at
+# the read-write endpoint with the `coder` user's CNPG-generated
+# password. Grafana interpolates `$PGPASSWORD` from the env, which
+# we wire in via `grafana.envFromSecrets` referencing the sealed
+# `secret-postgres` Secret in this namespace
+# (manifests/secrets/secret-postgres.yaml).
+#
+# Rotation: when CNPG rotates the password, re-seal the Secret —
+# unseal/seal/commit/push. Grafana picks up the new value on the
+# next env refresh (next pod start).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-datasource
+  namespace: coder-observability
+  labels:
+    grafana_datasource: "1"
+data:
+  postgres.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: postgres
+        type: grafana-postgresql-datasource
+        uid: postgres
+        access: proxy
+        url: coder-rw.coder.svc.cluster.local:5432
+        user: coder
+        isDefault: false
+        editable: false
+        jsonData:
+          database: coder
+          sslmode: disable
+          postgresVersion: 1500
+          timescaledb: false
+        secureJsonData:
+          password: $PGPASSWORD
