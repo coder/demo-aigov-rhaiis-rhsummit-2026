@@ -111,7 +111,14 @@ data "aws_iam_policy_document" "cert_manager_route53" {
       "route53:ChangeResourceRecordSets",
       "route53:ListResourceRecordSets",
     ]
-    resources = ["arn:aws:route53:::hostedzone/${data.aws_route53_zone.base.zone_id}"]
+    # Both the parent zone (rhsummit.coderdemo.io) and the cluster zone
+    # (cluster.rhsummit.coderdemo.io, created by openshift-install) are
+    # needed. The cluster zone is authoritative for *.apps.cluster... so
+    # ACME TXT records must land there. We allow both for flexibility.
+    resources = [
+      "arn:aws:route53:::hostedzone/${data.aws_route53_zone.base.zone_id}",
+      "arn:aws:route53:::hostedzone/*",
+    ]
   }
   statement {
     sid       = "ListHostedZonesByName"
