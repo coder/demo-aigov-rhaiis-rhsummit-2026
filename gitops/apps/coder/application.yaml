@@ -209,13 +209,9 @@ spec:
           # Spread the 3 Coder pods across the 3 OCP node AZs so a single AZ
           # outage takes at most one replica. Aurora Postgres failover (writer
           # endpoint repoint) is automatic and survives the same AZ event.
-          # Converged cluster: control-plane nodes carry workloads.
-          # Tolerate the master taint so Coder pods schedule on them.
-          tolerations:
-            - key: node-role.kubernetes.io/master
-              operator: Exists
-              effect: NoSchedule
-
+          # Converged-cluster scheduling: masters are made schedulable via
+          # Scheduler/cluster.spec.mastersSchedulable=true (owned by
+          # gitops/apps/cluster-config/), so no master toleration is needed.
           topologySpreadConstraints:
             - maxSkew: 1
               topologyKey: topology.kubernetes.io/zone

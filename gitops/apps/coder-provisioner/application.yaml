@@ -99,13 +99,9 @@ spec:
               cpu: "2"
               memory: 2Gi
 
-          # Converged cluster — control-plane nodes carry workloads.
-          # Tolerate the master taint so provisioner pods schedule on
-          # them (same pattern as the coder chart values).
-          tolerations:
-            - key: node-role.kubernetes.io/master
-              operator: Exists
-              effect: NoSchedule
+          # Converged-cluster scheduling: masters are made schedulable via
+          # Scheduler/cluster.spec.mastersSchedulable=true (owned by
+          # gitops/apps/cluster-config/), so no master toleration is needed.
 
           # Spread the 6 provisioners evenly across the 3 OCP node AZs
           # (2 per zone). Same pattern + label selector approach as the
