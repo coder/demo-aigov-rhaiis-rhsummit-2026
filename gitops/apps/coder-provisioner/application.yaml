@@ -32,14 +32,14 @@ spec:
   source:
     repoURL: https://helm.coder.com/v2
     chart: coder-provisioner
-    targetRevision: 2.33.0-rc.3       # match the Coder server chart version
+    targetRevision: 2.33.1            # match the Coder server chart version
     helm:
       releaseName: coder-provisioner
       values: |
         coder:
           image:
             repo: ghcr.io/coder/coder
-            tag: v2.33.0-rc.3          # MUST match the Coder server image
+            tag: v2.33.1               # MUST match the Coder server image
             pullPolicy: IfNotPresent
 
           replicaCount: 6     # 2 per AZ across us-east-1{a,b,c} via topology spread below

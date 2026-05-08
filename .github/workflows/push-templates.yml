@@ -44,7 +44,7 @@ permissions:
 env:
   IMAGE_REGISTRY: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026
   WORKSPACE_NAMESPACE: coder-workspaces
-  CODER_VERSION: 2.33.0-rc.3
+  CODER_VERSION: 2.33.1
 
 jobs:
   push:

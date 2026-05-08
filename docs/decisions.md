@@ -161,15 +161,15 @@ If you change a decision, update this file in the same PR.
 
 ---
 
-## 11. Coder v2.33.0-rc.3 (latest tagged RC, not main HEAD)
+## 11. Coder v2.33.1 (stable; Agents now beta, no longer behind an experiment flag)
 
-**Picked:** `coder_chart_version = "2.33.0-rc.3"`, image `v2.33.0-rc.3`. Pinned because RC tags are the stable cut points; main HEAD on a Tuesday isn't necessarily a tagged RC.
+**Picked:** `coder_chart_version = "2.33.1"`, image `v2.33.1`. Stable release.
 
-**Considered:** Pin to a stable release; track main HEAD.
+**Considered:** Pin to an RC; track main HEAD.
 
-**Why:** RC has Coder Agents Early Access functionality the booth demo needs (no stable release does as of 2026-04). main HEAD is a moving target — a 3am-yesterday merge could break the booth. RC tag = cut point we can verify against.
+**Why:** Original choice was `2.33.0-rc.3` because that was the only build with Coder Agents (Early Access experiment). v2.33.1 (released after the 2.33.0 line stabilized) **removed the `agents` experiment flag and promoted Agents to beta** (PR coder/coder#24432) — the demo no longer needs `CODER_EXPERIMENTS=agents`. Stable cut > RC for booth reliability.
 
-**Trigger to revisit:** When a newer rc.N tag ships, bump. When stable v2.33.0 GAs, bump to that.
+**Trigger to revisit:** Bump on Coder minor releases (every ~2 weeks per Coder's mainline cadence). Validate AI Bridge + agents flows after each bump.
 
 ---
 

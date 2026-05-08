@@ -45,14 +45,14 @@ spec:
   source:
     repoURL: https://helm.coder.com/v2
     chart: coder
-    targetRevision: 2.33.0-rc.3       # latest tagged RC (commit 3362b5ae, Apr 22 2026)
+    targetRevision: 2.33.1            # latest stable (Coder Agents beta — no longer behind an experiment flag)
     helm:
       releaseName: coder
       values: |
         coder:
           image:
             repo: ghcr.io/coder/coder
-            tag: v2.33.0-rc.3          # match chart targetRevision
+            tag: v2.33.1               # match chart targetRevision
             pullPolicy: IfNotPresent
 
           # Prometheus scrape annotations on every pod
@@ -159,9 +159,10 @@ spec:
             - name: AWS_REGION
               value: "us-east-1"
 
-            # ── Coder Agents Early Access ───────────────────────────────
-            - name: CODER_EXPERIMENTS
-              value: "agents"
+            # ── Coder Agents (beta) ─────────────────────────────────────
+            # The CODER_EXPERIMENTS=agents flag was removed in v2.33.1
+            # (PR #24432). Agents are on by default in beta — no env
+            # var required.
 
             # ── Telemetry / direct-connect off for demo network ─────────
             - name: CODER_DISABLE_DIRECT_CONNECTIONS

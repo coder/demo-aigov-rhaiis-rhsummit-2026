@@ -126,15 +126,15 @@ variable "gpu_zone_index" {
 ###############################################################################
 
 variable "coder_chart_version" {
-  description = "Coder Helm chart version. We pin to a release-candidate to get Coder Agents Early Access plus the chatd metrics, edit_files newline-strict diffs, per-turn model persistence, and agents-access org-scoped role migration that landed for this RC. Bump only when a newer tagged RC ships (RC tags now live directly on main; main HEAD is not necessarily a tagged RC)."
+  description = "Coder Helm chart version. Pinned to a stable release. Coder Agents promoted from Early Access experiment to beta in v2.33.1 (PR #24432) — `CODER_EXPERIMENTS=agents` no longer required. Bump only when a newer minor or patch ships and we've validated AI Bridge / agents continuity."
   type        = string
-  default     = "2.33.0-rc.3"
+  default     = "2.33.1"
 }
 
 variable "coder_image_tag" {
   description = "Coder server container image tag. Should match coder_chart_version's app version."
   type        = string
-  default     = "v2.33.0-rc.3"
+  default     = "v2.33.1"
 }
 
 variable "coder_subdomain" {
