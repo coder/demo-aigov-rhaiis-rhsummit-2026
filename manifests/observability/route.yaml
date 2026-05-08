@@ -13,7 +13,7 @@ metadata:
   annotations:
     haproxy.router.openshift.io/timeout: "60s"
 spec:
-  host: grafana.apps.cluster.rhsummit.coderdemo.io
+  host: graf-coder.apps.cluster.rhsummit.coderdemo.io
   to:
     kind: Service
     name: coder-observability-grafana

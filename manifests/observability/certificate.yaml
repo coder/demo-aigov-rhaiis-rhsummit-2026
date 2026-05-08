@@ -14,6 +14,6 @@ spec:
   issuerRef:
     name: letsencrypt-prod
     kind: ClusterIssuer
-  commonName: grafana.apps.cluster.rhsummit.coderdemo.io
+  commonName: graf-coder.apps.cluster.rhsummit.coderdemo.io
   dnsNames:
-    - grafana.apps.cluster.rhsummit.coderdemo.io
+    - graf-coder.apps.cluster.rhsummit.coderdemo.io
