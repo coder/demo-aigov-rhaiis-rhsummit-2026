@@ -201,49 +201,18 @@ resource "coder_agent" "main" {
       grep -qF "$P" ~/.profile 2>/dev/null || echo "export PATH=\"$P:\$PATH\"" >> ~/.profile
     done
 
-    # Remove stale Yarn apt repo (expired GPG key causes apt-get update warnings)
-    sudo rm -f /etc/apt/sources.list.d/yarn.list 2>/dev/null || true
-
-    # Install common development tools
-    echo "Installing development tools..."
-    sudo apt-get update -qq
-
-    # Critical — needed for the agent to operate reliably
-    sudo apt-get install -y -qq \
-      git \
-      curl \
-      wget \
-      ca-certificates \
-      openssh-client \
-      jq \
-      ripgrep \
-      fd-find \
-      build-essential \
-      pkg-config \
-      python3 \
-      python3-pip \
-      unzip \
-      tar \
-      gzip \
-      procps \
-      lsof \
-      sed \
-      gawk \
-      > /dev/null 2>&1 || true
-
-    # Nice-to-have — improve agent speed and output quality
-    sudo apt-get install -y -qq \
-      tree \
-      shellcheck \
-      diffutils \
-      inotify-tools \
-      netcat-openbsd \
-      dnsutils \
-      > /dev/null 2>&1 || true
-
-    # Create fd symlink (Debian/Ubuntu packages fd-find as fdfind)
-    if command -v fdfind &> /dev/null && ! command -v fd &> /dev/null; then
-      sudo ln -sf "$(which fdfind)" /usr/local/bin/fd
+    # Workspace base image (UBI9 enterprise-node) already ships
+    # git/curl/wget/jq/sudo/openssh-clients/python3.11/pip/gcc/make/
+    # tar/unzip/vim plus Node 22 + corepack. The apt-get install
+    # block from the source (Ubuntu) template is dropped — UBI9 uses
+    # dnf, and these packages are pre-baked. Anything not in the
+    # base goes through dnf+EPEL below; tolerant of "package not
+    # available."
+    if command -v dnf >/dev/null 2>&1; then
+      echo "=== UBI9 nice-to-haves (EPEL) ==="
+      sudo dnf install -y --nodocs \
+        https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm 2>/dev/null || true
+      sudo dnf install -y --nodocs ripgrep fd-find tree shellcheck inotify-tools nmap-ncat bind-utils lsof procps-ng 2>/dev/null || true
     fi
 
     echo "=== Workspace Ready ==="

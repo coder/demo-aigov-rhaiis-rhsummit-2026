@@ -63,11 +63,18 @@ RUN useradd --uid ${UID} --create-home --shell /bin/bash --user-group ${USER} \
 RUN chgrp -R 0 /home/${USER} \
     && chmod -R g=u /home/${USER}
 
-# Make /etc/passwd group-writable so the Coder agent's home-bootstrap step
-# can append a passwd entry for the SCC-injected UID at startup. Same
-# pattern Red Hat uses in their s2i base images.
+# Make /etc/passwd group-writable so the entrypoint can append a passwd
+# entry for the SCC-injected UID at startup. Same pattern Red Hat uses
+# in their s2i base images.
 RUN chmod g=u /etc/passwd
 
+# UID entrypoint — fakes /etc/passwd + HOME for the random UID OCP's
+# SCC injects, so anything that calls `getent passwd $(id -u)` /
+# `os/user.Current()` (the Coder agent does both) works.
+COPY uid_entrypoint.sh /usr/local/bin/uid_entrypoint
+RUN chmod 0755 /usr/local/bin/uid_entrypoint
+
+ENTRYPOINT ["/usr/local/bin/uid_entrypoint"]
 USER ${UID}
 WORKDIR /home/${USER}
 
