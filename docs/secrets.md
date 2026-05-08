@@ -117,6 +117,20 @@ git push
 
 The `coder-provisioner` Deployment is in CrashLoopBackOff until this Secret exists; it self-heals once Argo applies the SealedSecret and the controller decrypts it.
 
+### Granting Coder `Owner` to admin team members
+
+The OpenShift side (decision #21) auto-syncs the `demo-rhsummit-users:admin` GitHub team into an OpenShift Group bound to `cluster-admin`. **Coder does NOT have an equivalent team→role hook** — its `CODER_OAUTH2_GITHUB_*` env vars only restrict login, not assign roles. New admins land as regular Members.
+
+Manual one-liner per admin, after their first login:
+
+```bash
+coder users edit-roles <username> --roles owner
+```
+
+Run from a workstation already authenticated as a Coder Owner. Until you elevate them, the user can log in but won't see admin views or be able to grant licenses, manage organizations, etc.
+
+Reasoning lives in decision #21 under "Tradeoffs."
+
 ## Updating an existing secret
 
 Same flow — re-run the `kubeseal` invocation with the new value. Argo applies the new cipher, the controller updates the in-cluster `Secret`, and you `oc rollout restart` whatever Deployment mounts it as env vars (env-mounted secrets don't pick up changes without a pod restart; volume-mounted secrets DO).

@@ -306,6 +306,31 @@ If you change a decision, update this file in the same PR.
 
 ---
 
+## 21. GitHub OAuth into OpenShift, with `demo-rhsummit-users:admin` team → `cluster-admin` via redhat-cop/group-sync-operator (not OIDC, not manual `oc adm groups sync`, not a hand-maintained Group)
+
+**Picked:** A second GitHub OAuth app (separate from Coder's — GitHub apps are bound to a single callback URL) is wired into the singleton `OAuth/cluster` CR as a `GitHub` identityProvider, gated by `organizations: [demo-rhsummit-users]`. Cluster-admin elevation comes from membership in the `admin` team within that org: the `redhat-cop/group-sync-operator` (installed from the `community-operators` OLM catalog) polls GitHub every 5 minutes and reconciles the `admin` GitHub team into the OpenShift `Group/admin`. A `ClusterRoleBinding` binds that Group to `cluster-admin`. All of it (OAuth IdP patch, GroupSync CR, ClusterRoleBinding, sealed PAT secret) lives under `gitops/apps/cluster-config/` + `gitops/apps/group-sync-operator/`.
+
+**Considered:**
+- **Hand-maintained `Group/admins` resource** — list the GitHub usernames in YAML. Simple, no operator, but every admin team change is a PR. Acceptable for a stable demo team but a lousy story if we want to demo "remove an admin via GitHub UI and watch RBAC follow."
+- **`oc adm groups sync` CronJob** — same end state as the operator, fewer moving parts (no OLM CSV, no operator pod). Less polished, no UI in the OpenShift console, no watch-driven reconciliation. Rejected: the operator's scheduled-sync-with-status-conditions story matches the GitOps narrative better.
+- **OIDC via Keycloak/RH SSO with GitHub IdP behind it** — Keycloak surfaces team membership as group claims, removing the need for a separate sync loop. Right answer for federal customers but an extra dependency to install/configure for a demo whose narrative is "GitHub is the single source of truth." Same trigger as decision #20: revisit if the customer story shifts.
+- **Map GitHub identity to OpenShift cluster-admin via the IdP's `teams:` field** (instead of `organizations:`) — the GitHub IdP DOES auto-create OpenShift Groups for listed teams. But specifying `teams:` instead of `organizations:` restricts login to admin team members only — non-admin org members can't get in at all. We need both: any org member can log in (read-only), admin team gets `cluster-admin`. Two scopes, two mechanisms.
+
+**Why:**
+- **Single source of truth = GitHub.** Org membership controls "can log in," team membership controls "is cluster-admin." Both are managed by whoever administers the GitHub org via the standard GitHub UI/CLI; no second admin surface, no PRs.
+- **5-minute reconcile loop is fast enough for a demo** ("add me to the admin team, watch me get cluster-admin within 5 minutes") and well under GitHub's 5000 req/hour authed rate limit.
+- **Operator > CronJob > YAML.** OLM-managed install means uninstalling = deleting the Subscription. Status surfaces in `oc get groupsync`. Audit-friendly: each sync is logged with sync-time annotations on the resulting Group.
+- **Separate OAuth app from Coder** is forced by GitHub (one callback URL per app). The OAuth app's client secret is a SealedSecret in `openshift-config`; the read:org PAT for the operator is a SealedSecret in `group-sync-operator`. Both rotate the same way every other secret in this repo does (decision #19's workflow).
+
+**Tradeoffs:**
+- **Coder Owner role is NOT auto-synced from the admin team.** Coder's GitHub OAuth doesn't expose a team→role mapping mechanism (the `CODER_OAUTH2_GITHUB_*` env vars only restrict login, not assign roles). Adding a Coder admin requires a manual `coder users edit-roles <user> --roles owner` once they've logged in for the first time. Documented in `docs/secrets.md` (or wherever the Coder admin runbook lives). Acceptable cost given how rarely admins get added.
+- **Group name is just `admin`** — the operator's GitHub provider names the synced Group after the team slug, not `<org>-<team>`. If we ever sync admin teams from multiple orgs they'd collide; for one org that's fine and the short name is more readable.
+- **Operator install requires `OwnNamespace` mode**, not `AllNamespaces` (the CSV's installModes don't allow it). The OperatorGroup pins `targetNamespaces: [group-sync-operator]`. The operator still manages cluster-scoped Group resources globally — install mode controls only what the controller WATCHES.
+
+**Trigger to revisit:** Adding a second OpenShift cluster — the operator + GroupSync CR + sealed PAT lift into the new cluster's bootstrap unchanged, so this scales fine. If we add a second GitHub org with its own admin team, swap the GitHub provider to use a transform that prefixes the group name with the org so the names don't collide.
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":
