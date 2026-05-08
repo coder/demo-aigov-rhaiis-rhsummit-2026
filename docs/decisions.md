@@ -281,7 +281,7 @@ If you change a decision, update this file in the same PR.
 
 **Trigger to revisit:** If the customer story shifts to AWS-only production architectures (full ASM + KMS encryption-at-rest + automated rotation narrative), swap to ESO+ASM. For booth: never.
 
-**Note (OpenShift compat):** The upstream Bitnami chart hardcodes `securityContext.fsGroup: 65534` and `containerSecurityContext.runAsUser: 1001`. Those IDs fall outside the per-namespace `openshift.io/sa.scc.uid-range` and are rejected by `restricted-v2` admission, leaving the Deployment in `ReplicaFailure`. The Helm values in `gitops/apps/sealed-secrets/application.yaml` null those fields out so the SCC mutating admission injects valid IDs — same pattern as the Coder chart values (decision #11).
+**Note (OpenShift compat):** The upstream Bitnami chart hardcodes `podSecurityContext.fsGroup: 65534` and `containerSecurityContext.runAsUser: 1001`. Those IDs fall outside the per-namespace `openshift.io/sa.scc.uid-range` and are rejected by `restricted-v2` admission, leaving the Deployment in `ReplicaFailure`. The Helm values in `gitops/apps/sealed-secrets/application.yaml` disable the pod-level block entirely (`podSecurityContext.enabled: false`) and null `containerSecurityContext.runAsUser`, so the SCC mutating admission injects valid IDs from the namespace range while the chart's other container hardening (drop ALL caps, readOnlyRootFilesystem, RuntimeDefault seccomp) is preserved.
 
 ---
 

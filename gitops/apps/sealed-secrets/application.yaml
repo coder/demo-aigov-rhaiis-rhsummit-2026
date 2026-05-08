@@ -57,19 +57,25 @@ spec:
           limits:
             cpu: 200m
             memory: 256Mi
-        # OpenShift restricted-v2 SCC compliance — same pattern as the
-        # `coder` Helm values. The chart's defaults (`fsGroup: 65534`,
-        # `runAsUser: 1001`) fall outside the per-namespace
-        # `openshift.io/sa.scc.uid-range` and are rejected by admission.
-        # Nullify them so the SCC mutating admission injects valid IDs
-        # from the namespace range. seccompProfile is required by
-        # restricted-v2.
-        securityContext:
-          runAsNonRoot: true
-          fsGroup: null
-          seccompProfile:
-            type: RuntimeDefault
+        # OpenShift restricted-v2 SCC compliance. The chart's defaults
+        # (`podSecurityContext.fsGroup: 65534`, `containerSecurityContext.runAsUser: 1001`)
+        # fall outside the per-namespace `openshift.io/sa.scc.uid-range`
+        # and are rejected by admission.
+        #
+        # Pod-level: disable the chart's whole `podSecurityContext` block
+        # so OpenShift's SCC mutating admission injects an `fsGroup` from
+        # the namespace's allowed range. (The chart gates the entire block
+        # behind `.enabled`, so `enabled: false` drops it from the rendered
+        # PodSpec — null'ing inner fields wouldn't, since Helm would still
+        # render `securityContext: { fsGroup: null }`.)
+        #
+        # Container-level: keep the chart's other hardening (drop ALL caps,
+        # readOnlyRootFilesystem, runAsNonRoot, RuntimeDefault seccomp) and
+        # null out only `runAsUser` so the SCC injects a valid UID.
+        podSecurityContext:
+          enabled: false
         containerSecurityContext:
+          enabled: true
           runAsNonRoot: true
           runAsUser: null
           allowPrivilegeEscalation: false
