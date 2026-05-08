@@ -441,7 +441,7 @@ module "dotfiles" {
   # create form. Defaults pre-filled but fully editable per-workspace;
   # clear the URL field to skip cloning (the module's run.sh guards
   # against an empty URI).
-  default_dotfiles_uri    = "https://gitlab.zambruhni.com/lab/dotfiles"
+  default_dotfiles_uri    = "https://github.com/ausbru87/dotfiles"
   default_dotfiles_branch = "main"
 }
 
