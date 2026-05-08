@@ -706,7 +706,7 @@ resource "kubernetes_pod_v1" "workspace" {
       name              = "dev"
       image             = "${var.image_registry}/enterprise-node:latest"
       image_pull_policy = "Always"
-      command           = ["sh", "-c", coder_agent.main.init_script]
+      command           = ["/usr/local/bin/uid_entrypoint", "sh", "-c", coder_agent.main.init_script]
 
       security_context {
         # NET_ADMIN + SYS_ADMIN are required by the agent boundary
