@@ -23,31 +23,56 @@ FROM registry.access.redhat.com/ubi9/ubi:latest
 ARG USER=coder
 ARG UID=1001
 
-# Core dev tooling.
-# `curl` is intentionally NOT in the dnf list — UBI9 ships `curl-minimal`
-# which provides the curl binary and conflicts with the full curl package.
+# Core dev tooling + dotfiles deps.
+#
+# `curl` is intentionally NOT in the AppStream list — UBI9 ships
+# `curl-minimal` which provides the curl binary and conflicts with the
+# full curl package.
+#
+# zsh / tmux / neovim / fzf / ripgrep / fd-find / starship are
+# pre-installed so the dotfiles repo's install.sh `install_if_missing`
+# checks short-circuit. Inside a restricted-v2 pod, `sudo` can't
+# elevate (CAP_SETUID is dropped), so install.sh's package-install
+# code path doesn't work — pre-baked tools are the workaround.
+#
+# fzf / ripgrep / fd-find / xclip live in EPEL on UBI9, so we enable
+# EPEL once and install them in a single transaction.
 RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
+        https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm \
+    && dnf install -y --nodocs --setopt=install_weak_deps=False \
         bash-completion \
         ca-certificates \
+        fd-find \
+        fzf \
         gcc \
         git \
         gnupg2 \
         jq \
         less \
         make \
+        neovim \
         openssh-clients \
         procps-ng \
         python3.11 \
         python3.11-pip \
+        ripgrep \
         sudo \
         tar \
+        tmux \
         unzip \
         vim-enhanced \
         wget \
         which \
         zip \
+        zsh \
     && dnf clean all \
     && rm -rf /var/cache/dnf
+
+# Starship prompt — used by the dotfiles' .zshrc/.bashrc. Install at
+# build time as root because the install.sh script writes to
+# /usr/local/bin and would need sudo at workspace-startup time, which
+# the SCC-dropped CAP_SETUID prevents.
+RUN curl -fsSL https://starship.rs/install.sh | sh -s -- --yes --bin-dir /usr/local/bin
 
 # Single non-root user. Only really used outside OCP (where `USER 1001`
 # applies); on OCP the SCC-injected UID takes over and the named user is
@@ -73,6 +98,12 @@ RUN chmod g=u /etc/passwd
 # `os/user.Current()` (the Coder agent does both) works.
 COPY uid_entrypoint.sh /usr/local/bin/uid_entrypoint
 RUN chmod 0755 /usr/local/bin/uid_entrypoint
+
+# Pre-set $SHELL=/usr/bin/zsh so the dotfiles install.sh's
+# `set_default_shell` function returns early ("Default shell already
+# set to zsh") instead of running `sudo chsh`, which would fail under
+# restricted-v2's dropped CAP_SETUID.
+ENV SHELL=/usr/bin/zsh
 
 ENTRYPOINT ["/usr/local/bin/uid_entrypoint"]
 USER ${UID}
