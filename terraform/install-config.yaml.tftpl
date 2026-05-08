@@ -20,28 +20,14 @@ controlPlane:
         size: 120
         type: gp3
 compute:
-# General worker pool — disabled. The 3 control-plane nodes carry every
-# CPU workload via the converged-cluster pattern. Keep this entry so the
-# installer's compute-pool list isn't empty (some installer paths require
-# at least one compute pool definition).
+# Single "worker" pool — OpenShift IPI only supports "worker" or "edge" as
+# compute pool names. In the converged-cluster pattern the 3 CP nodes carry
+# all CPU workloads; this pool provides the GPU node(s) for RHAIIS.
+# When gpu_count=0 the pool has 0 replicas (pure converged, no GPU).
+# NVIDIA GPU Operator + NFD label these nodes nvidia.com/gpu.present=true;
+# RHAIIS lands here via nodeSelector + resource request.
 - hyperthreading: Enabled
   name: worker
-  replicas: ${worker_count}
-%{ if worker_count > 0 ~}
-  platform:
-    aws:
-      type: ${worker_instance_type}
-      rootVolume:
-        size: 120
-        type: gp3
-%{ endif ~}
-# GPU pool — hosts RHAIIS (vllm-cuda-rhel9). NVIDIA GPU Operator labels
-# these nodes with `nvidia.com/gpu.present=true`; the RHAIIS Deployment's
-# nodeSelector + nvidia.com/gpu resource request guarantee it lands here.
-# Pinned to one AZ because g5 capacity is unevenly distributed and we want
-# predictable launch behavior at booth time.
-- hyperthreading: Enabled
-  name: gpu
   replicas: ${gpu_count}
 %{ if gpu_count > 0 ~}
   platform:

@@ -168,6 +168,7 @@ resource "null_resource" "sts_setup" {
   triggers = {
     install_dir    = var.install_dir
     cluster_name   = var.cluster_name
+    ccoctl_name    = local.ccoctl_name
     aws_region     = var.aws_region
     aws_profile    = var.aws_profile != null ? var.aws_profile : ""
     install_binary = var.openshift_install_binary
@@ -175,6 +176,7 @@ resource "null_resource" "sts_setup" {
   }
 
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
     command = <<-EOT
       set -euo pipefail
 %{ if var.aws_profile != null ~}
@@ -202,7 +204,7 @@ resource "null_resource" "sts_setup" {
 
       echo "==> Running ccoctl aws create-all (OIDC provider + platform IAM roles)..."
       ./ccoctl aws create-all \
-        --name="${var.cluster_name}" \
+        --name="${local.ccoctl_name}" \
         --region="${var.aws_region}" \
         --credentials-requests-dir="$INSTALL_DIR/cred-reqs" \
         --output-dir="$INSTALL_DIR/ccoctl-output"
@@ -217,6 +219,7 @@ resource "null_resource" "sts_setup" {
 
   provisioner "local-exec" {
     when    = destroy
+    interpreter = ["/bin/bash", "-c"]
     command = <<-EOT
       set -euo pipefail
 %{ if self.triggers.aws_profile != "" ~}
@@ -227,11 +230,11 @@ resource "null_resource" "sts_setup" {
       echo "==> Cleaning up ccoctl-created AWS resources (OIDC provider + platform IAM roles)..."
       if [ -x ./ccoctl ]; then
         ./ccoctl aws delete \
-          --name="${self.triggers.cluster_name}" \
+          --name="${self.triggers.ccoctl_name}" \
           --region="${self.triggers.aws_region}" || true
       else
         echo "    ccoctl binary not found; skipping OIDC cleanup."
-        echo "    If the S3 bucket ${self.triggers.cluster_name}-oidc still exists, delete it manually."
+        echo "    If the S3 bucket ${self.triggers.ccoctl_name}-oidc still exists, delete it manually."
       fi
     EOT
   }
@@ -250,6 +253,7 @@ resource "null_resource" "openshift_install" {
   }
 
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
     command = <<-EOT
       set -euo pipefail
       echo "Running openshift-install create cluster (this takes 30-45 min)..."
@@ -262,6 +266,7 @@ resource "null_resource" "openshift_install" {
 
   provisioner "local-exec" {
     when    = destroy
+    interpreter = ["/bin/bash", "-c"]
     command = <<-EOT
       set -euo pipefail
       echo "Running openshift-install destroy cluster..."
@@ -290,12 +295,13 @@ resource "null_resource" "gitops_bootstrap" {
   }
 
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
     command = <<-EOT
       set -euo pipefail
       export KUBECONFIG="${var.install_dir}/auth/kubeconfig"
 
       echo "==> Applying operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG)..."
-      ${var.oc_binary} apply -f ${path.module}/../gitops/operator/
+      ${var.oc_binary} apply --server-side -f ${path.module}/../gitops/operator/
 
       echo "==> Waiting for openshift-gitops Argo CD server to be Ready..."
       for i in $(seq 1 60); do
@@ -407,6 +413,9 @@ resource "null_resource" "gitops_bootstrap" {
         --dry-run=client -o yaml | ${var.oc_binary} apply -f -
 
       # ── Argo CD root Application ──────────────────────────────────
+
+      echo "==> Granting cluster-admin to Argo CD application controller..."
+      ${var.oc_binary} apply -f ${path.module}/../gitops/bootstrap/argocd-cluster-admin.yaml
 
       echo "==> Bootstrapping Argo CD root Application (app-of-apps)..."
       ${var.oc_binary} apply -f ${path.module}/../gitops/bootstrap/root-app.yaml

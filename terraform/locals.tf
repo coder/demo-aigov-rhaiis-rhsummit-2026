@@ -3,6 +3,11 @@ locals {
   cluster_fqdn = "${var.cluster_name}.${var.base_domain}"
   apps_domain  = "apps.${local.cluster_fqdn}"
 
+  # ccoctl creates an S3 bucket named <name>-oidc. S3 bucket names are
+  # globally unique, so "cluster-oidc" will collide. Use a name derived
+  # from the cluster FQDN (dots replaced with hyphens) to avoid this.
+  ccoctl_name = replace(local.cluster_fqdn, ".", "-")
+
   # Single-Node OpenShift (SNO) when control_plane_count == 1
   is_sno = var.control_plane_count == 1
 

@@ -7,6 +7,10 @@
 crash.log
 override.tf
 override.tf.json
+terraform.tfvars
+terraform/terraform.tfvars
+terraform/.cluster/
+terraform/ccoctl
 
 # Secrets / credentials
 *.pem
@@ -33,3 +37,6 @@ build/
 # Helm
 charts/*.tgz
 .helm/
+
+# Deployment prep reports (workspace-local, not committed)
+deployment-prep-report_*.md

@@ -22,18 +22,6 @@
 #
 # Package: gpu-operator-certified
 ---
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: gpu-operator-certified
-  namespace: nvidia-gpu-operator
-spec:
-  channel: stable
-  installPlanApproval: Automatic
-  name: gpu-operator-certified
-  source: certified-operators
-  sourceNamespace: openshift-marketplace
----
 # The GPU operator ships with its own dedicated namespace (rather than
 # landing in openshift-operators) so the operator's NodeFeatureDiscovery
 # Helper Pods + ClusterPolicy CRs have a clean home.
@@ -57,3 +45,15 @@ metadata:
 spec:
   targetNamespaces:
     - nvidia-gpu-operator
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: gpu-operator-certified
+  namespace: nvidia-gpu-operator
+spec:
+  channel: stable
+  installPlanApproval: Automatic
+  name: gpu-operator-certified
+  source: certified-operators
+  sourceNamespace: openshift-marketplace

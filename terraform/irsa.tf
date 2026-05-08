@@ -16,7 +16,7 @@
 ###############################################################################
 
 locals {
-  oidc_bucket_name  = "${var.cluster_name}-oidc"
+  oidc_bucket_name  = "${local.ccoctl_name}-oidc"
   oidc_provider_url = "${local.oidc_bucket_name}.s3.${var.aws_region}.amazonaws.com"
   oidc_provider_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${local.oidc_provider_url}"
 }

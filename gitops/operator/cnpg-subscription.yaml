@@ -20,8 +20,8 @@
 # pin to a specific channel/version for production.
 #
 # Package: cloudnative-pg
-# Source:  community-operators
-# Channel: stable-v1.24
+# Source:  certified-operators (EDB-engineered, RH-certified for OCP)
+# Channel: stable-v1
 ---
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
@@ -29,8 +29,8 @@ metadata:
   name: cloudnative-pg
   namespace: openshift-operators
 spec:
-  channel: stable-v1.24
+  channel: stable-v1
   installPlanApproval: Automatic
   name: cloudnative-pg
-  source: community-operators
+  source: certified-operators
   sourceNamespace: openshift-marketplace

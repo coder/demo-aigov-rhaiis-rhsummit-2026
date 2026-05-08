@@ -1,0 +1,20 @@
+# Grant cluster-admin to the Argo CD application controller so it can
+# manage CRDs and cluster-scoped resources (CNPG Clusters, ClusterIssuers,
+# ClusterPolicies, etc.). The default OpenShift GitOps RBAC only covers
+# a subset of namespaced resources.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openshift-gitops-argocd-cluster-admin
+  labels:
+    app.kubernetes.io/name: openshift-gitops
+    app.kubernetes.io/component: application-controller
+    app.kubernetes.io/part-of: openshift-gitops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: openshift-gitops-argocd-application-controller
+    namespace: openshift-gitops
