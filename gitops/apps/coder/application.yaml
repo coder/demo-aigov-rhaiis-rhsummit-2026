@@ -175,6 +175,8 @@ spec:
             name: coder-server
             workspacePerms: true
             enableDeployments: true
+            annotations:
+              eks.amazonaws.com/role-arn: "arn:aws:iam::342934376218:role/demo/cluster-coder-bedrock"
 
           # OpenShift restricted-v2 SCC compliance (per docs.coder.com/install/openshift)
           securityContext:
