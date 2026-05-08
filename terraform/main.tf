@@ -46,6 +46,15 @@ data "aws_route53_zone" "base" {
   private_zone = false
 }
 
+# The cluster zone is created by openshift-install. We look it up here
+# so terraform can output the zone ID for scripts/configure-manifests.sh
+# and the cert-manager ClusterIssuer hostedZoneID.
+data "aws_route53_zone" "cluster" {
+  name         = "${var.cluster_name}.${var.base_domain}"
+  private_zone = false
+  depends_on   = [null_resource.openshift_install]
+}
+
 data "local_file" "pull_secret" {
   filename = pathexpand(var.pull_secret_path)
 }
@@ -420,6 +429,22 @@ resource "null_resource" "gitops_bootstrap" {
         --dry-run=client -o yaml | ${var.oc_binary} apply -f -
 
       # ── Argo CD root Application ──────────────────────────────────
+
+      # Ensure the cluster zone is delegated from the parent zone so that
+      # public DNS resolvers can find ACME challenge TXT records.
+      echo "==> Ensuring NS delegation for cluster zone in parent zone..."
+      CLUSTER_ZONE_NS=$(aws route53 list-resource-record-sets \
+        --hosted-zone-id "$(aws route53 list-hosted-zones-by-name \
+          --dns-name "${var.cluster_name}.${var.base_domain}" \
+          --query "HostedZones[0].Id" --output text | sed 's|/hostedzone/||')" \
+        --query "ResourceRecordSets[?Type=='NS'].ResourceRecords[].Value" \
+        --output text | tr '\t' '\n' | sort)
+      # Build the JSON change batch
+      NS_RECORDS=$(echo "$CLUSTER_ZONE_NS" | awk '{printf "{\"Value\":\"%s\"},", $0}' | sed 's/,$//')
+      aws route53 change-resource-record-sets \
+        --hosted-zone-id "${data.aws_route53_zone.base.zone_id}" \
+        --change-batch "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"${var.cluster_name}.${var.base_domain}.\",\"Type\":\"NS\",\"TTL\":300,\"ResourceRecords\":[$NS_RECORDS]}}]}" \
+        --output text || echo "    (NS delegation may already exist)"
 
       echo "==> Granting cluster-admin to Argo CD application controller..."
       ${var.oc_binary} apply -f ${path.module}/../gitops/bootstrap/argocd-cluster-admin.yaml

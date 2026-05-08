@@ -1,3 +1,13 @@
+output "cluster_fqdn" {
+  description = "Cluster FQDN (<cluster_name>.<base_domain>). Used by scripts/configure-manifests.sh."
+  value       = local.cluster_fqdn
+}
+
+output "cluster_zone_id" {
+  description = "Route 53 hosted zone ID for the cluster subdomain (created by openshift-install). Used by cert-manager for DNS-01 ACME challenges."
+  value       = data.aws_route53_zone.cluster.zone_id
+}
+
 output "cluster_api_url" {
   description = "OpenShift API server URL."
   value       = "https://api.${var.cluster_name}.${var.base_domain}:6443"
