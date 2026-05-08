@@ -173,27 +173,25 @@ spec:
                 label: grafana_dashboard
                 labelValue: "1"
                 # The umbrella `coder-observability` chart ships its
-                # own dashboards provisioning file
-                # (`sidecar.yaml`, provider name `sidecar`, folder
-                # `Other`) pointing at `/tmp/dashboards`. The grafana
-                # subchart auto-generates a SECOND provider
-                # (`sc-dashboardproviders.yaml`, provider name
-                # `sidecarProvider`, no folder) for the same path.
-                # Two providers reading the same files → every
-                # dashboard UID is "duplicated" → Grafana disables
-                # write permission for both providers → NO
+                # OWN dashboards provisioning file
+                # (`templates/configmap-grafana-dashboards.yaml` →
+                # `sidecar.yaml`, provider name `sidecar`, folder
+                # `Other`) pointing at `/tmp/dashboards`. By default
+                # the grafana subchart ALSO auto-generates a SECOND
+                # provisioning file (`sc-dashboardproviders.yaml`)
+                # for the same path. Two files = two provider
+                # instances = every UID inserted twice = Grafana
+                # disables writes for both providers, and NO
                 # dashboards (Coder, AI Bridge, agent-boundaries,
                 # all of Loki) actually land in the database.
                 #
-                # Fix: rename the auto-generated provider to match
-                # the umbrella's `sidecar`/`Other`. With identical
-                # names, Grafana's alphabetical-file processing
-                # collapses them into a single provider entry.
-                provider:
-                  name: sidecar
-                  folder: "Other"
-                  allowUiUpdates: true
-                  disableDelete: true
+                # `SCProvider: false` skips the chart's
+                # auto-generated provisioning file. The kiwigrid
+                # sidecar CONTAINER still runs and copies dashboard
+                # ConfigMaps into `/tmp/dashboards`; the umbrella's
+                # `sidecar.yaml` is the single provider that scans
+                # that directory.
+                SCProvider: false
               datasources:
                 enabled: true
                 label: grafana_datasource
