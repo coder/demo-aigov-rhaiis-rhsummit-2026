@@ -406,12 +406,12 @@ resource "null_resource" "gitops_bootstrap" {
       echo "==> Creating coder namespace if missing..."
       ${var.oc_binary} create namespace coder --dry-run=client -o yaml | ${var.oc_binary} apply -f -
 
-      echo "==> Pre-creating coder ServiceAccount with Bedrock IAM role annotation..."
+      echo "==> Pre-creating coder-server ServiceAccount with Bedrock IAM role annotation..."
       cat <<SA_EOF | ${var.oc_binary} apply -f -
       apiVersion: v1
       kind: ServiceAccount
       metadata:
-        name: coder
+        name: coder-server
         namespace: coder
         annotations:
           eks.amazonaws.com/role-arn: "${aws_iam_role.coder_bedrock.arn}"

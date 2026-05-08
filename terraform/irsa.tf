@@ -72,7 +72,7 @@ resource "aws_iam_role" "coder_bedrock" {
       Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
-          "${local.oidc_provider_url}:sub" = "system:serviceaccount:coder:coder"
+          "${local.oidc_provider_url}:sub" = "system:serviceaccount:coder:coder-server"
         }
       }
     }]

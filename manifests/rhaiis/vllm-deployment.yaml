@@ -63,10 +63,11 @@ spec:
         nvidia.com/gpu.present: "true"
       containers:
         - name: vllm
-          # CUDA-enabled RHAIIS image. `latest` per RH Summit 2026 demo
-          # preference; pin to a specific tag for production after
-          # verifying tool-call parser support.
-          image: registry.redhat.io/rhoai/vllm-cuda-rhel9:latest
+          # CUDA-enabled RHAIIS image. Using the quay.io mirror which
+          # doesn't require an RHOAI subscription entitlement. The
+          # registry.redhat.io path requires a specific SKU that may not
+          # be on the partner pull secret.
+          image: quay.io/modh/vllm:rhoai-2.20-cuda
           imagePullPolicy: Always
           args:
             - --model

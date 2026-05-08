@@ -80,6 +80,7 @@ spec:
             enable: false      # We'll create OpenShift Route separately if needed
 
           serviceAccount:
+            name: coder-server
             workspacePerms: true
             enableDeployments: true
 
