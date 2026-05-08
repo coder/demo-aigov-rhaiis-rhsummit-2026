@@ -78,14 +78,18 @@ spec:
               port: 5432
               database: coder
               username: coder
-              # mountSecret: "secret-postgres"   # see header note
-              # The chart's own postgres-exporter StatefulSet —
-              # disabled because we don't have a PGUSER/PGPASSWORD-
-              # shaped Secret that maps to CNPG's `coder-app`. Wire
-              # this back on with a translation Secret if/when we
-              # care about postgres-specific dashboards.
+              # `secret-postgres` is sealed at
+              # manifests/secrets/secret-postgres.yaml — key
+              # PGPASSWORD, sourced from the CNPG-generated
+              # `coder-app` Secret in the `coder` namespace. The
+              # chart wires this into the exporter Deployment so
+              # `pg_up` (and ~50 other postgres metrics) get
+              # published, which the Coder Status dashboard's
+              # "Postgres" panel reads. Without this the panel
+              # shows DOWN.
+              mountSecret: "secret-postgres"
               exporter:
-                enabled: false
+                enabled: true
 
             dashboards:
               enabled: true
