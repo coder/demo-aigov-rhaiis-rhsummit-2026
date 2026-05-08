@@ -37,9 +37,16 @@ ARG UID=1001
 #
 # fzf / ripgrep / fd-find / xclip live in EPEL on UBI9, so we enable
 # EPEL once and install them in a single transaction.
+# 1) Enable EPEL — done as its own layer so metadata is refreshed for
+#    the next RUN. (Combining it with the package install in one RUN
+#    failed for `tmux` — dnf's cache from the first transaction didn't
+#    see the just-added EPEL repo.)
 RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
         https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm \
-    && dnf install -y --nodocs --setopt=install_weak_deps=False \
+    && dnf makecache --refresh
+
+# 2) Tools available in UBI9 BaseOS / AppStream + EPEL.
+RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
         bash-completion \
         ca-certificates \
         fd-find \
@@ -58,13 +65,22 @@ RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
         ripgrep \
         sudo \
         tar \
-        tmux \
         unzip \
         vim-enhanced \
         wget \
         which \
         zip \
         zsh \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# 3) tmux — not in UBI9 baseos/appstream. EPEL 9's tmux depends on
+#    CRB (CodeReady Builder) which UBI9 doesn't ship, so EPEL's
+#    package can't install. Pull the Rocky Linux 9 AppStream RPM
+#    directly — same upstream RHEL 9 source, same ABI, no CRB
+#    needed.
+RUN dnf install -y --nodocs \
+        https://download.rockylinux.org/pub/rocky/9/AppStream/x86_64/os/Packages/t/tmux-3.2a-5.el9.x86_64.rpm \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 
