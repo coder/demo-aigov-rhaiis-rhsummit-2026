@@ -1,0 +1,19 @@
+# `coder-workspaces` namespace — where every workspace pod lands.
+#
+# Created here (instead of letting Coder/the Helm chart auto-create it
+# at first workspace build) so the namespace's UID-range annotation is
+# stable across cluster rebuilds — every -ocp template's main.tf
+# default for `var.namespace` points at this name, and chart values
+# overrides for SCC compliance assume the standard restricted-v2
+# range. If we let Coder create it on the fly, the SA permissions
+# (next file) and the SCC bindings (e.g., NET_ADMIN for the firewall
+# template) wouldn't have a guaranteed namespace to land in at
+# bootstrap time.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coder-workspaces
+  labels:
+    app.kubernetes.io/name: coder-workspaces
+    app.kubernetes.io/part-of: coder
+    app.kubernetes.io/component: workspaces

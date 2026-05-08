@@ -1,0 +1,47 @@
+# Cross-namespace RBAC: lets the `coder-provisioner` SA in the `coder`
+# namespace create + manage workspace pods/PVCs/deployments inside the
+# `coder-workspaces` namespace.
+#
+# The Coder Helm chart's `serviceAccount.workspacePerms: true` only
+# grants the SA in the chart's release namespace (here: `coder`). When
+# workspaces live elsewhere — which they do here, since
+# `coder-workspaces` is the standard Coder convention for separating
+# workspace pods from the control plane — we have to declare a matching
+# Role + RoleBinding in the workspace namespace ourselves.
+#
+# Without this, the provisioner fails template apply with:
+#   Error: persistentvolumeclaims is forbidden: User
+#   "system:serviceaccount:coder:coder-provisioner" cannot create
+#   resource "persistentvolumeclaims" in API group "" in the namespace
+#   "coder-workspaces"
+#
+# Rules mirror the chart-managed Role/coder-provisioner-workspace-perms
+# in the `coder` ns. If the chart bumps and adds new resource types,
+# update this file to match.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: coder-provisioner-workspace-perms
+  namespace: coder-workspaces
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "persistentvolumeclaims"]
+    verbs: ["create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coder-provisioner
+  namespace: coder-workspaces
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coder-provisioner-workspace-perms
+subjects:
+  - kind: ServiceAccount
+    name: coder-provisioner
+    namespace: coder

@@ -1,0 +1,38 @@
+# Cluster-side bootstrap for the `coder-workspaces` namespace where
+# Coder workspace pods land. Owns:
+#   - the Namespace itself
+#   - cross-namespace RBAC for the `coder-provisioner` SA in `coder`
+#     (Role/RoleBinding letting it create pods/PVCs/deployments here)
+#
+# Sealed Secrets that the workspace pods consume (today: `ghcr-pull`
+# in manifests/secrets/ghcr-pull.yaml) live in the platform-secrets
+# Argo app (sync wave 0) — they target this namespace by name.
+#
+# Sync wave 1 — runs alongside `coder` so the namespace + RBAC exist
+# by the time someone tries to push a workspace template.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coder-workspaces
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/coder-workspaces
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: coder-workspaces
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
