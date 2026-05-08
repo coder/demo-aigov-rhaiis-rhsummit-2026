@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: group-sync-operator
+  labels:
+    # Restricted-v2 is the default; the operator's CSV picks an SCC
+    # that fits its workload. Marker label so other tooling can
+    # find this namespace as the operator's home.
+    openshift.io/cluster-monitoring: "true"

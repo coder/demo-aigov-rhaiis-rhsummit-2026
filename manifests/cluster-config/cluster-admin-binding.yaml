@@ -1,0 +1,24 @@
+# Bind the GitHub `admin` team (synced by group-sync-operator into
+# the OpenShift Group below) to cluster-admin.
+#
+# The Group itself is materialized by the GroupSync CR in
+# `group-sync.yaml`. Until the operator runs at least once, the
+# Group won't exist and this binding is harmless (RBAC binds by
+# name; missing subjects are silently ignored at authz time).
+#
+# Group-sync naming: redhat-cop/group-sync-operator names synced
+# Groups `<org>-<team>` by default. We pin it explicitly via
+# `prune` + an output transform in the GroupSync spec for
+# determinism.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: github-admin-team-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: demo-rhsummit-users-admin

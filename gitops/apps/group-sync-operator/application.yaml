@@ -1,0 +1,50 @@
+# redhat-cop/group-sync-operator — installs from the
+# `community-operators` CatalogSource via OLM. Argo manages the
+# Subscription/Namespace/OperatorGroup; OLM does the rest (CSV,
+# CRDs, deployment).
+#
+# Why this operator:
+#   - OpenShift's built-in GitHub IdP only does login filtering
+#     (organizations / teams). It does NOT continuously sync team
+#     membership into OpenShift Groups. Without a separate sync,
+#     the `demo-rhsummit-users:admin` GitHub team's `cluster-admin`
+#     binding (manifests/cluster-config/cluster-admin-binding.yaml)
+#     would have nothing to bind to.
+#   - This operator polls GitHub every N minutes (default 1h, tuned
+#     down via the GroupSync CR's `schedule` field) and reconciles
+#     OpenShift Groups to match team membership. Add/remove an
+#     admin via `gh api ...` or the GitHub UI; cluster-admin moves
+#     within the schedule.
+#
+# Sync wave -1 — the operator must be present before the GroupSync
+# CR (in cluster-config, wave -2 → CRD-already-exists hard ordering
+# means GroupSync at wave 0 in `cluster-config` waits on the CRD
+# being created by OLM here; we use `SkipDryRunOnMissingResource`
+# below to avoid validation-time failures while OLM is still
+# bringing up the CSV).
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: group-sync-operator
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/group-sync-operator
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: group-sync-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

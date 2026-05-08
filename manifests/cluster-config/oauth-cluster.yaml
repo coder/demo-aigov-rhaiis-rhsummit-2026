@@ -1,0 +1,41 @@
+# Cluster OAuth — GitHub identity provider.
+#
+# Adds a GitHub IdP to the singleton `OAuth/cluster` CR. Argo claims
+# only `spec.identityProviders` via server-side apply; the installer
+# retains ownership of everything else (token timeouts, kubeadmin
+# state, etc.).
+#
+# Login is gated to members of the `demo-rhsummit-users` GitHub org
+# (decision #20 already established this org as the demo's audience).
+# Cluster-admin elevation is NOT done here — that's the
+# `redhat-cop/group-sync-operator` syncing the `admin` team into an
+# OpenShift Group, plus the ClusterRoleBinding in
+# cluster-admin-binding.yaml. Reading from the OpenShift side: every
+# org member can log in; only admin-team members hit any privileged
+# RBAC because that's all that's bound.
+#
+# Adding/removing IdPs:
+#   - Each entry's `name` becomes the path segment in the OAuth
+#     callback URL (here: /oauth2callback/github). Changing it
+#     invalidates the GitHub OAuth app's callback config — coordinate.
+#   - mappingMethod=claim: first user with a given identity wins;
+#     subsequent collisions surface as a login error rather than
+#     silently mapping. Right default for a single-IdP cluster.
+apiVersion: config.openshift.io/v1
+kind: OAuth
+metadata:
+  name: cluster
+spec:
+  identityProviders:
+    - name: github
+      mappingMethod: claim
+      type: GitHub
+      github:
+        clientID: Ov23liDfSHU5JLZVTgWX
+        clientSecret:
+          # The Secret must live in `openshift-config` (OpenShift
+          # convention) with key `clientSecret`. Sealed manifest:
+          # manifests/secrets/github-oauth-client-secret.yaml.
+          name: github-oauth-client-secret
+        organizations:
+          - demo-rhsummit-users

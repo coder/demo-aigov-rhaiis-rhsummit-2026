@@ -1,0 +1,36 @@
+# GroupSync — pulls `demo-rhsummit-users:admin` GitHub team
+# membership into an OpenShift Group every 5 minutes.
+#
+# Output Group name: `demo-rhsummit-users-admin` (matches what
+# cluster-admin-binding.yaml binds to). The
+# `org-team` → `<org>-<team>` rename is the operator's default;
+# leaving it implicit so the binding stays predictable.
+#
+# Auth: a fine-grained or classic GitHub PAT with `read:org`
+# scope, sealed at manifests/secrets/github-group-sync-token.yaml
+# and decrypted into Secret/github-group-sync-token in this
+# namespace. The token is read-only — only used to query team
+# membership; it never writes anything to GitHub.
+#
+# Tuning the cadence:
+#   - 5 minutes is fast enough for a demo where the operator
+#     adding/removing members should "just work" in the loop.
+#   - GitHub abuse-rate-limit is 5000 requests/hour for an authed
+#     PAT; one team poll = a handful of requests. We're nowhere
+#     near it.
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: GroupSync
+metadata:
+  name: github-admin-team
+  namespace: group-sync-operator
+spec:
+  schedule: "*/5 * * * *"
+  providers:
+    - name: github
+      github:
+        credentialsSecret:
+          name: github-group-sync-token
+          namespace: group-sync-operator
+        organization: demo-rhsummit-users
+        teams:
+          - admin
