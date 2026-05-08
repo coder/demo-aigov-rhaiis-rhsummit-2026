@@ -1,0 +1,88 @@
+# Wildcard cert for the default IngressController (*.apps.<cluster_fqdn>).
+#
+# Covers ALL Routes that don't bring their own cert — console, oauth,
+# argocd, monitoring, etc. Replaces the self-signed default.
+#
+# The Secret lands in openshift-ingress because that's where the router
+# pods run and where the IngressController looks for defaultCertificate.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: apps-wildcard-cert
+  namespace: openshift-ingress
+  labels:
+    app.kubernetes.io/name: apps-wildcard-cert
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: cert-manager
+spec:
+  secretName: apps-wildcard-cert
+  duration: 2160h
+  renewBefore: 720h
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: "*.apps.cluster.rhsummit.coderdemo.io"
+  dnsNames:
+    - "*.apps.cluster.rhsummit.coderdemo.io"
+---
+# Patch the default IngressController to use the Let's Encrypt wildcard
+# instead of the self-signed cert. After this, console, oauth, argocd UI,
+# and any Route without its own cert get a trusted cert automatically.
+apiVersion: operator.openshift.io/v1
+kind: IngressController
+metadata:
+  name: default
+  namespace: openshift-ingress-operator
+  labels:
+    app.kubernetes.io/name: default-ingress
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: cert-manager
+spec:
+  defaultCertificate:
+    name: apps-wildcard-cert
+---
+# API server certificate (api.<cluster_fqdn>).
+#
+# The APIServer resource references a Secret in openshift-config.
+# cert-manager issues the cert there; the kube-apiserver pods pick it up
+# and roll (~5 min across 3 masters, one-time).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-cert
+  namespace: openshift-config
+  labels:
+    app.kubernetes.io/name: api-cert
+    app.kubernetes.io/component: apiserver
+    app.kubernetes.io/part-of: cert-manager
+spec:
+  secretName: api-cert
+  duration: 2160h
+  renewBefore: 720h
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: api.cluster.rhsummit.coderdemo.io
+  dnsNames:
+    - api.cluster.rhsummit.coderdemo.io
+---
+# Patch the APIServer to use the Let's Encrypt cert for the external
+# API endpoint. After this, `oc login` and kubeconfig users get a trusted
+# cert instead of the internal cluster CA.
+#
+# NOTE: this triggers a rolling restart of kube-apiserver pods (~5 min).
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+  labels:
+    app.kubernetes.io/name: apiserver-cert
+    app.kubernetes.io/component: apiserver
+    app.kubernetes.io/part-of: cert-manager
+spec:
+  servingCerts:
+    namedCertificates:
+      - names:
+          - api.cluster.rhsummit.coderdemo.io
+        servingCertificate:
+          name: api-cert
