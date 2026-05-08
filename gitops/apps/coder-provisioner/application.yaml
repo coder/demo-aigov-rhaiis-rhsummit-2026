@@ -53,6 +53,13 @@ spec:
               value: "http://coder.coder.svc.cluster.local"
             - name: CODER_PROMETHEUS_ENABLE
               value: "true"
+            # readOnlyRootFilesystem=true means /home/coder is read-only.
+            # The Coder CLI (which the provisionerd is invoked through)
+            # tries to mkdir its XDG config dir on first run. Point HOME
+            # at /tmp so XDG_CONFIG_HOME lands on the writable emptyDir
+            # below.
+            - name: HOME
+              value: /tmp
 
           serviceAccount:
             workspacePerms: true
@@ -70,6 +77,19 @@ spec:
             readOnlyRootFilesystem: true
             seccompProfile:
               type: RuntimeDefault
+
+          # readOnlyRootFilesystem above means we need a writable mount
+          # for the Coder CLI's XDG config dir (which provisionerd
+          # touches on startup). HOME=/tmp env above points it here.
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+              readOnly: false
 
           resources:
             requests:
