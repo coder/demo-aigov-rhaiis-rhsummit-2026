@@ -248,6 +248,18 @@ spec:
             global:
               dnsService: "dns-default"
               dnsNamespace: "openshift-dns"
+
+            # Pull memcached from Google's Docker Hub mirror — the
+            # default `docker.io/library/memcached:1.6.23-alpine`
+            # hits DH's anonymous rate limit on a fresh-cluster sync
+            # (memcached-exporter has the same problem; we disable
+            # it altogether below since it has no published mirror).
+            memcached:
+              image:
+                repository: mirror.gcr.io/library/memcached
+                tag: 1.6.23-alpine
+            memcachedExporter:
+              enabled: false
             # The loki SUBCHART has its own `loki:` block for the
             # Loki app's pod-level securityContext (chart default
             # 10001). Path: loki.loki.podSecurityContext.
