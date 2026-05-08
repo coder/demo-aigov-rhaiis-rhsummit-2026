@@ -58,13 +58,8 @@ gpu_zone_index     = 0              # us-east-1a
 coder_chart_version = "2.33.0-rc.3"
 coder_image_tag     = "v2.33.0-rc.3"
 coder_subdomain     = "coder"
-coder_oidc_provider_url = ""     # leave empty to use built-in user/pass for the booth
+coder_oidc_provider_url = ""     # unused — GitHub OAuth replaces OIDC, see decisions.md §20
 
-###############################################################################
-# GitHub OAuth (Coder SSO)
-###############################################################################
-
-# Create at https://github.com/settings/developers (or org settings).
-# Callback URL: https://coder.apps.<cluster_name>.<base_domain>/api/v2/users/oauth2/github/callback
-github_oauth_client_id     = ""
-github_oauth_client_secret = ""
+# GitHub OAuth credentials for Coder SSO live in the coder-secrets
+# SealedSecret (manifests/secrets/coder-secrets.yaml). Seal them with
+# `kubeseal` after the cluster is up — see docs/secrets.md.
