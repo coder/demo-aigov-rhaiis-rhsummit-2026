@@ -87,6 +87,16 @@ spec:
             - name: CODER_STRICT_TRANSPORT_SECURITY
               value: "31536000"
 
+            # ── Token lifetimes ─────────────────────────────────────────
+            # Default server cap is 168h (7d), too short for the GH
+            # Actions template-push token which we'd otherwise have to
+            # rotate weekly. 1y is still bounded — the token is a
+            # GH Actions secret, scoped to template push, and rotated
+            # explicitly when the Coder version bumps or the
+            # SA-equivalent pattern changes.
+            - name: CODER_MAX_TOKEN_LIFETIME
+              value: "8760h"
+
             # ── Auth: GitHub OAuth for `demo-rhsummit-users` org ────────
             # Password auth disabled — GitHub is the only login method.
             - name: CODER_DISABLE_PASSWORD_AUTH
