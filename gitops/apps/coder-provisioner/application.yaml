@@ -58,6 +58,19 @@ spec:
             workspacePerms: true
             enableDeployments: true
 
+          # OpenShift restricted-v2 SCC compliance — same pattern as
+          # gitops/apps/coder/application.yaml. The chart hardcodes
+          # runAsUser: 1000, which falls outside the `coder` namespace's
+          # uid-range and is rejected by admission. Null'ing the UID/GID
+          # lets the SCC mutating admission inject valid IDs.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: null
+            runAsGroup: null
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+
           resources:
             requests:
               cpu: 250m
