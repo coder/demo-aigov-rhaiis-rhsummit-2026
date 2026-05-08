@@ -1,0 +1,69 @@
+# Bitnami Sealed Secrets controller.
+#
+# The controller decrypts SealedSecret CRs (committed in
+# `manifests/secrets/`) into in-cluster Secrets at sync time. Encrypted
+# manifests are safe to store in a public Git repo; only the controller
+# (which holds the per-cluster sealing key) can decrypt them.
+#
+# Sync wave -1 — must come up BEFORE the platform-secrets app (wave 0)
+# applies any SealedSecret CR, otherwise Argo will mark those CRs Healthy
+# without any actual decryption happening (the CRD must exist; the
+# controller pod must be Ready).
+#
+# Sealing key backup — one-time post-bootstrap step. See docs/secrets.md
+# section "Backup & Recovery". The key lives in
+# `kube-system`-style location (here `sealed-secrets/sealed-secrets-key-*`)
+# and CANNOT be recovered if the cluster + the backup are both lost.
+#
+# Workflow for a new secret:
+#   1. `kubectl create secret … --dry-run=client -o yaml` (do NOT commit)
+#   2. Pipe through `kubeseal --controller-namespace=sealed-secrets …`
+#   3. Commit the SealedSecret YAML to `manifests/secrets/`
+#   4. Argo CD picks it up; controller decrypts in-cluster.
+#
+# The controller chart names the controller Service `sealed-secrets`
+# (default) so `kubeseal --controller-namespace=sealed-secrets` resolves
+# without extra flags.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sealed-secrets
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://bitnami-labs.github.io/sealed-secrets
+    chart: sealed-secrets
+    targetRevision: 2.16.2       # pinned; bump deliberately
+    helm:
+      releaseName: sealed-secrets
+      values: |
+        # Run the controller in its own namespace (OCP convention).
+        # `kube-system` works on K3s but on OpenShift `kube-system`
+        # has restrictive SCCs and isn't where user workloads belong.
+        fullnameOverride: sealed-secrets
+        # Match the chart's default Service name so kubeseal's
+        # --controller-name=sealed-secrets / --controller-namespace=sealed-secrets
+        # works without extra flags.
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sealed-secrets
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

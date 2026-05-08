@@ -2,7 +2,7 @@
 
 > Architectural and operational decisions made during the demo build, with the alternatives we considered and why we picked what we picked.
 > If you're tempted to revisit one of these — read the "why" first; we may have already burned that path.
-> Last updated 2026-04-27.
+> Last updated 2026-05-08.
 
 ## How to use this doc
 
@@ -257,13 +257,56 @@ If you change a decision, update this file in the same PR.
 
 ---
 
+## 19. Bitnami Sealed Secrets for in-Git secret management (not SOPS, not ESO+ASM, not Vault, not inline)
+
+**Picked:** Bitnami Sealed Secrets controller deployed via Argo CD (`gitops/apps/sealed-secrets/application.yaml`, sync wave -1). Encrypted `SealedSecret` CRs live in `manifests/secrets/` and are decrypted in-cluster by the controller. Workflow doc at [`docs/secrets.md`](secrets.md).
+
+**Considered:**
+- **SOPS + age/GPG + Argo CD plugin (KSOPS / argocd-vault-plugin)** — encryption keys live as files; needs an Argo plugin to decrypt at sync time, which means a custom Argo image or initContainer.
+- **External Secrets Operator + AWS Secrets Manager** — would have been the AWS-native answer (IRSA already works for the IAM grant). Cleanest for rotation, supports drift correction, no sealing-key DR risk.
+- **HashiCorp Vault** — overkill for a demo with two managed secrets.
+- **Inline values committed to Git** — non-starter for OAuth client secrets.
+- **`oc create secret` out-of-band, not in Git** — works but breaks the "every cluster-side state is a `git push`" Argo narrative we're selling at the booth.
+
+**Why:**
+- **On-prem-portability dominates.** Same theme as #3 (CNPG over RDS) and #4 (GHCR over ECR). The audience is OCP platform engineers running OpenShift on AWS, Azure, vSphere, bare-metal, air-gap. ESO+ASM is the most operationally clean choice on AWS, but it ties the secret-management narrative to AWS — exactly what we avoided for Postgres and the registry. Sealed Secrets runs identically on any cluster; "the controller is in your cluster" is a story that scales to all of them.
+- **Workflow parity with the existing K3s lab** (`zambruhni.com`). Operators already know `kubectl create secret … | kubeseal …`. No new mental model.
+- **Argo manages the cipher.** SealedSecret CRs are normal Argo-tracked resources; rotation is a `git commit` + push, like every other change in this repo.
+- **The deferred-secret-mgmt risks are bounded:**
+  - Sealing-key DR — backed up to 1Password / Vault on day 1; without it, every secret has to be re-sealed (acceptable for a demo lifecycle).
+  - Namespace-scoped by default — fine, every secret here is per-namespace.
+  - No native rotation API — manual re-seal, fine for the few secrets we have.
+
+**Tradeoffs:** Lose the AWS-native rotation story we'd have gotten with ESO+ASM. Sealing key is a single point of failure if both the cluster and the backup vault are lost simultaneously — bus factor, not a daily concern.
+
+**Trigger to revisit:** If the customer story shifts to AWS-only production architectures (full ASM + KMS encryption-at-rest + automated rotation narrative), swap to ESO+ASM. For booth: never.
+
+---
+
+## 20. GitHub OAuth into Coder, scoped to the `demo-rhsummit-users` org (not Coder built-in user/pass, not OIDC/Keycloak)
+
+**Picked:** Coder server runs with `CODER_DISABLE_PASSWORD_AUTH=true` and `CODER_OAUTH2_GITHUB_ALLOWED_ORGS=demo-rhsummit-users`. The OAuth client ID/secret live in the `coder-secrets` SealedSecret. Same OAuth app is reused as `CODER_EXTERNAL_AUTH_0_*` so workspaces inherit GitHub creds for git operations.
+
+**Considered:**
+- **Coder built-in user/pass** — what the original plan deferred to (`booth-acceptable to use Coder's built-in user/pass`). Reversed: passwords in a multi-person demo are friction, the GitHub org gate is sharper.
+- **OIDC into Keycloak / RH SSO** — closer to a federal-customer story but adds a Keycloak install + realm config the demo doesn't need; we have one access boundary (`demo-rhsummit-users` membership) and that's it.
+- **Reuse `coder/coder` GitHub org** — too broad; we want a clean cohort.
+
+**Why:** The org is the access boundary. Anyone we want in the demo gets invited to `demo-rhsummit-users`; everyone else hits "you're not a member of this org" at login. No password storage, no per-user creation flow during a booth crunch. The same OAuth app doubling as the workspace's git provider means cloning a private repo Just Works after login.
+
+**Tradeoffs:** Requires a GitHub org for the demo audience. Not a problem; we already have one. Password fallback is gone — if GitHub is down, no one logs in.
+
+**Trigger to revisit:** A federal customer says "no GitHub" — swap to RH SSO via OIDC.
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":
 
 - **IRSA migration** — replace static IAM keys with role-assumption (decision #10)
 - **STIG/FIPS hardening** — `restricted-v2` SCC overrides, `fips: true` in install-config
-- **Vault for secrets** — too heavy for the demo's 3 secrets
+- **Vault for secrets** — Sealed Secrets is the booth answer (decision #19); Vault is the production answer for orgs that already run it
 - **AAP for sprint trigger** — replaced with GitHub Actions
 - **Tekton for sprint trigger** — same
 - **AWS Load Balancer Controller** — overkill; OCP IngressController serves Routes
@@ -271,7 +314,7 @@ These came up; we said "not for booth, document and move on":
 - **LokiStack with S3 backing** — local PVC is fine for 7-day retention
 - **Tempo / Service Mesh / multi-cluster** — out of scope
 - **Bedrock invocation logging** — see decision #17
-- **OIDC / Keycloak SSO into Coder** — booth-acceptable to use Coder's built-in user/pass
+- **OIDC / Keycloak SSO into Coder** — superseded by GitHub OAuth (decision #20)
 
 ---
 

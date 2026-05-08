@@ -1,0 +1,82 @@
+# Coder external provisioner daemon.
+#
+# The Coder server runs with CODER_PROVISIONER_DAEMONS=0 (see
+# gitops/apps/coder/application.yaml), so all template builds run in this
+# separate Deployment. Splitting the provisioner from the API plane lets
+# us scale build capacity independently and isolate Terraform-execution
+# blast radius.
+#
+# Required Secret in the `coder` namespace before pods schedule:
+#
+#   `coder-provisioner-key` — the daemon's auth key against the Coder API.
+#                             Managed as a SealedSecret in
+#                             manifests/secrets/coder-provisioner-key.yaml.
+#                             See docs/secrets.md (or
+#                             docs/sealed-secrets-rollout.md for the
+#                             one-shot bootstrap step) for the
+#                             `coder provisioner keys create` + kubeseal
+#                             workflow.
+#
+# Sync wave 2 — runs after `coder` (wave 1) so the API is reachable when
+# the daemon dials home.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coder-provisioner
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://helm.coder.com/v2
+    chart: coder-provisioner
+    targetRevision: 2.33.0-rc.3       # match the Coder server chart version
+    helm:
+      releaseName: coder-provisioner
+      values: |
+        coder:
+          image:
+            repo: ghcr.io/coder/coder
+            tag: v2.33.0-rc.3          # MUST match the Coder server image
+            pullPolicy: IfNotPresent
+
+          replicaCount: 5
+
+          podAnnotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "2112"
+
+          env:
+            - name: CODER_URL
+              value: "http://coder.coder.svc.cluster.local"
+            - name: CODER_PROMETHEUS_ENABLE
+              value: "true"
+
+          serviceAccount:
+            workspacePerms: true
+            enableDeployments: true
+
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+
+        provisionerDaemon:
+          keySecretName: coder-provisioner-key
+          keySecretKey: key
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: coder
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

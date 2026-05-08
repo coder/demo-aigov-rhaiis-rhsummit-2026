@@ -1,0 +1,49 @@
+# Platform secrets — every SealedSecret CR committed under
+# `manifests/secrets/`. The Bitnami Sealed Secrets controller (deployed
+# by the `sealed-secrets` app at sync wave -1) decrypts each one into a
+# regular Kubernetes Secret in the namespace named in the CR.
+#
+# Sync wave 0 — runs after the controller is up but in the same wave as
+# postgres / cert-manager / gpu-stack. Apps that consume the decrypted
+# Secrets (Coder is wave 1) come up after the cipher has been resolved.
+#
+# Adding a new secret:
+#   1. Generate the plaintext Secret manifest with `kubectl create secret
+#      generic … --dry-run=client -o yaml` (do NOT commit the plaintext).
+#   2. Pipe through `kubeseal --controller-namespace=sealed-secrets
+#      --format yaml > manifests/secrets/<name>.yaml`.
+#   3. Commit the SealedSecret + push.
+#   4. Argo CD picks it up; controller decrypts in-cluster.
+#
+# See docs/secrets.md for the full workflow and per-secret kubeseal
+# invocations.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-secrets
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/secrets
+  destination:
+    server: https://kubernetes.default.svc
+    # Each SealedSecret CR carries its own target namespace inside its
+    # `spec.template.metadata.namespace`. The destination namespace
+    # below is just where Argo treats the Application as living; the
+    # actual Secrets land in whatever namespace each manifest specifies.
+    namespace: openshift-gitops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false   # SealedSecrets never need to create a ns
+      - ServerSideApply=true
