@@ -178,6 +178,24 @@ spec:
             - name: AWS_REGION
               value: "us-east-1"
 
+            # ── AI Gateway: Anthropic via Bedrock (IRSA) ────────────────
+            # Indexed provider config tells AI Gateway to route Anthropic
+            # API traffic to Bedrock. No static keys — the AWS SDK picks
+            # up credentials from the IRSA-projected token on the pod.
+            # BEDROCK_MODEL maps the default/primary model; Claude Code
+            # sends Anthropic-native model names which AI Gateway resolves
+            # to Bedrock inference profile IDs.
+            - name: CODER_AIBRIDGE_PROVIDER_0_TYPE
+              value: "anthropic"
+            - name: CODER_AIBRIDGE_PROVIDER_0_NAME
+              value: "anthropic"
+            - name: CODER_AIBRIDGE_PROVIDER_0_BEDROCK_REGION
+              value: "us-east-1"
+            - name: CODER_AIBRIDGE_PROVIDER_0_BEDROCK_MODEL
+              value: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+            - name: CODER_AIBRIDGE_PROVIDER_0_BEDROCK_SMALL_FAST_MODEL
+              value: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+
             # ── Coder Agents (beta) ─────────────────────────────────────
             # The CODER_EXPERIMENTS=agents flag was removed in v2.33.1
             # (PR #24432). Agents are on by default in beta — no env
