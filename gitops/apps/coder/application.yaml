@@ -148,14 +148,33 @@ spec:
             # Bedrock-only via IRSA — the pod identity webhook injects
             # AWS_ROLE_ARN + AWS_WEB_IDENTITY_TOKEN_FILE from the `coder`
             # ServiceAccount annotation. AI Bridge picks Bedrock up
-            # through the standard AWS SDK credential chain. No static
-            # OpenAI/Anthropic/Gemini keys.
+            # through the standard AWS SDK credential chain.
+            #
+            # OpenAI is a separate matter — Bedrock doesn't host
+            # GPT models, so AI Bridge needs a real upstream OpenAI
+            # API key for /api/v2/aibridge/openai/* requests (Codex
+            # CLI, GPT-5/4 traffic). Sourced from the existing
+            # `coder-secrets` SealedSecret under the `openai-api-key`
+            # data key. ALLOW_BYOK=false forces all workspace traffic
+            # through this central key (keeps the audit trail intact;
+            # without it, users could set OPENAI_API_KEY directly to
+            # a personal key and bypass governance).
+            #
+            # Anthropic still routes via Bedrock + IRSA; no API key
+            # required there.
             - name: CODER_AIBRIDGE_ENABLED
               value: "true"
             - name: CODER_AIBRIDGE_STRUCTURED_LOGGING
               value: "true"
             - name: CODER_AIBRIDGE_RETENTION
               value: "30d"
+            - name: CODER_AIBRIDGE_OPENAI_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: coder-secrets
+                  key: openai-api-key
+            - name: CODER_AIBRIDGE_ALLOW_BYOK
+              value: "false"
             - name: AWS_REGION
               value: "us-east-1"
 
