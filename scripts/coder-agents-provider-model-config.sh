@@ -461,7 +461,7 @@ GRANITE_PAYLOAD=$(jq -n \
     provider: "openai-compat",
     model: $model,
     display_name: $display,
-    context_limit: 32768,
+    context_limit: 16384,
     enabled: true,
     is_default: false,
     model_config: {
