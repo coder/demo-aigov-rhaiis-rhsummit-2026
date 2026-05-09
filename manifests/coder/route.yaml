@@ -18,6 +18,10 @@ metadata:
   namespace: coder
   annotations:
     haproxy.router.openshift.io/timeout: "300s"
+    # AI Bridge signs outgoing Bedrock requests with SigV4. If the router
+    # injects Forwarded/X-Forwarded-* headers, the Anthropic SDK includes
+    # them in the signature → Bedrock rejects with 403 signature mismatch.
+    haproxy.router.openshift.io/set-forwarded-headers: "never"
 spec:
   host: coder.apps.cluster.rhsummit.coderdemo.io   # replace before booth
   to:
@@ -39,6 +43,7 @@ metadata:
   namespace: coder
   annotations:
     haproxy.router.openshift.io/timeout: "300s"
+    haproxy.router.openshift.io/set-forwarded-headers: "never"
 spec:
   host: x.coder.apps.cluster.rhsummit.coderdemo.io   # placeholder for wildcard
   wildcardPolicy: Subdomain
