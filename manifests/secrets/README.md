@@ -13,6 +13,7 @@ invocations — lives in [`docs/secrets.md`](../../docs/secrets.md).
 |---|---|---|
 | `coder-secrets.yaml` | `coder` | Coder server (`gitops/apps/coder/application.yaml`) — GitHub OAuth ID/secret for the `demo-rhsummit-users` org |
 | `coder-provisioner-key.yaml` | `coder` | Coder external provisioner (`gitops/apps/coder-provisioner/application.yaml`) — daemon auth key issued by `coder provisioner keys create` |
+| `coder-admin-token.yaml` | `coder` | `coder-agents-config` Job (`gitops/apps/coder-agents-config/application.yaml`) — Owner-role API token used to call `/api/experimental/chats/...` and register Bedrock + RHAIIS providers/models |
 
 (Plus this README and a `.gitkeep`, which exist so Argo CD can resolve
 the path before the first SealedSecret is committed.)

@@ -14,6 +14,7 @@
 | `coder-routing` | 2 | OpenShift Route(s) for Coder with cert-manager-issued wildcard TLS + ingress wildcard policy patch |
 | `coder-provisioner` | 2 | External Coder provisioner daemon (5 replicas) — runs all template builds. Reads `coder-provisioner-key/key` to auth against the Coder API. |
 | `coder-observability` | 3 | Grafana + Prometheus + Loki + Coder dashboards (Helm chart from `helm.coder.com/observability`). Bundled dashboards include AI Bridge model-invocation metrics + Agent Boundaries (Agent Firewall) activity — the "every model call is governed and logged" booth visual. Route at `grafana.apps.cluster.<base_domain>`. |
+| `coder-agents-config` | 5 | Bootstrap Job that calls `/api/experimental/chats/...` to register the Coder Agents (chatd) providers and the Bedrock Opus/Sonnet + RHAIIS Granite model lineup. Runs on every sync (`hook: Sync`, `BeforeHookCreation` delete policy). Uses the `coder-server` SA (Bedrock IRSA) and a Coder admin token from `coder-admin-token` SealedSecret. See [`manifests/coder-agents-config/`](../manifests/coder-agents-config/). |
 
 ### What's NOT in GitOps
 

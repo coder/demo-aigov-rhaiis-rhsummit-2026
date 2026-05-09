@@ -41,6 +41,48 @@ anthropic.claude-3-5-haiku-20241022-v1:0
 
 AI Bridge picks Bedrock up via the standard AWS SDK credential chain — no static keys, no env var config beyond what's already in the Helm values (`CODER_AIBRIDGE_ENABLED=true`, `AWS_REGION=us-east-1`).
 
+### Coder Agents (chatd) provider + model bootstrap
+
+A new GitOps app at `gitops/apps/coder-agents-config/` registers the
+Bedrock + RHAIIS providers and model lineup with chatd via
+`/api/experimental/chats/...`. Reference template was the k3s-infra
+`coder-agents-provider-model-config.sh` script.
+
+What's wired:
+
+| Piece | Location |
+|---|---|
+| Canonical script | `scripts/coder-agents-provider-model-config.sh` (runnable from a laptop with `aws` + `jq` + `curl`) |
+| ConfigMap renderer | `scripts/render-coder-agents-configmap.sh` — regenerates the configmap when the script changes |
+| Tooling image | `coder-templates/images/agents-config-tools/Dockerfile` (UBI9-minimal + aws + jq + curl + bash); built by `.github/workflows/build-images.yml` |
+| K8s Job | `manifests/coder-agents-config/job.yaml` — runs as `coder-server` SA (Bedrock IRSA), reads `coder-admin-token` SealedSecret, sync-hook so it re-runs every Argo sync |
+| Argo CD app | `gitops/apps/coder-agents-config/application.yaml` (sync wave 5) |
+
+What it creates in chatd:
+
+- **Bedrock provider** (provider type `bedrock`, no api_key — uses IRSA;
+  flip `BEDROCK_PROVIDER_MODE=aibridge` in the Job env if your Coder
+  build's chatd doesn't accept `bedrock` and you want to route through
+  AI Bridge's `/api/v2/aibridge/anthropic` endpoint instead).
+- **RHAIIS provider** (provider type `openai`, base_url
+  `http://vllm.ocp-ai.svc.cluster.local:8000/v1`, api_key `EMPTY`).
+- **Every Anthropic Opus + Sonnet inference profile** discovered at
+  Job-runtime via `aws bedrock list-inference-profiles --type-equals
+  SYSTEM_DEFINED`. Newest Opus is set as the chatd default. Each model
+  registers twice — once with extended thinking on, once without.
+- **`ibm-granite/granite-3.1-8b-instruct`** on the RHAIIS provider.
+
+Pre-reqs the next session needs to do once:
+
+1. Build + push the new tooling image: trigger
+   `.github/workflows/build-images.yml` (any push under
+   `coder-templates/images/**` does it; `workflow_dispatch` works too).
+2. Mint a long-lived Owner-role Coder API token, seal it as
+   `coder-admin-token`, commit at `manifests/secrets/coder-admin-token.yaml`
+   (full workflow in `docs/secrets.md`).
+3. Push — Argo will pick up the new app and the bootstrap Job will run
+   on its first sync.
+
 ## What's NOT done (explicitly out of scope)
 
 - **OpenAI models on Bedrock** — GPT-5.5/5.4 are in limited preview (gated, announced May 6). Not worth pursuing for the booth.

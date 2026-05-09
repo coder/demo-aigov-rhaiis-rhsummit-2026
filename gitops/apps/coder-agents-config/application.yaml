@@ -1,0 +1,57 @@
+# Coder Agents (chatd) provider + model bootstrap.
+#
+# Argo CD applies the manifests in `manifests/coder-agents-config/`,
+# which include:
+#   - a ConfigMap holding the bootstrap script
+#     (`scripts/coder-agents-provider-model-config.sh`, rendered by
+#      `scripts/render-coder-agents-configmap.sh`)
+#   - a Job that mounts the ConfigMap and runs the script as the
+#     `coder-server` ServiceAccount (so it inherits the Bedrock IRSA
+#     role) using a Coder admin token from the `coder-admin-token`
+#     SealedSecret.
+#
+# The Job is annotated `argocd.argoproj.io/hook: Sync` so it runs on
+# every Application sync; `BeforeHookCreation` cleans up the previous
+# Job before creating the new one. `ttlSecondsAfterFinished: 3600`
+# auto-deletes succeeded Jobs after an hour.
+#
+# Sync wave 5 — runs after:
+#   - sealed-secrets controller (wave -1)
+#   - platform-secrets / `coder-admin-token` decryption (wave 0)
+#   - coder server (wave 1)
+#   - rhaiis (wave 2)
+#   - observability (wave 3)
+# So by the time this Job runs, both Coder and RHAIIS are reachable
+# in-cluster and the admin token is materialized.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coder-agents-config
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/coder-agents-config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: coder
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false      # `coder` ns already created by the coder app
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

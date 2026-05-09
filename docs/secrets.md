@@ -117,6 +117,41 @@ git push
 
 The `coder-provisioner` Deployment is in CrashLoopBackOff until this Secret exists; it self-heals once Argo applies the SealedSecret and the controller decrypts it.
 
+### `coder-admin-token` — owner-role API token for the chatd bootstrap Job
+
+Consumed by the Argo CD-managed `coder-agents-config` Job (see [`manifests/coder-agents-config/`](../manifests/coder-agents-config/)) which calls `/api/experimental/chats/...` to register the Bedrock + RHAIIS providers and every Opus/Sonnet/Granite model entry. The token must belong to a user with the **Owner** role.
+
+```bash
+# 1. Log in as an Owner (the first GH user who signed in is automatically
+#    Owner; for additional admins, see "Granting Coder Owner" below).
+coder login https://coder.apps.cluster.rhsummit.coderdemo.io
+
+# 2. Mint a long-lived token. CODER_MAX_ADMIN_TOKEN_LIFETIME in
+#    helm-values is set to 8760h (1y) — that's the cap.
+TOKEN=$(coder tokens create --lifetime 8760h --name agents-config-bootstrap)
+
+# 3. Seal it
+oc create secret generic coder-admin-token \
+  --namespace=coder \
+  --from-literal=token="$TOKEN" \
+  --dry-run=client -o yaml > /tmp/coder-admin-token.yaml
+
+kubeseal --controller-namespace=sealed-secrets --format yaml \
+  < /tmp/coder-admin-token.yaml \
+  > manifests/secrets/coder-admin-token.yaml
+
+rm /tmp/coder-admin-token.yaml
+unset TOKEN
+
+git add manifests/secrets/coder-admin-token.yaml
+git commit -m "secrets: seal coder-admin-token (chatd bootstrap)"
+git push
+```
+
+Once Argo decrypts this into `Secret/coder-admin-token -n coder`, the next sync of the `coder-agents-config` Application kicks off the bootstrap Job. Verify with `oc -n coder logs job/coder-agents-config -f`.
+
+Rotation: same flow — re-run the `kubeseal` invocation with a fresh token. Old tokens stay valid until they hit their TTL or are explicitly revoked (`coder tokens delete <id>`).
+
 ### Granting Coder `Owner` to admin team members
 
 The OpenShift side (decision #21) auto-syncs the `demo-rhsummit-users:admin` GitHub team into an OpenShift Group bound to `cluster-admin`. **Coder does NOT have an equivalent team→role hook** — its `CODER_OAUTH2_GITHUB_*` env vars only restrict login, not assign roles. New admins land as regular Members.

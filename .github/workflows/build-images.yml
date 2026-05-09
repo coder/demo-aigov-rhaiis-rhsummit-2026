@@ -6,8 +6,11 @@ name: Build + push workspace images
 #     The original openshift-ai-gov template ships its own image this way.
 #
 #  2. Shared UBI9 images at coder-templates/images/<image>/Dockerfile:
-#       - ubi9-base-workspace : UBI 9.7 base + dev tooling + dotfiles deps
-#       - ubi9-node-workspace : FROM ubi9-base-workspace, adds Node 22 LTS
+#       - ubi9-base-workspace  : UBI 9.7 base + dev tooling + dotfiles deps
+#       - ubi9-node-workspace  : FROM ubi9-base-workspace, adds Node 22 LTS
+#       - agents-config-tools  : Tiny UBI9-minimal + aws + jq + curl image
+#                                consumed by the `coder-agents-config`
+#                                Argo CD Job (gitops/apps/coder-agents-config/).
 #
 #     The 4 -ocp templates (ai-dev-ocp, agents-dev-ocp,
 #     demo-ai-gov-firewall-ocp, demo-ai-gov-no-firewall-ocp) all FROM
@@ -100,6 +103,20 @@ jobs:
           cache-from: type=gha,scope=ubi9-node-workspace
           cache-to: type=gha,scope=ubi9-node-workspace,mode=max
 
+      - name: Build + push agents-config-tools (UBI9-minimal + aws + jq + curl)
+        uses: docker/build-push-action@v6
+        with:
+          context: coder-templates/images/agents-config-tools
+          file: coder-templates/images/agents-config-tools/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_REGISTRY }}/agents-config-tools:latest
+            ${{ env.IMAGE_REGISTRY }}/agents-config-tools:${{ env.UBI9_VERSION }}
+            ${{ env.IMAGE_REGISTRY }}/agents-config-tools:${{ env.UBI9_VERSION }}-${{ github.sha }}
+          cache-from: type=gha,scope=agents-config-tools
+          cache-to: type=gha,scope=agents-config-tools,mode=max
+
       - name: Summary
         run: |
           {
@@ -107,6 +124,7 @@ jobs:
             echo ""
             echo "- \`${{ env.IMAGE_REGISTRY }}/ubi9-base-workspace:latest\` (also \`:${{ env.UBI9_VERSION }}\`, \`:${{ env.UBI9_VERSION }}-${{ github.sha }}\`)"
             echo "- \`${{ env.IMAGE_REGISTRY }}/ubi9-node-workspace:latest\` (also \`:${{ env.UBI9_VERSION }}\`, \`:${{ env.UBI9_VERSION }}-${{ github.sha }}\`)"
+            echo "- \`${{ env.IMAGE_REGISTRY }}/agents-config-tools:latest\` (also \`:${{ env.UBI9_VERSION }}\`, \`:${{ env.UBI9_VERSION }}-${{ github.sha }}\`)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Per-template images. Currently just openshift-ai-gov; matrix is

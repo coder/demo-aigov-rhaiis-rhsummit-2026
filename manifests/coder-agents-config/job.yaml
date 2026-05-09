@@ -1,0 +1,126 @@
+# Coder Agents (chatd) provider + model bootstrap Job.
+#
+# What it does
+# ------------
+# Calls the Coder chats API (`/api/experimental/chats/...`) to create or
+# update two providers and the full Bedrock Opus/Sonnet + RHAIIS Granite
+# model lineup that the booth demo expects to see in the chat dropdown:
+#
+#   * AWS Bedrock provider — IRSA-backed, no API key on file (provider
+#     type "bedrock"; falls back to "anthropic" via AI Bridge if the env
+#     `BEDROCK_PROVIDER_MODE=aibridge` is set).
+#   * RHAIIS provider — direct to the in-cluster vLLM Service URL
+#     (`http://vllm.ocp-ai.svc.cluster.local:8000/v1`), api_key="EMPTY".
+#   * Every Anthropic Opus/Sonnet inference profile available in the
+#     configured AWS region, discovered at runtime via
+#     `aws bedrock list-inference-profiles` (the IRSA role on the
+#     `coder-server` SA grants the bedrock:List* perms).
+#   * One RHAIIS Granite model.
+#
+# How it gets credentials
+# -----------------------
+# - AWS / Bedrock: pod runs as `serviceAccountName: coder-server`, the
+#   same SA the live Coder server uses. The cluster's pod-identity
+#   webhook injects AWS_ROLE_ARN + AWS_WEB_IDENTITY_TOKEN_FILE based on
+#   the SA's `eks.amazonaws.com/role-arn` annotation
+#   (`arn:aws:iam::342934376218:role/demo/cluster-coder-bedrock`).
+# - Coder admin token: read from a SealedSecret `coder-admin-token`
+#   in this namespace (see manifests/secrets/README.md for the seal
+#   workflow). The token must belong to a user with the Owner role so
+#   it can write `chats/providers` + `chats/model-configs`.
+#
+# Re-run on every Argo CD sync
+# ----------------------------
+# `argocd.argoproj.io/hook: Sync` makes Argo treat the Job as a sync
+# hook — it gets created/recreated each sync. `BeforeHookCreation`
+# delete policy means Argo deletes the previous Job (if any) before
+# starting the new one, so we never accumulate Job history.
+#
+# Idempotency
+# -----------
+# The script itself is idempotent: PATCH on existing resources keyed
+# by display_name (model-configs) and provider type (providers) so
+# chat_messages FK references don't break.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: coder-agents-config
+  namespace: coder
+  labels:
+    app.kubernetes.io/name: coder-agents-config
+    app.kubernetes.io/part-of: coder-aigov-demo
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  backoffLimit: 6              # retry until Coder is reachable
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: coder-agents-config
+        app.kubernetes.io/part-of: coder-aigov-demo
+    spec:
+      restartPolicy: OnFailure
+      # Same SA that runs the Coder server — gives us Bedrock IRSA for
+      # `aws bedrock list-inference-profiles`. No new IAM role needed.
+      serviceAccountName: coder-server
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: configure
+          image: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/agents-config-tools:latest
+          imagePullPolicy: Always
+          command:
+            - /bin/bash
+            - /scripts/coder-agents-provider-model-config.sh
+          env:
+            - name: CODER_URL
+              value: "http://coder.coder.svc.cluster.local"   # in-cluster Coder service
+            - name: CODER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: coder-admin-token
+                  key: token
+            - name: AWS_REGION
+              value: "us-east-1"
+            - name: RHAIIS_BASE_URL
+              value: "http://vllm.ocp-ai.svc.cluster.local:8000/v1"
+            - name: RHAIIS_MODEL_ID
+              value: "ibm-granite/granite-3.1-8b-instruct"
+            - name: RHAIIS_DISPLAY_NAME
+              value: "Granite 3.1 8B Instruct (RHAIIS sovereign)"
+            - name: BEDROCK_PROVIDER_MODE
+              value: "native"     # set to "aibridge" if chatd's `bedrock` provider type doesn't work
+            - name: HOME
+              value: "/tmp"        # so aws CLI can write its cache under a writable dir
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: script
+          configMap:
+            name: coder-agents-config-script
+            defaultMode: 0555
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
