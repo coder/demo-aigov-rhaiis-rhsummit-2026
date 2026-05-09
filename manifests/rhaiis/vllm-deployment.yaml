@@ -119,11 +119,27 @@ spec:
               cpu: "4"
               memory: "16Gi"
               nvidia.com/gpu: "1"
+          # startupProbe gates the container's "started" state until vLLM
+          # has actually loaded weights and bound /v1/models. Without this,
+          # liveness fires at 180s, kills vLLM mid-load, and the emptyDir
+          # cache is wiped — the next attempt re-downloads ~16GB and the
+          # cycle repeats forever. Granite 3.1 8B over the public HF mirror
+          # consistently takes ~4-5 min to download + ~1-2 min to load
+          # checkpoint shards + cudagraph capture (longer at higher
+          # max-model-len), so 15 min of startup runway is the safe
+          # ceiling. failureThreshold 90 * periodSeconds 10 = 900s.
+          startupProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 90
           readinessProbe:
             httpGet:
               path: /v1/models
               port: http
-            initialDelaySeconds: 60     # first model load takes a minute
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 6
@@ -131,7 +147,6 @@ spec:
             httpGet:
               path: /v1/models
               port: http
-            initialDelaySeconds: 180
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 4
