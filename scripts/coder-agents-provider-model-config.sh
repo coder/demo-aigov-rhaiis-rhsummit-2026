@@ -72,6 +72,7 @@ require() {
 require curl
 require jq
 require aws
+require python3
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -132,38 +133,51 @@ upsert_model_by_name() {
   fi
 }
 
-# Friendly name from a Bedrock inference-profile or foundation-model ID.
-#   us.anthropic.claude-opus-4-20250514-v1:0  -> "Claude Opus 4 (2025-05-14, US)"
-#   anthropic.claude-3-5-haiku-20241022-v1:0  -> "Claude 3.5 Haiku (2024-10-22)"
+# Friendly name from a Bedrock inference-profile ID. Implemented in
+# Python — the regex/grouping logic was painful to keep correct in
+# pure bash across the variety of profile-ID shapes Anthropic ships
+# (some have a date stamp + -v1, some only -v1, some neither).
+#
+#   global.anthropic.claude-opus-4-7              -> "Claude Opus 4.7 [GLOBAL]"
+#   us.anthropic.claude-opus-4-5-20251101-v1:0    -> "Claude Opus 4.5 (2025-11-01) [US]"
+#   us.anthropic.claude-3-opus-20240229-v1:0      -> "Claude 3 Opus (2024-02-29) [US]"
 format_display_name() {
-  local id="$1"
-  local region_prefix=""
-  case "$id" in
-    us\.*)  region_prefix=" (US)";   id="${id#us.}"   ;;
-    eu\.*)  region_prefix=" (EU)";   id="${id#eu.}"   ;;
-    apac\.*) region_prefix=" (APAC)"; id="${id#apac.}" ;;
-  esac
-  # Strip "anthropic." vendor prefix and ":0" version tail.
-  id="${id#anthropic.}"
-  id="${id%:0}"
-  # claude-opus-4-20250514-v1
-  local family model_part date_part version
-  family=$(echo "$id" | awk -F- '{print $1}')                   # claude
-  model_part=$(echo "$id" | awk -F- '{print $2}')               # opus / sonnet / 3
-  if echo "$id" | grep -qE -- '-[0-9]{8}-v[0-9]+$'; then
-    date_part=$(echo "$id" | awk -F- '{print $(NF-1)}')         # 20250514
-    version=$(echo "$id" | awk -F- '{print $NF}')               # v1
-    local middle
-    middle=$(echo "$id" | awk -F- '{for (i=2;i<NF-1;i++) printf "%s ", $i}')
-    local pretty_middle
-    pretty_middle=$(echo "$middle" | sed -E 's/\b([a-z])/\u\1/g; s/[ ]+$//')
-    local pretty_date="${date_part:0:4}-${date_part:4:2}-${date_part:6:2}"
-    echo "Claude ${pretty_middle} (${pretty_date}${region_prefix:+, }${region_prefix# })"
-  else
-    # Fallback: capitalize words, drop trailing -v* if present
-    id=$(echo "$id" | sed -E 's/-v[0-9]+$//; s/-/ /g; s/\b([a-z])/\u\1/g')
-    echo "${id}${region_prefix}"
-  fi
+  python3 - "$1" <<'PY'
+import re, sys
+mid = sys.argv[1]
+m = re.match(r'^(global|us|eu|apac)\.', mid)
+region = m.group(1).upper() if m else ''
+mid = re.sub(r'^(global|us|eu|apac)\.', '', mid)
+mid = mid.replace('anthropic.', '', 1)
+if mid.endswith(':0'):
+    mid = mid[:-2]
+date = ''
+md = re.search(r'-(\d{8})(?:-v\d+)?$', mid)
+if md:
+    date = md.group(1)
+    mid = mid[:md.start()]
+mid = re.sub(r'-v\d+$', '', mid)
+parts = mid.split('-')
+out, i = [], 0
+while i < len(parts):
+    p = parts[i]
+    if p == 'claude':
+        out.append('Claude')
+    elif p.isdigit():
+        run = [p]
+        while i + 1 < len(parts) and parts[i+1].isdigit():
+            run.append(parts[i+1]); i += 1
+        out.append('.'.join(run))
+    else:
+        out.append(p.capitalize())
+    i += 1
+name = ' '.join(out)
+if date:
+    name += f" ({date[:4]}-{date[4:6]}-{date[6:]})"
+if region:
+    name += f" [{region}]"
+print(name)
+PY
 }
 
 # Sort key so the newest model becomes the default. Strips everything
@@ -391,49 +405,40 @@ echo "==> Configuring Bedrock Anthropic models..."
 PROVIDER_TYPE=$(bedrock_provider_for_model)
 
 for model_id in $ALL_IDS; do
-  base_name=$(format_display_name "$model_id")
+  display=$(format_display_name "$model_id")
   cost=$(cost_for_model "$model_id")
   context=$(context_for_model "$model_id")
   is_default="false"
   [ "$model_id" = "$DEFAULT_MODEL_ID" ] && is_default="true"
 
-  # Two entries per model: one with extended thinking on, one off.
-  for variant in "extended" "standard"; do
-    if [ "$variant" = "extended" ]; then
-      display="${base_name} (Extended Thinking)"
-      effort="max"
-      variant_default="false"
-    else
-      display="${base_name}"
-      effort=""
-      variant_default="$is_default"
-    fi
+  # Single entry per model. The previous "(Extended Thinking)" variant
+  # was dropped — 16 Bedrock models would have produced 32 dropdown
+  # entries, which is too noisy. Users who want extended thinking can
+  # toggle `provider_options.bedrock.effort` via the admin UI.
+  options='{}'
 
-    options=$(provider_options_for_model "$model_id" "$effort" "$PROVIDER_TYPE")
+  payload=$(jq -n \
+    --arg provider "$PROVIDER_TYPE" \
+    --arg model "$model_id" \
+    --arg display "$display" \
+    --argjson context "$context" \
+    --argjson cost "$cost" \
+    --argjson is_default "$is_default" \
+    --argjson options "$options" '{
+      provider: $provider,
+      model: $model,
+      display_name: $display,
+      context_limit: $context,
+      enabled: true,
+      is_default: $is_default,
+      model_config: {
+        max_output_tokens: 32000,
+        cost: $cost,
+        provider_options: $options
+      }
+    }')
 
-    payload=$(jq -n \
-      --arg provider "$PROVIDER_TYPE" \
-      --arg model "$model_id" \
-      --arg display "$display" \
-      --argjson context "$context" \
-      --argjson cost "$cost" \
-      --argjson is_default "$variant_default" \
-      --argjson options "$options" '{
-        provider: $provider,
-        model: $model,
-        display_name: $display,
-        context_limit: $context,
-        enabled: true,
-        is_default: $is_default,
-        model_config: {
-          max_output_tokens: 32000,
-          cost: $cost,
-          provider_options: $options
-        }
-      }')
-
-    upsert_model_by_name "$display" "$payload"
-  done
+  upsert_model_by_name "$display" "$payload"
 done
 
 # ---------------------------------------------------------------------------

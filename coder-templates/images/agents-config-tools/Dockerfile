@@ -25,13 +25,16 @@ ARG AWSCLI_VERSION=2.17.58
 
 # microdnf is the UBI-minimal package manager. unzip + tar + gzip are
 # needed to extract the AWS CLI bundle; ca-certificates is needed for
-# TLS to the Coder API and the AWS endpoints.
+# TLS to the Coder API and the AWS endpoints. python3 is used by the
+# script's display-name formatter (handles Bedrock inference-profile ID
+# variants more reliably than pure bash/awk).
 RUN microdnf install -y --nodocs \
         bash \
         ca-certificates \
         curl-minimal \
         gzip \
         jq \
+        python3 \
         tar \
         unzip \
     && microdnf clean all \
