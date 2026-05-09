@@ -79,8 +79,17 @@ spec:
             - 0.0.0.0
             - --port
             - "8000"
+            # Granite 3.1 8B's native context is 128K (max_position_embeddings
+            # = 131072 in the HF config), but vLLM defaults to whatever the
+            # tokenizer config exposes. Coder Agents' system prompt + tool
+            # definitions alone consume ~3-4K tokens, plus chat history and
+            # a 4K completion budget, so anything below ~16K causes vLLM to
+            # 400 with "maximum context length is X tokens." We pin to 32K
+            # — comfortable headroom for Agents traffic, and still well
+            # within the KV-cache budget of a single A10G/L4 (24GB) running
+            # 8B fp16 (~16GB weights, ~5GB KV cache for 32K).
             - --max-model-len
-            - "8192"
+            - "32768"
             - --disable-log-requests
             - --tensor-parallel-size
             - "1"            # 1 GPU per pod; A10G handles 8B fp16 alone

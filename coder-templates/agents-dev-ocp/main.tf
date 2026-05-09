@@ -16,9 +16,6 @@
 # Included tools:
 #   Web IDEs:
 #     - code-server (VS Code in the browser)
-#     - mux (terminal multiplexer)
-#   Desktop IDEs:
-#     - Cursor IDE (AI-powered VS Code fork)
 #   System packages (installed on startup):
 #     Critical: git, curl, wget, ca-certificates, openssh-client,
 #              jq, ripgrep, fd-find, build-essential, pkg-config,
@@ -264,30 +261,6 @@ module "code-server" {
   subdomain = true
   group     = "Web IDEs"
   order     = 1
-}
-
-# mux — terminal multiplexer
-module "mux" {
-  count     = data.coder_workspace.me.start_count
-  source    = "registry.coder.com/coder/mux/coder"
-  version   = "1.4.3"
-  agent_id  = coder_agent.main.id
-  subdomain = true
-  group     = "Web IDEs"
-  order     = 2
-}
-
-# --- Desktop IDEs ---
-
-# cursor — Cursor Desktop IDE connection (external app)
-module "cursor" {
-  count    = data.coder_workspace.me.start_count
-  source   = "registry.coder.com/coder/cursor/coder"
-  version  = "1.4.1"
-  agent_id = coder_agent.main.id
-  folder   = "/home/coder"
-  group    = "Desktop IDEs"
-  order    = 3
 }
 
 # --- Utilities ---

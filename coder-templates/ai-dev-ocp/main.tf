@@ -6,7 +6,6 @@
 # Included tools:
 #   Web IDEs:
 #     - code-server (VS Code in the browser)
-#     - mux (terminal multiplexer with AI provider UI)
 #   Desktop IDEs:
 #     - Kiro IDE (AWS/Anthropic coding agent)
 #     - Cursor IDE (AI-powered VS Code fork)
@@ -187,15 +186,26 @@ locals {
   # Claude Code settings.json — written to ~/.claude/settings.json
   # Controls environment variables, model selection, and onboarding state.
   #
-  # Default model is pinned to Bedrock's claude-sonnet-4-20250514. Without
-  # this, Claude Code falls back to its embedded default (e.g.,
-  # claude-opus-4-7[1m] for the Opus 4.7 preview build), which Bedrock
-  # doesn't host — every prompt 404s. Sonnet 4 is GA on Bedrock and the
-  # right balance of capability + cost for booth use; users can switch
-  # via /model after first login (Bedrock also has
-  # claude-opus-4-20250514, claude-3-5-haiku-20241022).
+  # Default model is pinned to the Bedrock cross-region inference profile
+  # `us.anthropic.claude-sonnet-4-20250514-v1:0`. Claude Code passes this
+  # value as the `model` field of every Anthropic-API request; AI Bridge
+  # forwards it to Bedrock, which only resolves canonical inference
+  # profile IDs (the bare `claude-sonnet-4-20250514` form 404s).
+  #
+  # Why Sonnet 4 specifically: it's the cheapest of the verified-subscribed
+  # set (see bedrock-model-sub.md, 2026-05-09). Other working IDs users
+  # can pick via /model:
+  #   us.anthropic.claude-sonnet-4-6
+  #   us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  #   us.anthropic.claude-opus-4-7
+  #   us.anthropic.claude-opus-4-6-v1
+  #   us.anthropic.claude-opus-4-5-20251101-v1:0
+  #   us.anthropic.claude-opus-4-1-20250805-v1:0
+  # Anything Claude Code surfaces in /model that ISN'T on this list will
+  # 4xx — those are Anthropic-direct preview tags Bedrock doesn't host
+  # (e.g. `claude-opus-4-7[1m]`).
   claude_settings = {
-    model = "claude-sonnet-4-20250514"
+    model = "us.anthropic.claude-sonnet-4-20250514-v1:0"
     env = {
       ANTHROPIC_BASE_URL  = local.ai_bridge_anthropic_url
       OPENAI_BASE_URL     = local.ai_bridge_openai_url
@@ -223,20 +233,6 @@ locals {
         hasCompletedProjectOnboarding = true
         hasTrustDialogAccepted        = true
       }
-    }
-  }
-
-  # Mux provider configuration — written to ~/.mux/providers.jsonc
-  # Configures the Anthropic provider with AI Bridge base URL and models
-  mux_provider_settings = {
-    "anthropic" = {
-      "serviceTier" = "default"
-      "models" = [
-        "claude-haiku-4-5-20251001",
-        "claude-opus-4-6-20250610"
-      ]
-      "baseUrl" = local.ai_bridge_anthropic_url
-      "apiKey"  = data.coder_workspace_owner.me.session_token
     }
   }
 }
@@ -333,13 +329,6 @@ resource "coder_agent" "main" {
     model = "gpt-5.3-codex"
     model_reasoning_effort = "medium"
     CODEXEOF
-
-    # Mux AI provider configuration
-    echo "Configuring Mux..."
-    mkdir -p ~/.mux
-    cat > ~/.mux/providers.jsonc << 'MUXEOF'
-    ${jsonencode(local.mux_provider_settings)}
-    MUXEOF
 
     echo "=== Workspace Ready ==="
   EOT
@@ -439,17 +428,6 @@ module "cursor" {
   folder   = "/home/coder"
   group    = "Desktop IDEs"
   order    = 4
-}
-
-# mux — terminal multiplexer with built-in AI provider switching UI
-module "mux" {
-  count     = data.coder_workspace.me.start_count
-  source    = "registry.coder.com/coder/mux/coder"
-  version   = "1.4.3"
-  agent_id  = coder_agent.main.id
-  subdomain = true
-  group     = "Web IDEs"
-  order     = 2
 }
 
 # dotfiles — clone and apply user dotfiles on workspace start

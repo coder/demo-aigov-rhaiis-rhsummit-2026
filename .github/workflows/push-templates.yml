@@ -7,15 +7,12 @@ name: Push templates to Coder
 # gitops/apps/coder/application.yaml).
 #
 # Templates currently pushed:
-#  - openshift-ai-gov            — original demo template, custom Dockerfile
-#  - ai-dev-ocp                  — UBI9 enterprise-node base + Claude/Codex/Gemini/Kiro
-#  - agents-dev-ocp              — UBI9 + Coder Agents Early Access
-#  - demo-ai-gov-firewall-ocp    — UBI9 + agent boundary firewall (NET_ADMIN)
-#  - demo-ai-gov-no-firewall-ocp — UBI9, same demo flow but no boundary
+#  - ai-dev-ocp     — UBI9 ubi9-node-workspace base + Claude/Codex/Gemini/Kiro CLIs
+#  - agents-dev-ocp — UBI9 + Coder Agents (beta as of v2.33.1)
 #
-# Each template gets its variable list passed explicitly — different
-# templates declare different variables; passing an undeclared variable
-# fails the push.
+# Both -ocp templates declare the same two variables (namespace and
+# image_registry) so the push step doesn't need any per-template
+# branching.
 
 on:
   push:
@@ -32,11 +29,8 @@ on:
         type: choice
         options:
           - all
-          - openshift-ai-gov
           - ai-dev-ocp
           - agents-dev-ocp
-          - demo-ai-gov-firewall-ocp
-          - demo-ai-gov-no-firewall-ocp
 
 permissions:
   contents: read
@@ -59,7 +53,7 @@ jobs:
       # `env.X` can't be referenced inside `strategy.matrix` per GH docs,
       # so the JSON array is inlined.
       matrix:
-        template: ${{ fromJSON((github.event_name == 'push' || inputs.template == 'all') && '["openshift-ai-gov","ai-dev-ocp","agents-dev-ocp","demo-ai-gov-firewall-ocp","demo-ai-gov-no-firewall-ocp"]' || format('["{0}"]', inputs.template)) }}
+        template: ${{ fromJSON((github.event_name == 'push' || inputs.template == 'all') && '["ai-dev-ocp","agents-dev-ocp"]' || format('["{0}"]', inputs.template)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,31 +72,14 @@ jobs:
           coder users show me
 
       - name: coder templates push
-        env:
-          AI_GATEWAY_URL: ${{ secrets.AI_GATEWAY_URL }}
         run: |
           set -euo pipefail
           cd "coder-templates/${{ matrix.template }}"
-
-          # Per-template variable list. Keep this in sync with the
-          # `variable "..."` blocks in each main.tf. The original
-          # openshift-ai-gov template takes ai_gateway_url; the -ocp
-          # templates construct AI Bridge URLs from
-          # data.coder_workspace.me.access_url and don't need it.
-          case "${{ matrix.template }}" in
-            openshift-ai-gov)
-              EXTRA_VARS=( --variable "ai_gateway_url=${AI_GATEWAY_URL}" )
-              ;;
-            *)
-              EXTRA_VARS=()
-              ;;
-          esac
 
           coder templates push "${{ matrix.template }}" \
             --directory . \
             --variable "namespace=${WORKSPACE_NAMESPACE}" \
             --variable "image_registry=${IMAGE_REGISTRY}" \
-            "${EXTRA_VARS[@]}" \
             --yes \
             --message "GH Actions push from ${{ github.sha }}"
 

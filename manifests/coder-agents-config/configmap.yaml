@@ -36,19 +36,28 @@ data:
     #     base_url:    http://vllm.ocp-ai.svc.cluster.local:8000/v1
     #
     #   Models
-    #     - Every Anthropic Opus and Sonnet inference profile available in
-    #       the configured AWS region (discovered at runtime via
-    #       `aws bedrock list-inference-profiles`). Each is registered with
-    #       a friendly display name; the newest Opus is the default.
+    #     - An explicit allowlist of Anthropic Opus + Sonnet Bedrock inference
+    #       profile IDs that are subscribed account-wide. Each is registered
+    #       with a friendly display name; the newest Opus is the default.
     #     - One RHAIIS Granite model.
+    #
+    #   Why an allowlist instead of dynamic discovery:
+    #     `aws bedrock list-inference-profiles` returns ~16 Anthropic profiles
+    #     in us-east-1, but only a subset is actually invocable —
+    #     account-wide AWS Marketplace subscription must have been completed
+    #     for each profile by a `aws-marketplace:Subscribe`-permitted
+    #     principal. Registering an unsubscribed model surfaces a 403
+    #     "AWS Marketplace subscription cannot be completed" the first time
+    #     it's invoked, which the Coder Agents UI renders as
+    #     "Authentication failed." We pin to the verified-subscribed set so
+    #     the picker only contains models that work. See `bedrock-model-sub.md`
+    #     for how to extend this list when AWS adds a new model.
     #
     # Why inference profiles, not raw foundation model IDs:
     #   Anthropic Claude 4+ models on Bedrock require an inference profile
     #   (cross-region, e.g. `us.anthropic.claude-opus-4-...-v1:0`). The
     #   profile IDs are stable and the right thing to put in the
-    #   `model_config.model` field. Older Claude 3.x foundation model IDs
-    #   still work via on-demand throughput, but for forward compatibility
-    #   we use profiles when available and fall back to foundation models.
+    #   `model_config.model` field.
     #
     # Usage (laptop, ad-hoc):
     #   export CODER_URL=https://coder.apps.<cluster-domain>
@@ -319,54 +328,45 @@ data:
     upsert_provider "openai-compat" "$RHAIIS_PROVIDER_PAYLOAD"
     
     # ---------------------------------------------------------------------------
-    # Discover Bedrock Anthropic Opus + Sonnet models
+    # Bedrock Anthropic Opus + Sonnet models — explicit allowlist
     # ---------------------------------------------------------------------------
+    #
+    # These inference profile IDs were verified subscribed + invocable from
+    # the IRSA role on 2026-05-09 (kiro-cli, ocp-deploy-acct profile). See
+    # `bedrock-model-sub.md` for the full subscription log and how to extend
+    # this list:
+    #   1. Run the discovery query in that doc to find new profiles.
+    #   2. Subscribe each via `aws bedrock-runtime converse` from a
+    #      marketplace-permitted principal.
+    #   3. Add the verified profile ID to ALL_IDS below and re-render the
+    #      configmap (`./scripts/render-coder-agents-configmap.sh`).
+    #
+    # Haiku is intentionally excluded — `claude-haiku-4-5-20251001-v1:0`
+    # requires the Anthropic use-case form in the Bedrock console (the only
+    # subscription that the marketplace-permitted bedrock-runtime invoke
+    # can't complete on its own). When that form is approved, add it here.
+    
+    ALL_IDS=$(cat <<'IDS'
+    us.anthropic.claude-sonnet-4-20250514-v1:0
+    us.anthropic.claude-sonnet-4-6
+    us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    us.anthropic.claude-opus-4-7
+    us.anthropic.claude-opus-4-6-v1
+    us.anthropic.claude-opus-4-5-20251101-v1:0
+    us.anthropic.claude-opus-4-1-20250805-v1:0
+    IDS
+    )
+    
+    # Demo primary is Sonnet 4 (cheapest of the working set, plenty capable
+    # for booth Q&A). Override at deploy-time by exporting DEFAULT_MODEL_ID
+    # before running the script.
+    : "${DEFAULT_MODEL_ID:=us.anthropic.claude-sonnet-4-20250514-v1:0}"
     
     echo ""
-    echo "==> Discovering Anthropic Opus/Sonnet inference profiles in ${AWS_REGION}..."
-    
-    # Inference profiles (preferred — required for Claude 4+).
-    PROFILES=$(aws bedrock list-inference-profiles --region "$AWS_REGION" \
-      --type-equals SYSTEM_DEFINED --output json 2>/dev/null || echo '{"inferenceProfileSummaries":[]}')
-    
-    PROFILE_IDS=$(echo "$PROFILES" \
-      | jq -r '.inferenceProfileSummaries[]
-          | select(.models | length > 0)
-          | select(.models[0].modelArn | contains("anthropic"))
-          | select(.inferenceProfileId | test("opus|sonnet"))
-          | .inferenceProfileId' \
-      | sort -u)
-    
-    # Foundation models that are on-demand-capable (still useful for older
-    # Claude 3.x families that don't require a profile).
-    FM=$(aws bedrock list-foundation-models --region "$AWS_REGION" \
-      --by-provider anthropic --output json)
-    
-    FM_IDS=$(echo "$FM" \
-      | jq -r '.modelSummaries[]
-          | select(.modelLifecycle.status == "ACTIVE")
-          | select(.inferenceTypesSupported | index("ON_DEMAND"))
-          | select(.modelId | test("opus|sonnet"))
-          | .modelId' \
-      | sort -u)
-    
-    # Combine: profile IDs first (newest path), foundation model IDs second.
-    ALL_IDS=$( { echo "$PROFILE_IDS"; echo "$FM_IDS"; } | awk 'NF' | sort -u )
-    
-    if [ -z "$ALL_IDS" ]; then
-      echo "WARN: no Opus/Sonnet models discovered. Check Bedrock model access in the AWS console." >&2
-    fi
-    
-    echo "    Found:"
+    echo "==> Subscribed Anthropic Opus/Sonnet inference profiles to register:"
     echo "$ALL_IDS" | sed 's/^/      /'
-    
-    # Pick the newest Opus profile/model as the default. Falls back to
-    # newest sonnet if no opus is available.
-    NEWEST_OPUS=$(echo "$ALL_IDS" | grep opus | while read -r id; do echo "$(date_key "$id") $id"; done | sort -r | head -1 | awk '{print $2}')
-    NEWEST_SONNET=$(echo "$ALL_IDS" | grep sonnet | while read -r id; do echo "$(date_key "$id") $id"; done | sort -r | head -1 | awk '{print $2}')
-    DEFAULT_MODEL_ID="${NEWEST_OPUS:-$NEWEST_SONNET}"
     echo ""
-    echo "    Default model will be: ${DEFAULT_MODEL_ID:-<none>}"
+    echo "    Default model will be: ${DEFAULT_MODEL_ID}"
     
     # ---------------------------------------------------------------------------
     # Create / update model-configs
@@ -478,7 +478,7 @@ data:
         provider: "openai-compat",
         model: $model,
         display_name: $display,
-        context_limit: 8192,
+        context_limit: 32768,
         enabled: true,
         is_default: false,
         model_config: {
