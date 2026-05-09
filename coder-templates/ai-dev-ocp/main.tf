@@ -185,8 +185,17 @@ locals {
   ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai/v1"
 
   # Claude Code settings.json — written to ~/.claude/settings.json
-  # Controls environment variables, model selection, and onboarding state
+  # Controls environment variables, model selection, and onboarding state.
+  #
+  # Default model is pinned to Bedrock's claude-sonnet-4-20250514. Without
+  # this, Claude Code falls back to its embedded default (e.g.,
+  # claude-opus-4-7[1m] for the Opus 4.7 preview build), which Bedrock
+  # doesn't host — every prompt 404s. Sonnet 4 is GA on Bedrock and the
+  # right balance of capability + cost for booth use; users can switch
+  # via /model after first login (Bedrock also has
+  # claude-opus-4-20250514, claude-3-5-haiku-20241022).
   claude_settings = {
+    model = "claude-sonnet-4-20250514"
     env = {
       ANTHROPIC_BASE_URL  = local.ai_bridge_anthropic_url
       OPENAI_BASE_URL     = local.ai_bridge_openai_url
@@ -266,17 +275,30 @@ resource "coder_agent" "main" {
     echo "Installing Claude Code CLI..."
     curl -fsSL https://claude.ai/install.sh | bash || true
 
-    # Install Codex CLI
+    # Point npm globals at the user's HOME so subsequent `npm install -g`
+    # invocations don't need sudo. Without this they default to /usr and
+    # fail under restricted-v2 (CAP_SETUID dropped → sudo can't elevate).
+    npm config set prefix "$HOME/.local" >/dev/null
+    export PATH="$HOME/.local/bin:$PATH"
+
+    # Install Codex CLI (no sudo — user-prefixed npm above)
     echo "Installing Codex CLI..."
-    sudo npm install -g @openai/codex@latest || true
+    npm install --global --no-fund --no-audit @openai/codex@latest || true
 
-    # Install Gemini CLI
+    # Install Gemini CLI (no sudo — user-prefixed npm above)
     echo "Installing Gemini CLI..."
-    sudo npm install -g @google/gemini-cli@latest || true
+    npm install --global --no-fund --no-audit @google/gemini-cli@latest || true
 
-    # Install Kiro CLI
+    # Install Kiro CLI. Upstream installer reads /dev/tty for a "replace
+    # existing?" prompt, which fails inside the Coder agent's stdio
+    # environment. Skip if already installed; otherwise pre-feed `y` so
+    # the prompt resolves non-interactively.
     echo "Installing Kiro CLI..."
-    curl -fsSL https://cli.kiro.dev/install | bash || true
+    if command -v kiro >/dev/null 2>&1; then
+      echo "  (already installed; skipping)"
+    else
+      yes y 2>/dev/null | bash -c "$(curl -fsSL https://cli.kiro.dev/install)" || true
+    fi
 
     # Claude Code configuration
     echo "Configuring Claude Code..."
