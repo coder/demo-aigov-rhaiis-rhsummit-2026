@@ -214,7 +214,11 @@ data:
     
     echo ""
     echo "==> Bedrock reachable in region ${AWS_REGION}?"
-    aws bedrock list-foundation-models --region "$AWS_REGION" --max-results 1 >/dev/null \
+    # `aws bedrock list-foundation-models` is non-paginated; --max-results
+    # isn't an accepted flag on the v2 CLI (errors with "Unknown options:
+    # --max-results, 1"). Use --query to truncate output instead.
+    aws bedrock list-foundation-models --region "$AWS_REGION" \
+        --query 'modelSummaries[0].modelId' --output text >/dev/null \
       || { echo "ERROR: aws bedrock failed — check IRSA / AWS_REGION / SSO" >&2; exit 1; }
     echo "    OK"
     
