@@ -140,15 +140,15 @@ spec:
             # manifest at manifests/secrets/grafana-github-oauth.yaml.
             envFromSecret: grafana-github-oauth
 
-            # PG password env var ($PGPASSWORD) referenced by the
-            # postgres datasource configmap
-            # (manifests/observability/postgres-datasource-configmap.yaml).
-            # Sealed Secret materializes from
-            # manifests/secrets/secret-postgres.yaml (key
-            # PGPASSWORD; value sourced from the CNPG-generated
-            # `coder-app` Secret in the `coder` namespace).
+            # Multiple env-from-secret sources:
+            #   - secret-postgres: PGPASSWORD for postgres-exporter datasource
+            #   - keycloak-grafana-oidc-secret: client_secret for the
+            #     Keycloak generic_oauth provider (key `client_secret`
+            #     exposed as $GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET).
             envFromSecrets:
               - name: secret-postgres
+                optional: false
+              - name: keycloak-grafana-oidc-secret
                 optional: false
 
             grafana.ini:
@@ -176,6 +176,40 @@ spec:
                 # `groups` claim.
                 role_attribute_path: "contains(groups[*], '@demo-rhsummit-users/admin') && 'Admin' || 'Viewer'"
                 skip_org_role_sync: true
+
+              # ── Keycloak OIDC (demo personas, added 2026-05-10) ──
+              # Second auth provider alongside auth.github. Grafana
+              # supports up to one generic_oauth block + the
+              # vendor-specific ones (github, google, etc.) — they
+              # can coexist on the login page as separate buttons.
+              # CLIENT_SECRET comes from the env var
+              # GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET injected via the
+              # keycloak-grafana-oidc-secret SealedSecret.
+              auth.generic_oauth:
+                enabled: true
+                name: Keycloak (demo users)
+                allow_sign_up: true
+                auto_login: false
+                client_id: grafana
+                # client_secret comes from env (see envFromSecrets above)
+                scopes: openid profile email groups
+                auth_url: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo/protocol/openid-connect/auth
+                token_url: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo/protocol/openid-connect/token
+                api_url: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo/protocol/openid-connect/userinfo
+                # Map the Keycloak `admins` group → Grafana Admin role.
+                # Members of /developers (and no other admin tier) → Viewer.
+                # Same logic as the GitHub path; Grafana applies the role
+                # from whichever IdP the user signed in with.
+                role_attribute_path: "contains(groups[*], 'admins') && 'Admin' || 'Viewer'"
+                skip_org_role_sync: true
+                # Use preferred_username as Grafana's login attribute
+                # (matches what Coder uses too — consistent identity
+                # across the two consumers of the same Keycloak realm).
+                login_attribute_path: preferred_username
+                # The realm import emits the `groups` claim into the
+                # ID/access tokens via the group-membership protocol
+                # mapper; Grafana reads it from there.
+                groups_attribute_path: groups
 
             # Infinity plugin — needed by the AI Bridge dashboard's
             # litellm-pricing-data datasource (k3s pattern, copied).

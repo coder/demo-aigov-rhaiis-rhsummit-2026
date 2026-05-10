@@ -1,41 +1,83 @@
-# Cluster OAuth — GitHub identity provider.
+# Cluster OAuth — TWO identity providers (dual-IdP, 2026-05-10).
 #
-# Adds a GitHub IdP to the singleton `OAuth/cluster` CR. Argo claims
-# only `spec.identityProviders` via server-side apply; the installer
-# retains ownership of everything else (token timeouts, kubeadmin
-# state, etc.).
+# 1. `github` — original admin-tier IdP. Login gated to members of the
+#    `demo-rhsummit-users` GitHub org. Cluster-admin elevation goes
+#    through `redhat-cop/group-sync-operator` (admin team → OpenShift
+#    Group → cluster-admins binding in cluster-admin-binding.yaml).
 #
-# Login is gated to members of the `demo-rhsummit-users` GitHub org
-# (decision #20 already established this org as the demo's audience).
-# Cluster-admin elevation is NOT done here — that's the
-# `redhat-cop/group-sync-operator` syncing the `admin` team into an
-# OpenShift Group, plus the ClusterRoleBinding in
-# cluster-admin-binding.yaml. Reading from the OpenShift side: every
-# org member can log in; only admin-team members hit any privileged
-# RBAC because that's all that's bound.
+# 2. `keycloak` — new demo-user IdP. OIDC against the in-cluster RHBK
+#    `demo` realm. Demo personas alice/bob/carol/dave/madmin land
+#    here. The `groups` claim carries the user's Keycloak group
+#    membership (developers, admins) which OCP can use for
+#    role-binding sync via the `groups` field on the claim mapper.
 #
-# Adding/removing IdPs:
-#   - Each entry's `name` becomes the path segment in the OAuth
-#     callback URL (here: /oauth2callback/github). Changing it
-#     invalidates the GitHub OAuth app's callback config — coordinate.
-#   - mappingMethod=claim: first user with a given identity wins;
-#     subsequent collisions surface as a login error rather than
-#     silently mapping. Right default for a single-IdP cluster.
+# Both run side-by-side: OCP login page shows two "Sign in with..."
+# buttons. Argo claims only `spec.identityProviders` via server-side
+# apply; the installer retains everything else.
+#
+# Naming:
+# - `name: github` → callback URL /oauth2callback/github (matches the
+#   existing GitHub OAuth app's redirect config; do not rename).
+# - `name: keycloak` → callback URL /oauth2callback/keycloak (matches
+#   the redirectUris in manifests/keycloak/realm-demo.yaml's
+#   `openshift` client; if renamed, update both sides).
+#
+# mappingMethod=claim: first user with a given identity wins; collisions
+# surface as login errors rather than silent merges. Correct default.
+
 apiVersion: config.openshift.io/v1
 kind: OAuth
 metadata:
   name: cluster
 spec:
   identityProviders:
+    # ── GitHub IdP (admin tier — unchanged) ──────────────────────────
     - name: github
       mappingMethod: claim
       type: GitHub
       github:
         clientID: Ov23liDfSHU5JLZVTgWX
         clientSecret:
-          # The Secret must live in `openshift-config` (OpenShift
-          # convention) with key `clientSecret`. Sealed manifest:
-          # manifests/secrets/github-oauth-client-secret.yaml.
+          # Sealed manifest: manifests/secrets/github-oauth-client-secret.yaml
           name: github-oauth-client-secret
         organizations:
           - demo-rhsummit-users
+
+    # ── Keycloak OIDC IdP (demo personas — new) ──────────────────────
+    - name: keycloak
+      mappingMethod: claim
+      type: OpenID
+      openID:
+        clientID: openshift
+        clientSecret:
+          # Sealed manifest: manifests/secrets/keycloak-openshift-oidc-secret.yaml
+          # (created in the same commit as this OAuth CR change)
+          name: keycloak-openshift-oidc-secret
+        # OIDC issuer URL — discovery doc auto-resolves all endpoints
+        # (auth, token, userinfo, jwks).
+        issuer: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo
+        claims:
+          preferredUsername:
+            - preferred_username
+          name:
+            - name
+            - preferred_username
+          email:
+            - email
+          # OpenShift's OIDC IdP supports a `groups` claim mapping;
+          # when present, OCP creates a corresponding OpenShift Group
+          # per claim value and binds the user's identity to those
+          # groups. The `admins` claim value will then match the
+          # ClusterRoleBinding subject in cluster-admin-binding.yaml
+          # (which currently binds to a group named `admin` from
+          # group-sync-operator — we'd ADD a second binding for
+          # `admins` if we want Keycloak admins-tier users to get
+          # cluster-admin via OIDC too).
+          groups:
+            - groups
+        # Scopes Keycloak emits in the access token / userinfo.
+        # `groups` is the custom scope our realm's `coder/gitlab/
+        # openshift/grafana` clients all have configured via the
+        # group-membership protocol mapper.
+        extraScopes:
+          - groups
