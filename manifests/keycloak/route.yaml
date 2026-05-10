@@ -1,0 +1,37 @@
+# OpenShift Route for the Keycloak service.
+#
+# Terminates TLS at the Route layer using the cluster's wildcard cert
+# (cert-manager-issued for `*.apps.cluster.rhsummit.coderdemo.io`).
+# Keycloak itself runs plain HTTP behind it — `proxy: edge` in the
+# Keycloak CR (see keycloak.yaml) tells Keycloak to trust the
+# X-Forwarded-* headers so issuer URLs render as HTTPS.
+#
+# The Service named `keycloak-service` is auto-created by the RHBK
+# operator from the Keycloak CR.
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: keycloak
+  namespace: keycloak
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: coder-aigov-demo
+  annotations:
+    # Reference the wildcard cert in openshift-ingress namespace
+    # that cert-manager already issues for the cluster. Same pattern
+    # as coder-routing/.
+    cert-manager.io/issuer-kind: ClusterIssuer
+    cert-manager.io/issuer-name: letsencrypt-prod
+spec:
+  host: keycloak.apps.cluster.rhsummit.coderdemo.io
+  to:
+    kind: Service
+    name: keycloak-service
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

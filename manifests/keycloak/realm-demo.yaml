@@ -1,0 +1,241 @@
+# Demo realm — declarative source of truth for booth identities.
+#
+# Realm `demo` with:
+#   - 4 user personas (alice, bob, carol, dave) in the `developers` group
+#   - 1 admin user (madmin) in the `admins` group (for Grafana Admin role)
+#   - 4 confidential OIDC clients (coder, gitlab, openshift, grafana)
+#   - Group claim `groups` mapped into ID + access tokens
+#
+# Reset story: this CR is the ONLY source of demo-user state. `oc apply
+# -f realm-demo.yaml` re-establishes everything. For the surgical
+# `make reset`, you can `oc delete keycloakrealmimport/demo + oc apply
+# -f` to replay the import, OR more efficiently delete just the
+# per-user KeycloakUser CRs and re-apply.
+#
+# Shared demo password: `Demo2026!` (NOT a security boundary; documented
+# in 1Password under "RH Summit booth - demo persona logins"). Every
+# demo user has the same password. Booth presenters tell visitors the
+# password verbally; visitors log in as alice/bob/etc to drive the
+# scenario. The admin user has the same password — admin-tier in this
+# realm is ONLY for Grafana Admin role, not for any production-tier
+# access.
+#
+# OIDC client secrets are intentionally simple, hardcoded, and visible
+# in git. They are demo realm secrets — if leaked they only let someone
+# impersonate the demo-realm OIDC clients to the demo Keycloak instance.
+# For prod, switch to Keycloak's `${vault.X}` placeholder syntax + a
+# K8s-vault provider (see RHBK docs); booth-grade hardcoding is the
+# trade we make for reset simplicity.
+#
+# Issuer URL once Keycloak is up:
+#   https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo
+---
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: KeycloakRealmImport
+metadata:
+  name: demo-realm
+  namespace: keycloak
+  labels:
+    app.kubernetes.io/name: keycloak-realm-demo
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  keycloakCRName: keycloak
+  realm:
+    realm: demo
+    enabled: true
+    displayName: "RH Summit 2026 Demo Realm"
+    displayNameHtml: "<strong>RH Summit 2026</strong> Demo Realm"
+
+    # Disable self-registration. Only declared users can log in. The
+    # whole point of the realm is reset-friendly known personas.
+    registrationAllowed: false
+    rememberMe: false
+    verifyEmail: false
+    loginWithEmailAllowed: true
+    duplicateEmailsAllowed: false
+    resetPasswordAllowed: false
+
+    # Booth-grade — long enough that nobody hits the timeout during
+    # the demo flow.
+    accessTokenLifespan: 3600
+    ssoSessionIdleTimeout: 28800
+    ssoSessionMaxLifespan: 36000
+
+    # ─── Groups ──────────────────────────────────────────────────────
+    groups:
+      - name: developers
+      - name: admins
+
+    # ─── Demo users ──────────────────────────────────────────────────
+    users:
+      - username: alice
+        enabled: true
+        email: alice@demo.rhsummit.coderdemo.io
+        firstName: Alice
+        lastName: Anderson
+        emailVerified: true
+        credentials:
+          - type: password
+            value: "Demo2026!"
+            temporary: false
+        groups:
+          - /developers
+      - username: bob
+        enabled: true
+        email: bob@demo.rhsummit.coderdemo.io
+        firstName: Bob
+        lastName: Brown
+        emailVerified: true
+        credentials:
+          - type: password
+            value: "Demo2026!"
+            temporary: false
+        groups:
+          - /developers
+      - username: carol
+        enabled: true
+        email: carol@demo.rhsummit.coderdemo.io
+        firstName: Carol
+        lastName: Chen
+        emailVerified: true
+        credentials:
+          - type: password
+            value: "Demo2026!"
+            temporary: false
+        groups:
+          - /developers
+      - username: dave
+        enabled: true
+        email: dave@demo.rhsummit.coderdemo.io
+        firstName: Dave
+        lastName: Davis
+        emailVerified: true
+        credentials:
+          - type: password
+            value: "Demo2026!"
+            temporary: false
+        groups:
+          - /developers
+      - username: madmin
+        enabled: true
+        email: madmin@demo.rhsummit.coderdemo.io
+        firstName: Mary
+        lastName: Admin
+        emailVerified: true
+        credentials:
+          - type: password
+            value: "Demo2026!"
+            temporary: false
+        groups:
+          - /developers
+          - /admins
+
+    # ─── OIDC clients ────────────────────────────────────────────────
+    clients:
+      - clientId: coder
+        name: "Coder (Workspace Platform)"
+        protocol: openid-connect
+        enabled: true
+        clientAuthenticatorType: client-secret
+        secret: "coder-client-secret-demo-2026"
+        publicClient: false
+        standardFlowEnabled: true
+        directAccessGrantsEnabled: false
+        serviceAccountsEnabled: false
+        redirectUris:
+          - "https://coder.apps.cluster.rhsummit.coderdemo.io/api/v2/users/oidc/callback"
+        webOrigins:
+          - "https://coder.apps.cluster.rhsummit.coderdemo.io"
+        attributes:
+          # Include `groups` claim in ID + access tokens
+          "post.logout.redirect.uris": "https://coder.apps.cluster.rhsummit.coderdemo.io/*"
+        protocolMappers:
+          - name: groups
+            protocol: openid-connect
+            protocolMapper: oidc-group-membership-mapper
+            consentRequired: false
+            config:
+              "claim.name": "groups"
+              "full.path": "false"
+              "id.token.claim": "true"
+              "access.token.claim": "true"
+              "userinfo.token.claim": "true"
+
+      - clientId: gitlab
+        name: "GitLab (SCM)"
+        protocol: openid-connect
+        enabled: true
+        clientAuthenticatorType: client-secret
+        secret: "gitlab-client-secret-demo-2026"
+        publicClient: false
+        standardFlowEnabled: true
+        directAccessGrantsEnabled: false
+        serviceAccountsEnabled: false
+        redirectUris:
+          - "https://gitlab.rhsummit.coderdemo.io/users/auth/openid_connect/callback"
+        webOrigins:
+          - "https://gitlab.rhsummit.coderdemo.io"
+        protocolMappers:
+          - name: groups
+            protocol: openid-connect
+            protocolMapper: oidc-group-membership-mapper
+            consentRequired: false
+            config:
+              "claim.name": "groups"
+              "full.path": "false"
+              "id.token.claim": "true"
+              "access.token.claim": "true"
+              "userinfo.token.claim": "true"
+
+      - clientId: openshift
+        name: "OpenShift Console"
+        protocol: openid-connect
+        enabled: true
+        clientAuthenticatorType: client-secret
+        secret: "openshift-client-secret-demo-2026"
+        publicClient: false
+        standardFlowEnabled: true
+        directAccessGrantsEnabled: false
+        serviceAccountsEnabled: false
+        redirectUris:
+          # OCP OAuth callback URL format. The path segment after
+          # /oauth2callback/ matches the identityProvider name in the
+          # OAuth CR (we'll name it `keycloak` in cluster-config).
+          - "https://oauth-openshift.apps.cluster.rhsummit.coderdemo.io/oauth2callback/keycloak"
+        protocolMappers:
+          - name: groups
+            protocol: openid-connect
+            protocolMapper: oidc-group-membership-mapper
+            consentRequired: false
+            config:
+              "claim.name": "groups"
+              "full.path": "false"
+              "id.token.claim": "true"
+              "access.token.claim": "true"
+              "userinfo.token.claim": "true"
+
+      - clientId: grafana
+        name: "Grafana (Observability)"
+        protocol: openid-connect
+        enabled: true
+        clientAuthenticatorType: client-secret
+        secret: "grafana-client-secret-demo-2026"
+        publicClient: false
+        standardFlowEnabled: true
+        directAccessGrantsEnabled: false
+        serviceAccountsEnabled: false
+        redirectUris:
+          - "https://graf-coder.apps.cluster.rhsummit.coderdemo.io/login/generic_oauth"
+        webOrigins:
+          - "https://graf-coder.apps.cluster.rhsummit.coderdemo.io"
+        protocolMappers:
+          - name: groups
+            protocol: openid-connect
+            protocolMapper: oidc-group-membership-mapper
+            consentRequired: false
+            config:
+              "claim.name": "groups"
+              "full.path": "false"
+              "id.token.claim": "true"
+              "access.token.claim": "true"
+              "userinfo.token.claim": "true"

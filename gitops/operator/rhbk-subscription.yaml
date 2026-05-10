@@ -1,0 +1,50 @@
+# Red Hat Build of Keycloak (RHBK) operator
+#
+# Source: `redhat-operators` catalog (Red Hat-supported, on-narrative
+# for RH Summit). Channel `stable-v22` — pinned major to avoid the
+# operator auto-jumping to a new realm-schema major mid-event.
+#
+# Images pull from `registry.redhat.io/rhbk/*` which is covered by the
+# cluster's existing global pull secret (entry `registry.redhat.io`,
+# same partner-pull pattern that RHAIIS uses for `quay.io/modh/vllm`).
+# No additional entitlement plumbing needed.
+#
+# Installed into a dedicated `keycloak` namespace via an OperatorGroup
+# in OwnNamespace mode (same pattern as group-sync-operator). Keeps
+# the operator's CR scope explicit and avoids accidental cross-namespace
+# CR reconciliation.
+#
+# This subscription is applied OUTSIDE Argo CD (along with the other
+# operator subscriptions in `gitops/operator/`) as part of the
+# cluster-bootstrap step. Operators must be present BEFORE Argo can
+# create their CRs (Argo can't apply a Keycloak CR until the CRD is
+# in the cluster, which only happens after the operator pod starts).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak
+  labels:
+    openshift.io/cluster-monitoring: "true"
+    app.kubernetes.io/part-of: coder-aigov-demo
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: rhbk-operatorgroup
+  namespace: keycloak
+spec:
+  targetNamespaces:
+    - keycloak
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: rhbk-operator
+  namespace: keycloak
+spec:
+  channel: stable-v22
+  name: rhbk-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic

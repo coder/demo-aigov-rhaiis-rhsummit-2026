@@ -1,0 +1,60 @@
+# Keycloak — Red Hat Build of Keycloak (RHBK) instance + demo realm.
+#
+# Owns:
+#   - CNPG Postgres cluster `keycloak-db` (in keycloak namespace)
+#   - Keycloak CR (single-replica, plain-HTTP-behind-edge-TLS)
+#   - OpenShift Route (cert-manager wildcard via letsencrypt-prod)
+#   - KeycloakRealmImport CR (realm `demo`, 5 users, 2 groups, 4 OIDC clients)
+#
+# Pre-requisites NOT managed by this Application (must be in place
+# BEFORE Argo can sync this app):
+#   1. RHBK operator subscription — `gitops/operator/rhbk-subscription.yaml`,
+#      applied at cluster-bootstrap time by the gitops_bootstrap step.
+#      Without the operator's CRDs, Argo can't create the Keycloak or
+#      KeycloakRealmImport CRs.
+#   2. CNPG operator — already in place via gitops/operator/cnpg-subscription.yaml.
+#   3. cert-manager + the `letsencrypt-prod` ClusterIssuer — already in
+#      place via gitops/apps/cert-manager/.
+#
+# Sync wave 1 (same as coder) — Keycloak's Postgres + Keycloak server
+# don't need to be up before any other app starts; consumers (Coder
+# OIDC, OpenShift OAuth CR addition, Grafana OIDC, GitLab OIDC) will
+# come up later in their own apps after Keycloak is healthy.
+#
+# Identity story:
+#   - Demo-user personas (alice/bob/carol/dave/madmin) live HERE in the
+#     realm import YAML — declarative, reset-friendly.
+#   - Admin identity (Coder team using `demo-rhsummit-users:admin`) is
+#     unchanged — STILL flows through GitHub OAuth (kept as second IdP
+#     on Coder + OCP). See docs/identity-architecture.md for the
+#     dual-IdP design.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak
+  namespace: openshift-gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: main
+    path: manifests/keycloak
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 8
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

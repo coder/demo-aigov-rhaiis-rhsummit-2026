@@ -1,0 +1,35 @@
+# CNPG Postgres cluster for Keycloak's data store.
+#
+# Single instance — booth-grade, not HA. Keycloak operator
+# automatically picks up CNPG-generated secret format (`keycloak-db-app`
+# Secret with `uri`, `host`, `username`, `password` keys).
+#
+# Why CNPG rather than the operator's built-in postgres: we already
+# run CNPG for Coder's Postgres (see manifests/postgres/cluster.yaml).
+# Reusing the same operator keeps the cluster-state surface small,
+# and CNPG's backups + restore tooling is the same shape as the rest
+# of the cluster's data layer.
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: keycloak-db
+  namespace: keycloak
+  labels:
+    app.kubernetes.io/name: keycloak-db
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  instances: 1
+  storage:
+    size: 5Gi
+  bootstrap:
+    initdb:
+      database: keycloak
+      owner: keycloak
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
