@@ -1,129 +1,124 @@
-# Red Hat AI Inference Server (RHAIIS) — OpenAI-compatible inference endpoint
+# Red Hat AI Inference Server (RHAIIS) — planner + executor split
 #
-# Demo-grade Deployment running on a GPU node. Hardening (STIG, FIPS,
-# restricted-v2 overrides, readOnlyRootFilesystem) is intentionally NOT
-# applied here — booth demo values simplicity. OCP applies its baseline
-# restricted-v2 SCC by default which is sufficient for the demo.
-# Production deployments should re-add explicit hardening; see
-# docs/architecture.md.
+# The booth demo runs TWO vLLM endpoints to demonstrate a planner /
+# executor agentic split:
 #
-# Verified to expose:
-#   POST /v1/chat/completions   (with tools / tool_choice for tool-calling)
-#   POST /v1/completions
-#   POST /v1/embeddings
-#   GET  /v1/models
+#   vllm-planner   — Llama 3.3 70B Instruct INT4 on L40S 48 GiB
+#                     · "do the planning, decompose tasks, decide which
+#                       sub-agents to spawn"
+#                     · `--tool-call-parser llama3_json`
+#                     · 16K context (tight on L40S 48 GiB after 35 GiB
+#                       weights + cudagraph buffers; 32K crashed init)
 #
-# Tool-call support requires the right per-model parser. Active model:
-# Qwen2.5-Coder-32B-Instruct-AWQ — the hermes parser is the right match
-# for Qwen 2.5's `<tool_call>...</tool_call>` emission format.
-# Alternates (kept for reference; switch by changing args + parser):
-#   --tool-call-parser granite       (Granite 3.x Instruct)
-#   --tool-call-parser hermes        (Qwen2.5 / Qwen2.5-Coder, OpenHermes, Hermes 3)
-#   --tool-call-parser llama3_json   (Llama-3.1+ / Llama 3.3 Instruct)
-#   --tool-call-parser mistral       (Mistral / Mixtral / Devstral Instruct)
-#   --tool-call-parser deepseek      (DeepSeek-V3 / DeepSeek-Coder-V2.5+)
+#   vllm-executor  — Qwen 2.5 7B Instruct on A10G 24 GiB
+#                     · "run the actual tool calls — execute, read_file,
+#                       write_file, edit_files"
+#                     · `--tool-call-parser hermes`
+#                     · 16K context (plenty on A10G 24 GiB after 14 GiB
+#                       weights + buffers)
 #
-# Why Qwen2.5-Coder-32B-Instruct-AWQ on L40S, not Granite-3.1-8B on A10G:
-#   The booth demo wants to show the open model driving the same agentic
-#   workflow as Claude (clone repo, edit files, run commands). Coder
-#   Agents (chatd) ships a 19-tool harness. An 8B model can't reliably
-#   keep all 19 schemas in working context AND chain them — Granite's
-#   BFCL v3 is 68.27, mid-pack. Qwen2.5-Coder-32B is purpose-built for
-#   agentic coding (SWE-Bench Pro ~44%) and the AWQ 4-bit quant fits
-#   comfortably on a single L40S 48 GiB. Llama 3.3 70B is documented
-#   as the backup if Qwen origins come into question (see
-#   docs/decisions.md and bedrock-model-sub.md).
+# Why two models / two backends:
+#   Coder Agents' 19-tool harness asks the chat model to do (a) high-
+#   level reasoning ("which sub-agent should run this", "which template
+#   matches the user's intent"), (b) precise tool format adherence, AND
+#   (c) low-latency tool execution. A single mid-tier model is mediocre
+#   at all three. Splitting the workload by capability tier — big model
+#   plans, small model executes — gives the booth a clean "watch the
+#   smart model orchestrate, watch the fast model execute" narrative
+#   AND aligns to how production AI infra is actually built (router +
+#   pool of specialized backends).
 #
-# GPU node placement: pinned to NVIDIA L40S only. The L40S MachineSet
-# (manifests/machinesets/gpu-l40s.yaml) provisions a g6e.2xlarge in
-# us-east-1a; the GPU operator's GPU Feature Discovery DaemonSet labels
-# it `nvidia.com/gpu.product=NVIDIA-L40S` once the driver loads, and the
-# nodeSelector below targets that label so this Deployment cannot land
-# back on the legacy A10G g5.2xlarge node. Backout: change the
-# nodeSelector value to NVIDIA-A10G and revert the model + parser args.
+# Why Llama 3.3 70B for planner (not Qwen3 32B, not bigger Qwen):
+#   - Llama 3.3 70B has the strongest documented multi-step reasoning
+#     in the 70B-class open-weight tier.
+#   - The RedHatAI/ namespace ships a vetted INT4 (W4A16) quant that's
+#     vLLM 0.8.4-compatible and fits L40S 48 GiB.
+#   - Coder is a Red Hat partner; using a Red-Hat-published quant of a
+#     Meta model is the right booth narrative for "RH-supported AI
+#     infrastructure end to end."
+#   - License caveat: Llama 3.3 Community License (NOT OSI-OSS — has
+#     the >700M MAU clause and acceptable-use policy). Acceptable for
+#     ~all enterprises; may be a sensitivity for the most license-
+#     sensitive PubSec audiences. Backup: Qwen3 32B Instruct AWQ in
+#     the same slot — same hardware, same refresh procedure, no
+#     license caveat. See docs/decisions.md §27.
+#
+# Why Qwen 2.5 7B for executor (not Granite 8B, not Hermes 3 8B):
+#   - The hermes parser handles Qwen 2.5 Instruct's `<tool_call>` format
+#     reliably (we proved Granite 8B couldn't and Qwen 2.5 *Coder* AWQ
+#     drifted on the format — Qwen 2.5 Instruct is the one variant that
+#     works under tool_choice=auto).
+#   - 7B is fast enough that the booth visual ("model executes the
+#     tool call you can see in real time") feels snappy.
+#   - Hermes 3 8B is the runner-up; swap by changing --model only.
+#
+# GPU node placement: planner pinned to NVIDIA-L40S, executor pinned
+# to NVIDIA-A10G. Both nodes are managed by separate MachineSets:
+#   - cluster-pqc4z-worker-us-east-1a       (g5.2xlarge, A10G 24 GiB)
+#   - cluster-pqc4z-worker-l40s-us-east-1a  (g6e.2xlarge, L40S 48 GiB)
+# Backout: change either Deployment's nodeSelector + model + parser
+# back to a known-good config; the MachineSets stay put either way.
 #
 # Pull-secret expectation: a `redhat-pull-secret` of type
 # kubernetes.io/dockerconfigjson exists in this namespace, sourced from
-# your Red Hat partner subscription (registry.redhat.io). Created at
-# cluster-bootstrap time by terraform/main.tf's gitops_bootstrap step.
+# your Red Hat partner subscription.
 ---
+# ─── PLANNER ─────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vllm
+  name: vllm-planner
   namespace: ocp-ai
   labels:
     app.kubernetes.io/name: vllm
-    app.kubernetes.io/component: inference
+    app.kubernetes.io/component: planner
     app.kubernetes.io/part-of: coder-aigov-demo
 spec:
   replicas: 1
   strategy:
-    type: Recreate                  # model load is heavy; avoid double-warmup
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: vllm
+      app.kubernetes.io/component: planner
   template:
     metadata:
       labels:
         app.kubernetes.io/name: vllm
-        app.kubernetes.io/component: inference
+        app.kubernetes.io/component: planner
     spec:
       imagePullSecrets:
         - name: redhat-pull-secret
-      # Pin to L40S only. Both A10G (g5.2xlarge) and L40S (g6e.2xlarge)
-      # nodes are present in the cluster; the looser
-      # `nvidia.com/gpu.present=true` selector would let the pod land on
-      # either, and AWQ 4-bit + 32K context does NOT fit on A10G's 24 GiB.
       nodeSelector:
         nvidia.com/gpu.product: NVIDIA-L40S
       containers:
         - name: vllm
-          # CUDA-enabled RHAIIS image. Using the quay.io mirror which
-          # doesn't require an RHOAI subscription entitlement. The
-          # registry.redhat.io path requires a specific SKU that may not
-          # be on the partner pull secret.
           image: quay.io/modh/vllm:rhoai-2.20-cuda
           imagePullPolicy: Always
           args:
             - --model
-            - Qwen/Qwen2.5-32B-Instruct-AWQ
-            # Qwen 2.5 32B Instruct (NOT the Coder variant) — same
-            # parameter count, AWQ 4-bit fits L40S identically (~18 GiB
-            # weights, ~19 GiB on GPU after framework overhead), but
-            # follows the `<tool_call>...</tool_call>` output format
-            # precisely under tool_choice=auto. The Coder variant's AWQ
-            # quant has format-drift: it emits bare JSON or `<{"name":
-            # ...}>` (truncated wrap) even when its own tokenizer
-            # template tells it to use `<tool_call>` (vllm-project/vllm
-            # #29192). Verified empirically — Coder-variant tool_choice=auto
-            # produced raw JSON in `content`, parser found nothing in
-            # `tool_calls`, chatd had nothing to execute. Don't go back
-            # to Coder without verifying vllm has shipped a fix.
-            #
-            # Coding ability is still strong: 32B Instruct's general
-            # reasoning + code is comparable to Coder-32B; the demo
-            # narrative ("open model drives the same agentic workflow as
-            # Claude") survives the swap intact.
-            - --quantization
-            - awq_marlin
+            - RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16
+            # INT4 GPTQ quant published by RedHatAI on HuggingFace —
+            # ~35 GiB weights, vetted on vLLM. Auto-detect handles
+            # the format; --quantization not strictly needed but
+            # explicit is safer.
             - --tool-call-parser
-            - hermes
+            - llama3_json
             - --enable-auto-tool-choice
             - --host
             - 0.0.0.0
             - --port
             - "8000"
-            # Qwen 2.5 Coder 32B native context is 32K. AWQ on L40S
-            # (48 GiB) leaves ~25 GiB free for KV cache after weights +
-            # cudagraph buffers, which covers 32K context with a
-            # comfortable batch budget. If we ever move to L40S+ or
-            # A100 80GB, can extend to 128K via YaRN config.
+            # 16K context. L40S 48 GiB - 35 GiB weights - 2 GiB
+            # cudagraph = ~11 GiB free. 16K KV cache for 70B is
+            # ~6-8 GiB. Tight; if init fails with "available KV cache
+            # memory" error, drop to 8192. Llama 3.3's native 128K
+            # context is far out of reach on this GPU regardless.
             - --max-model-len
-            - "32768"
+            - "16384"
             - --disable-log-requests
             - --tensor-parallel-size
-            - "1"            # single L40S — no TP needed
+            - "1"
           ports:
             - name: http
               containerPort: 8000
@@ -136,9 +131,6 @@ spec:
               value: all
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: compute,utility
-            # Kubernetes auto-injects VLLM_PORT=tcp://... from the Service
-            # named "vllm". vLLM tries to parse this as an int and crashes.
-            # Override it explicitly.
             - name: VLLM_PORT
               value: "8000"
           resources:
@@ -148,16 +140,9 @@ spec:
               nvidia.com/gpu: "1"
             limits:
               cpu: "6"
-              memory: "32Gi"            # bumped from 16Gi — 32B vLLM Python proc + tokenizer pool
+              memory: "32Gi"
               nvidia.com/gpu: "1"
-          # startupProbe gates the container's "started" state until vLLM
-          # has actually loaded weights and bound /v1/models. Without this,
-          # liveness fires too early, kills vLLM mid-load, and the emptyDir
-          # cache is wiped — the next attempt re-downloads ~18GB and the
-          # cycle repeats forever. Qwen 2.5 Coder 32B AWQ over the public
-          # HF mirror takes ~5-7 min to download + ~2-3 min to load
-          # checkpoint shards + cudagraph capture. failureThreshold 120 *
-          # periodSeconds 10 = 1200s = 20 min runway.
+          # 70B INT4 download is ~35 GiB; allow 25 min runway.
           startupProbe:
             httpGet:
               path: /v1/models
@@ -165,7 +150,7 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 120
+            failureThreshold: 150
           readinessProbe:
             httpGet:
               path: /v1/models
@@ -188,7 +173,7 @@ spec:
       volumes:
         - name: hf-cache
           emptyDir:
-            sizeLimit: 60Gi              # 32B AWQ ≈ 18GB; leave headroom for checkpoint download retries
+            sizeLimit: 80Gi
         - name: shm
           emptyDir:
             medium: Memory
@@ -197,15 +182,146 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: vllm
+  name: vllm-planner
   namespace: ocp-ai
   labels:
     app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner
     app.kubernetes.io/part-of: coder-aigov-demo
 spec:
   type: ClusterIP
   selector:
     app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+# ─── EXECUTOR ────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-executor
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: executor
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+      app.kubernetes.io/component: executor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm
+        app.kubernetes.io/component: executor
+    spec:
+      imagePullSecrets:
+        - name: redhat-pull-secret
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-A10G
+      containers:
+        - name: vllm
+          image: quay.io/modh/vllm:rhoai-2.20-cuda
+          imagePullPolicy: Always
+          args:
+            - --model
+            - Qwen/Qwen2.5-7B-Instruct
+            - --tool-call-parser
+            - hermes
+            - --enable-auto-tool-choice
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            # 16K context. A10G 24 GiB - 14 GiB weights - 2 GiB
+            # cudagraph = ~8 GiB free. 16K KV cache for 7B is ~3-4
+            # GiB. Comfortable. Could go to 32K if needed.
+            - --max-model-len
+            - "16384"
+            - --disable-log-requests
+            - --tensor-parallel-size
+            - "1"
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: HF_HOME
+              value: /tmp/hf-cache
+            - name: HF_HUB_OFFLINE
+              value: "0"
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            - name: VLLM_PORT
+              value: "8000"
+          resources:
+            requests:
+              cpu: "2"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "4"
+              memory: "16Gi"
+              nvidia.com/gpu: "1"
+          # 7B fp16 ≈ 14 GiB download; 15 min runway is safe.
+          startupProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 4
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /tmp/hf-cache
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: 30Gi
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-executor
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: executor
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: executor
   ports:
     - name: http
       port: 8000

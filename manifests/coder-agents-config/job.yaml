@@ -88,12 +88,26 @@ spec:
                   key: token
             - name: AWS_REGION
               value: "us-east-1"
-            - name: RHAIIS_BASE_URL
-              value: "http://vllm.ocp-ai.svc.cluster.local:8000/v1"
-            - name: RHAIIS_MODEL_ID
-              value: "Qwen/Qwen2.5-32B-Instruct-AWQ"
-            - name: RHAIIS_DISPLAY_NAME
-              value: "Qwen 2.5 32B Instruct AWQ (RHAIIS sovereign)"
+            # RHAIIS planner + executor split — each has its own
+            # vLLM Service in ocp-ai. The script's defaults match
+            # these values; env vars are listed explicitly here so
+            # they're discoverable when reading the Job spec.
+            - name: RHAIIS_PLANNER_BASE_URL
+              value: "http://vllm-planner.ocp-ai.svc.cluster.local:8000/v1"
+            - name: RHAIIS_PLANNER_MODEL_ID
+              value: "RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16"
+            - name: RHAIIS_PLANNER_DISPLAY_NAME
+              value: "Llama 3.3 70B Instruct INT4 — Planner (RHAIIS sovereign)"
+            - name: RHAIIS_PLANNER_PROVIDER_DISPLAY
+              value: "RHAIIS Planner (Llama 3.3 70B INT4 / L40S)"
+            - name: RHAIIS_EXECUTOR_BASE_URL
+              value: "http://vllm-executor.ocp-ai.svc.cluster.local:8000/v1"
+            - name: RHAIIS_EXECUTOR_MODEL_ID
+              value: "Qwen/Qwen2.5-7B-Instruct"
+            - name: RHAIIS_EXECUTOR_DISPLAY_NAME
+              value: "Qwen 2.5 7B Instruct — Executor (RHAIIS sovereign)"
+            - name: RHAIIS_EXECUTOR_PROVIDER_DISPLAY
+              value: "RHAIIS Executor (Qwen 2.5 7B / A10G)"
             - name: BEDROCK_PROVIDER_MODE
               value: "native"     # set to "aibridge" if chatd's `bedrock` provider type doesn't work
             - name: HOME

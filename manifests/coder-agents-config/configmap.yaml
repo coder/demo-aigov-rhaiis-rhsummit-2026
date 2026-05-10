@@ -83,16 +83,21 @@ data:
     : "${CODER_URL:?CODER_URL must be set}"
     : "${CODER_TOKEN:?CODER_TOKEN must be set}"
     : "${AWS_REGION:=us-east-1}"
-    : "${RHAIIS_BASE_URL:=http://vllm.ocp-ai.svc.cluster.local:8000/v1}"
-    # Active RHAIIS model — must match what vLLM is serving in
-    # manifests/rhaiis/vllm-deployment.yaml. Qwen 2.5 Coder 32B AWQ on L40S
-    # is the booth-demo lineup; see docs/decisions.md for the model-tier
-    # rationale (Granite 3.1 8B was too small for the Coder Agents 19-tool
-    # harness — workspace creation / file edits never fired tool_calls).
-    # To roll back to Granite, change BOTH this script AND the vLLM
-    # deployment, then re-run the Job.
-    : "${RHAIIS_MODEL_ID:=Qwen/Qwen2.5-32B-Instruct-AWQ}"
-    : "${RHAIIS_DISPLAY_NAME:=Qwen 2.5 32B Instruct AWQ (RHAIIS sovereign)}"
+    
+    # RHAIIS now ships TWO openai-compat backends (planner + executor) —
+    # see manifests/rhaiis/vllm-deployment.yaml for the rationale and
+    # docs/decisions.md §27. Override any of these env vars at deploy time
+    # if you swap models.
+    : "${RHAIIS_PLANNER_BASE_URL:=http://vllm-planner.ocp-ai.svc.cluster.local:8000/v1}"
+    : "${RHAIIS_PLANNER_MODEL_ID:=RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16}"
+    : "${RHAIIS_PLANNER_DISPLAY_NAME:=Llama 3.3 70B Instruct INT4 — Planner (RHAIIS sovereign)}"
+    : "${RHAIIS_PLANNER_PROVIDER_DISPLAY:=RHAIIS Planner (Llama 3.3 70B INT4 / L40S)}"
+    
+    : "${RHAIIS_EXECUTOR_BASE_URL:=http://vllm-executor.ocp-ai.svc.cluster.local:8000/v1}"
+    : "${RHAIIS_EXECUTOR_MODEL_ID:=Qwen/Qwen2.5-7B-Instruct}"
+    : "${RHAIIS_EXECUTOR_DISPLAY_NAME:=Qwen 2.5 7B Instruct — Executor (RHAIIS sovereign)}"
+    : "${RHAIIS_EXECUTOR_PROVIDER_DISPLAY:=RHAIIS Executor (Qwen 2.5 7B / A10G)}"
+    
     : "${BEDROCK_PROVIDER_MODE:=native}"   # native | aibridge
     
     BASE="${CODER_URL%/}/api/experimental/chats"
@@ -112,33 +117,53 @@ data:
     # ---------------------------------------------------------------------------
     
     patch_provider() {
+      # Returns the provider ID on stdout (for capturing after upsert).
+      # Logs a brief summary to stderr.
       local id="$1" payload="$2"
-      curl -sf -X PATCH -H "$AUTH" -H "Content-Type: application/json" \
-        -d "$payload" "${BASE}/providers/${id}" \
-        | jq '{id,provider,display_name,base_url,has_api_key}'
+      local resp
+      resp=$(curl -sf -X PATCH -H "$AUTH" -H "Content-Type: application/json" \
+        -d "$payload" "${BASE}/providers/${id}")
+      echo "$resp" | jq '{id,provider,display_name,base_url,has_api_key}' >&2
+      echo "$resp" | jq -r '.id'
     }
     
     create_provider() {
+      # Returns the new provider ID on stdout.
       local payload="$1"
-      curl -sf -X POST -H "$AUTH" -H "Content-Type: application/json" \
-        -d "$payload" "${BASE}/providers" \
-        | jq '{id,provider,display_name,base_url,has_api_key}'
+      local resp
+      resp=$(curl -sf -X POST -H "$AUTH" -H "Content-Type: application/json" \
+        -d "$payload" "${BASE}/providers")
+      echo "$resp" | jq '{id,provider,display_name,base_url,has_api_key}' >&2
+      echo "$resp" | jq -r '.id'
     }
     
     upsert_provider() {
       # Match on (provider type, source=database) so chart-injected providers
-      # don't collide with the rows we own.
-      local provider_type="$1" payload="$2"
+      # don't collide with the rows we own. For provider types that we use
+      # MULTIPLE TIMES (e.g. two openai-compat backends — planner + executor),
+      # pass a non-empty $3 (display_name) and we'll match on
+      # (type, display_name) instead.
+      #
+      # Prints a one-line summary to stderr and the resulting provider ID
+      # on stdout (so callers can capture: `pid=$(upsert_provider …)`).
+      local provider_type="$1" payload="$2" display_name="${3:-}"
       local existing_id
-      existing_id=$(echo "$EXISTING_PROVIDERS" \
-        | jq -r --arg p "$provider_type" '.[] | select(.provider == $p and .source == "database") | .id' \
-        | head -1)
+      if [ -n "$display_name" ]; then
+        existing_id=$(echo "$EXISTING_PROVIDERS" \
+          | jq -r --arg p "$provider_type" --arg n "$display_name" \
+            '.[] | select(.provider == $p and .source == "database" and .display_name == $n) | .id' \
+          | head -1)
+      else
+        existing_id=$(echo "$EXISTING_PROVIDERS" \
+          | jq -r --arg p "$provider_type" '.[] | select(.provider == $p and .source == "database") | .id' \
+          | head -1)
+      fi
     
       if [ -n "$existing_id" ]; then
-        echo "    Updating ${provider_type} provider (${existing_id})..."
+        echo "    Updating ${provider_type}${display_name:+ (\"$display_name\")} provider (${existing_id})..." >&2
         patch_provider "$existing_id" "$payload"
       else
-        echo "    Creating ${provider_type} provider..."
+        echo "    Creating ${provider_type}${display_name:+ (\"$display_name\")} provider..." >&2
         create_provider "$payload"
       fi
     }
@@ -323,16 +348,34 @@ data:
     esac
     
     echo ""
-    echo "==> Configuring RHAIIS provider (direct, OpenAI-compatible)..."
-    RHAIIS_PROVIDER_PAYLOAD=$(jq -n --arg url "$RHAIIS_BASE_URL" '{
+    echo "==> Configuring RHAIIS Planner provider (direct, OpenAI-compatible)..."
+    RHAIIS_PLANNER_PROVIDER_PAYLOAD=$(jq -n \
+      --arg url "$RHAIIS_PLANNER_BASE_URL" \
+      --arg name "$RHAIIS_PLANNER_PROVIDER_DISPLAY" '{
       provider: "openai-compat",
-      display_name: "RHAIIS (Sovereign Granite)",
+      display_name: $name,
       base_url: $url,
       api_key: "EMPTY",
       central_api_key_enabled: true,
       allow_user_api_key: false
     }')
-    upsert_provider "openai-compat" "$RHAIIS_PROVIDER_PAYLOAD"
+    RHAIIS_PLANNER_PROVIDER_ID=$(upsert_provider "openai-compat" "$RHAIIS_PLANNER_PROVIDER_PAYLOAD" "$RHAIIS_PLANNER_PROVIDER_DISPLAY")
+    echo "    -> planner provider id: $RHAIIS_PLANNER_PROVIDER_ID"
+    
+    echo ""
+    echo "==> Configuring RHAIIS Executor provider (direct, OpenAI-compatible)..."
+    RHAIIS_EXECUTOR_PROVIDER_PAYLOAD=$(jq -n \
+      --arg url "$RHAIIS_EXECUTOR_BASE_URL" \
+      --arg name "$RHAIIS_EXECUTOR_PROVIDER_DISPLAY" '{
+      provider: "openai-compat",
+      display_name: $name,
+      base_url: $url,
+      api_key: "EMPTY",
+      central_api_key_enabled: true,
+      allow_user_api_key: false
+    }')
+    RHAIIS_EXECUTOR_PROVIDER_ID=$(upsert_provider "openai-compat" "$RHAIIS_EXECUTOR_PROVIDER_PAYLOAD" "$RHAIIS_EXECUTOR_PROVIDER_DISPLAY")
+    echo "    -> executor provider id: $RHAIIS_EXECUTOR_PROVIDER_ID"
     
     # ---------------------------------------------------------------------------
     # Bedrock Anthropic Opus + Sonnet models — explicit allowlist
@@ -470,22 +513,28 @@ data:
     done
     
     # ---------------------------------------------------------------------------
-    # RHAIIS Granite model
+    # RHAIIS planner + executor model-configs
     # ---------------------------------------------------------------------------
+    #
+    # Each model_config is registered against the matching provider's
+    # display_name so chatd's openai-compat dispatcher routes traffic to
+    # the right vLLM backend (planner -> Llama 70B INT4 / L40S; executor
+    # -> Qwen 7B / A10G).
+    
+    RHAIIS_COST='{"input_price_per_million_tokens":0,"output_price_per_million_tokens":0,"cache_read_price_per_million_tokens":0}'
     
     echo ""
-    echo "==> Configuring RHAIIS Granite model..."
-    
-    GRANITE_COST='{"input_price_per_million_tokens":0,"output_price_per_million_tokens":0,"cache_read_price_per_million_tokens":0}'
-    
-    GRANITE_PAYLOAD=$(jq -n \
-      --arg model "$RHAIIS_MODEL_ID" \
-      --arg display "$RHAIIS_DISPLAY_NAME" \
-      --argjson cost "$GRANITE_COST" '{
+    echo "==> Configuring RHAIIS Planner model..."
+    RHAIIS_PLANNER_PAYLOAD=$(jq -n \
+      --arg model "$RHAIIS_PLANNER_MODEL_ID" \
+      --arg display "$RHAIIS_PLANNER_DISPLAY_NAME" \
+      --arg provider_id "$RHAIIS_PLANNER_PROVIDER_ID" \
+      --argjson cost "$RHAIIS_COST" '{
         provider: "openai-compat",
+        provider_id: $provider_id,
         model: $model,
         display_name: $display,
-        context_limit: 32768,
+        context_limit: 16384,
         enabled: true,
         is_default: false,
         model_config: {
@@ -493,8 +542,28 @@ data:
           cost: $cost
         }
       }')
+    upsert_model_by_name "$RHAIIS_PLANNER_DISPLAY_NAME" "$RHAIIS_PLANNER_PAYLOAD"
     
-    upsert_model_by_name "$RHAIIS_DISPLAY_NAME" "$GRANITE_PAYLOAD"
+    echo ""
+    echo "==> Configuring RHAIIS Executor model..."
+    RHAIIS_EXECUTOR_PAYLOAD=$(jq -n \
+      --arg model "$RHAIIS_EXECUTOR_MODEL_ID" \
+      --arg display "$RHAIIS_EXECUTOR_DISPLAY_NAME" \
+      --arg provider_id "$RHAIIS_EXECUTOR_PROVIDER_ID" \
+      --argjson cost "$RHAIIS_COST" '{
+        provider: "openai-compat",
+        provider_id: $provider_id,
+        model: $model,
+        display_name: $display,
+        context_limit: 16384,
+        enabled: true,
+        is_default: false,
+        model_config: {
+          max_output_tokens: 4096,
+          cost: $cost
+        }
+      }')
+    upsert_model_by_name "$RHAIIS_EXECUTOR_DISPLAY_NAME" "$RHAIIS_EXECUTOR_PAYLOAD"
     
     # ---------------------------------------------------------------------------
     # Summary
