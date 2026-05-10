@@ -15,26 +15,40 @@
 # Iteration log:
 #
 # 1. (failed) --disable-frontend-multiprocessing
-#    The DEBUG logs revealed the hang is in vLLM V1's core_client.py
-#    line 421 — parent is in a tight 10-second-poll loop:
-#      `Waiting for 1 core engine proc(s) to start: {0}`
-#    Engine_core child loaded ALL weights (38 GiB on GPU verified) but
-#    never sent the "I'm ready" handshake back to the parent. The
-#    `--disable-frontend-multiprocessing` flag turned out to only
-#    affect the HTTP API frontend, NOT the engine_core process.
+#    The flag only affects the HTTP API frontend, not the engine_core
+#    process. Hang persisted.
 #
-# 2. (current) VLLM_USE_V1=0
-#    Forces vLLM's V0 engine instead of V1. V0 uses a different
-#    process model (and different code path entirely) — the V1
-#    core_client.py readiness handshake is bypassed. V0 is the
-#    legacy engine; works but lacks some V1 perf optimizations
-#    (chunked-prefill priorities, etc.). Acceptable booth tradeoff.
+# 2. (failed-but-informative) VLLM_USE_V1=0 forced V0 engine.
+#    Instead of hanging, V0 surfaced the actual error V1 was silently
+#    deadlocking on:
+#      ValueError: No available memory for the cache blocks.
+#      Try increasing `gpu_memory_utilization` when initializing the engine.
+#    Root cause confirmed: 70B INT4 weights (35 GiB) + framework
+#    overhead (7-8 GiB) at default --gpu-memory-utilization=0.9
+#    (=43.2 GiB) leaves ZERO room for KV cache on a 48 GiB L40S.
+#    V1's core_client deadlocks IN this step; V0 reports the error
+#    and exits cleanly. Same underlying problem, different failure
+#    mode.
 #
-# Flags to try next if (2) doesn't fix it:
-#   3. --gpu-memory-utilization 0.85
-#   4. Switch quant to RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
-#      (different kernel path)
-#   5. Newer rhoai-cuda image tag (vLLM ≥0.9)
+# 3. (current) Two-pronged fix on V0:
+#    --gpu-memory-utilization 0.95 (pushes vLLM's budget up to 45.6
+#    GiB, recovering 2.4 GiB of headroom that was being wasted on the
+#    framework reserve)
+#    + --max-model-len 8192 (halves the KV cache need vs 16K, so 70B
+#    at 8K context needs ~6-7 GiB cache instead of ~12-15 GiB at 16K).
+#    Combined: 45.6 - 35 = 10.6 GiB for KV cache; 8K context fits
+#    with 3-4 GiB headroom. Booth use case (coding agent tasks) is
+#    almost always under 8K input + 4K output, so 8K total is
+#    acceptable.
+#
+# Flags to try next if (3) doesn't fix it:
+#   4. --max-model-len 4096 (further halving — leaves more margin)
+#   5. Newer rhoai-cuda image tag (vLLM ≥0.9 may have better KV
+#      allocator)
+#   6. Switch to RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic — FP8
+#      weights are larger than INT4 (~70 GiB ≫ L40S budget), so this
+#      is NOT actually viable on L40S. Would need A100 80GB or H100
+#      80GB. Documented as "future GPU swap" not "try next."
 #
 # Backout: just `oc delete -f this-file.yaml`. The experimental
 # MachineSet stays put for reuse.
@@ -82,14 +96,24 @@ spec:
             - llama3_json
             - --enable-auto-tool-choice
             # Skip cudagraph capture. Saves 10-15 min on cold start.
-            # We're debugging the engine init hang, not compile time.
             - --enforce-eager
+            # Push GPU memory budget from default 0.9 → 0.95.
+            # L40S 48 GiB * 0.95 = 45.6 GiB for vLLM (vs 43.2 at 0.9).
+            # Reclaims 2.4 GiB that's wasted as framework reserve at
+            # the default; that's the difference between "no KV cache
+            # fits" and "8K KV cache fits comfortably" for 70B INT4.
+            - --gpu-memory-utilization
+            - "0.95"
             - --host
             - 0.0.0.0
             - --port
             - "8000"
+            # 8K context. 70B at 8K needs ~6-7 GiB KV cache; budget
+            # after weights (35 GiB) on 45.6 GiB total = 10.6 GiB.
+            # Fits with 3-4 GiB headroom. Bumped back to 16K once
+            # we know basic init succeeds.
             - --max-model-len
-            - "16384"
+            - "8192"
             - --tensor-parallel-size
             - "1"
           ports:
