@@ -593,6 +593,55 @@ Conceptually correct: "RHAIIS is the provider, the models it hosts are below it.
 
 ---
 
+## 31. Llama 3.3 70B INT4 working config found — V0 engine + 0.95 mem + 8K context
+
+**Picked:** vllm-llama-experiment Deployment runs `RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16` end-to-end on the experimental L40S MachineSet with these flags:
+
+```
+--model RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16
+--tool-call-parser llama3_json
+--enable-auto-tool-choice
+--enforce-eager
+--gpu-memory-utilization 0.95
+--max-model-len 8192
+--tensor-parallel-size 1
+env: VLLM_USE_V1=0
+```
+
+Verified end-to-end: `/v1/models` 200, structured `tool_calls` under `tool_choice: auto`, single-tool and multi-tool prompts. Sequential reasoning (one tool_call at a time, waits for result before next) is correct for ordering-sensitive workflows like clone-then-read. Qwen 32B AWQ in comparison emits parallel tool_calls which is faster but can race on data dependencies.
+
+**The four sticking points + their fixes (booth-grade troubleshooting log):**
+
+1. **V1 engine deadlock** — `core_client.py:421` parent process spins in a 10-second-poll loop waiting for engine_core child readiness handshake; child loads weights to GPU but never sends the handshake reply. Silent: no log output, no restart, no crash. **Fix:** `VLLM_USE_V1=0` forces V0 engine which uses a completely different process model. V0 is the legacy engine but ships in the same image and works correctly here.
+
+2. **--disable-frontend-multiprocessing red herring** — sounds related but only affects the HTTP API frontend, NOT the engine_core process. Did not help and was dropped.
+
+3. **KV cache budget exhaustion** — at default `--gpu-memory-utilization 0.9` (43.2 GiB on a 48 GiB L40S) with 35 GiB weights + 7-8 GiB framework overhead, vLLM has ZERO budget left for KV cache. V0 surfaces this as `ValueError: No available memory for the cache blocks`; V1 deadlocks instead of erroring. **Fix:** `--gpu-memory-utilization 0.95` recovers 2.4 GiB.
+
+4. **8K context (not 16K)** — even with 0.95 utilization, 70B KV cache for 16K context needs ~12-15 GiB which won't fit alongside the weights. **Fix:** `--max-model-len 8192` — needs ~6-7 GiB at 8K, fits with 3-4 GiB headroom. Coding-agent traffic typically stays well under 8K input + 4K output = 12K total per turn — so 8K is restrictive but functional. Bumping max-model-len to a 70B-on-L40S-fit ceiling (probably 10K-12K) is iteration #5 if we want more.
+
+**Status — NOT promoted to the production planner.**
+
+The Qwen 2.5 32B Instruct AWQ on the production `vllm-planner` Service stays as the booth-ready model — works under `tool_choice: auto`, 32K context (4x Llama's 8K), already verified yesterday end-to-end with chatd. Llama 70B INT4 on the experimental Service is available at `vllm-llama-experiment.ocp-ai.svc.cluster.local:8000` for direct testing but is NOT registered in chatd (the openai-compat provider's single base_url still points at vllm-planner).
+
+**Tradeoff matrix for the booth-day decision:**
+
+| Property | Qwen 32B Instruct AWQ (production planner) | Llama 70B INT4 (experiment) |
+|---|---|---|
+| **Reasoning quality** | Mid-tier; needs nudging on sub-agent flows | Strongest of the OSS 70B class; better at planning + template selection |
+| **Tool-call behavior** | Parallel (faster, occasional race on data deps) | Sequential (correct ordering, slower) |
+| **Context window** | 32K | 8K (limited by GPU memory) |
+| **GPU footprint** | 18 GiB on L40S (38% used) | 42 GiB on L40S (88% used) |
+| **License** | Apache-2.0 | Llama 3.3 Community License (>700M MAU clause) |
+| **vLLM stack** | V1 engine + cudagraph (default) | V0 engine + `--enforce-eager` (only path that works) |
+
+**Trigger to revisit:**
+- Customer wants Llama-branded demo → flip chatd's openai-compat provider base_url to point at `vllm-llama-experiment` Service + PATCH the model_config to the Llama model id. ~30 seconds. Both backends stay running so the flip is reversible.
+- Need >8K context with Llama 70B → upgrade GPU to A100 80GB or H100 80GB on the experimental MachineSet (replace `g6e.2xlarge` with `p5.48xlarge` slice or similar). FP8 quant becomes viable at 70 GiB on 80 GiB GPU and supports 32K+ context easily.
+- vLLM ≥0.9 ships in a future RHAIIS image → re-test V1 engine; the deadlock may be fixed upstream, giving back better serving performance + larger context.
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":
