@@ -14,21 +14,27 @@
 #
 # Iteration log:
 #
-# 1. (current) --disable-frontend-multiprocessing
-#    Removes the multi-process engine_core/api_server split that's
-#    suspected of the IPC deadlock seen on the production planner.
-#    Everything runs in one Python process. Slightly higher latency
-#    under load but eliminates the IPC contract entirely. If THIS
-#    works, root cause is confirmed as the frontend multiprocessing
-#    code path.
+# 1. (failed) --disable-frontend-multiprocessing
+#    The DEBUG logs revealed the hang is in vLLM V1's core_client.py
+#    line 421 — parent is in a tight 10-second-poll loop:
+#      `Waiting for 1 core engine proc(s) to start: {0}`
+#    Engine_core child loaded ALL weights (38 GiB on GPU verified) but
+#    never sent the "I'm ready" handshake back to the parent. The
+#    `--disable-frontend-multiprocessing` flag turned out to only
+#    affect the HTTP API frontend, NOT the engine_core process.
 #
-# Flags to try next if (1) doesn't fix it:
-#   2. --gpu-memory-utilization 0.85 (default 0.9; KV cache may be
-#      hitting an allocation race)
-#   3. Switch image to a newer rhoai-cuda tag that ships vLLM ≥0.9
+# 2. (current) VLLM_USE_V1=0
+#    Forces vLLM's V0 engine instead of V1. V0 uses a different
+#    process model (and different code path entirely) — the V1
+#    core_client.py readiness handshake is bypassed. V0 is the
+#    legacy engine; works but lacks some V1 perf optimizations
+#    (chunked-prefill priorities, etc.). Acceptable booth tradeoff.
+#
+# Flags to try next if (2) doesn't fix it:
+#   3. --gpu-memory-utilization 0.85
 #   4. Switch quant to RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
-#      (different kernel path; the issue may be in the AWQ Marlin
-#      compressed-tensors loader)
+#      (different kernel path)
+#   5. Newer rhoai-cuda image tag (vLLM ≥0.9)
 #
 # Backout: just `oc delete -f this-file.yaml`. The experimental
 # MachineSet stays put for reuse.
@@ -75,12 +81,8 @@ spec:
             - --tool-call-parser
             - llama3_json
             - --enable-auto-tool-choice
-            # Try (1): no frontend multiprocessing → no engine_core
-            # child → no IPC deadlock surface.
-            - --disable-frontend-multiprocessing
-            # Conservative cudagraph: --enforce-eager skips compile
-            # entirely so we don't burn 10-15 min there. We're
-            # debugging the post-load hang, not the compile time.
+            # Skip cudagraph capture. Saves 10-15 min on cold start.
+            # We're debugging the engine init hang, not compile time.
             - --enforce-eager
             - --host
             - 0.0.0.0
@@ -88,9 +90,6 @@ spec:
             - "8000"
             - --max-model-len
             - "16384"
-            # Verbose by default — we WANT to see what's happening.
-            # Drop --disable-log-requests so we see incoming traffic
-            # in logs when we curl this endpoint.
             - --tensor-parallel-size
             - "1"
           ports:
@@ -111,6 +110,14 @@ spec:
             # see every step of engine init.
             - name: VLLM_LOGGING_LEVEL
               value: DEBUG
+            # Force V0 engine. V1 engine's core_client.py has a
+            # readiness-handshake deadlock with this specific quant
+            # on this image (parent loops "Waiting for 1 core engine
+            # proc(s) to start: {0}" forever; child loaded weights
+            # but never replies). V0 uses a completely different
+            # process model — different code path, different IPC.
+            - name: VLLM_USE_V1
+              value: "0"
           resources:
             requests:
               cpu: "2"
