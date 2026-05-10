@@ -91,9 +91,9 @@ spec:
             - name: RHAIIS_BASE_URL
               value: "http://vllm.ocp-ai.svc.cluster.local:8000/v1"
             - name: RHAIIS_MODEL_ID
-              value: "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+              value: "Qwen/Qwen2.5-32B-Instruct-AWQ"
             - name: RHAIIS_DISPLAY_NAME
-              value: "Qwen 2.5 Coder 32B Instruct AWQ (RHAIIS sovereign)"
+              value: "Qwen 2.5 32B Instruct AWQ (RHAIIS sovereign)"
             - name: BEDROCK_PROVIDER_MODE
               value: "native"     # set to "aibridge" if chatd's `bedrock` provider type doesn't work
             - name: HOME

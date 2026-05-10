@@ -91,8 +91,8 @@ data:
     # harness — workspace creation / file edits never fired tool_calls).
     # To roll back to Granite, change BOTH this script AND the vLLM
     # deployment, then re-run the Job.
-    : "${RHAIIS_MODEL_ID:=Qwen/Qwen2.5-Coder-32B-Instruct-AWQ}"
-    : "${RHAIIS_DISPLAY_NAME:=Qwen 2.5 Coder 32B Instruct AWQ (RHAIIS sovereign)}"
+    : "${RHAIIS_MODEL_ID:=Qwen/Qwen2.5-32B-Instruct-AWQ}"
+    : "${RHAIIS_DISPLAY_NAME:=Qwen 2.5 32B Instruct AWQ (RHAIIS sovereign)}"
     : "${BEDROCK_PROVIDER_MODE:=native}"   # native | aibridge
     
     BASE="${CODER_URL%/}/api/experimental/chats"

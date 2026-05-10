@@ -87,26 +87,26 @@ spec:
           imagePullPolicy: Always
           args:
             - --model
-            - Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
-            # AWQ 4-bit weights — ~18 GiB on disk, ~19 GiB on GPU after
-            # framework overhead. vLLM auto-detects AWQ from the model
-            # config but explicit is safer across vLLM versions.
+            - Qwen/Qwen2.5-32B-Instruct-AWQ
+            # Qwen 2.5 32B Instruct (NOT the Coder variant) — same
+            # parameter count, AWQ 4-bit fits L40S identically (~18 GiB
+            # weights, ~19 GiB on GPU after framework overhead), but
+            # follows the `<tool_call>...</tool_call>` output format
+            # precisely under tool_choice=auto. The Coder variant's AWQ
+            # quant has format-drift: it emits bare JSON or `<{"name":
+            # ...}>` (truncated wrap) even when its own tokenizer
+            # template tells it to use `<tool_call>` (vllm-project/vllm
+            # #29192). Verified empirically — Coder-variant tool_choice=auto
+            # produced raw JSON in `content`, parser found nothing in
+            # `tool_calls`, chatd had nothing to execute. Don't go back
+            # to Coder without verifying vllm has shipped a fix.
+            #
+            # Coding ability is still strong: 32B Instruct's general
+            # reasoning + code is comparable to Coder-32B; the demo
+            # narrative ("open model drives the same agentic workflow as
+            # Claude") survives the swap intact.
             - --quantization
             - awq_marlin
-            # Hermes parser handles `<tool_call>{"name": ..., "arguments": ...}</tool_call>`.
-            # Qwen 2.5 Coder Instruct's bundled tokenizer chat_template
-            # does NOT include the tool-calling block — so when chatd
-            # sends `tools` + `tool_choice: auto`, vLLM's auto-injected
-            # prompt asks the model for JSON but doesn't tell it to wrap
-            # in `<tool_call>` tags. Result: model emits bare JSON in
-            # `content`, hermes parser finds nothing in `tool_calls`,
-            # chatd never executes anything. The fix is to force vLLM
-            # to use the hermes-style tool template that ships in the
-            # vLLM image. Verified: same model with `tool_choice: required`
-            # already emits properly-structured tool_calls (parser is
-            # fine), so this is purely a prompt-formatting issue.
-            - --chat-template
-            - /app/data/template/tool_chat_template_hermes.jinja
             - --tool-call-parser
             - hermes
             - --enable-auto-tool-choice
