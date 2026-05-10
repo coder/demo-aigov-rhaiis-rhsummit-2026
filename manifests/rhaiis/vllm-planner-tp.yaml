@@ -1,0 +1,200 @@
+# vllm-planner-tp — Tensor-parallel Llama 3.3 70B INT4 at 32K context
+#
+# Runs on the g6e.12xlarge node (4× L40S 48 GiB) provisioned by
+# manifests/machinesets/gpu-l40s-tp.yaml. Requests 2 of the 4 GPUs
+# via nvidia.com/gpu: 2 + nodeSelector gpu-purpose=tensor-parallel.
+#
+# Why this exists alongside vllm-planner (Qwen 32B AWQ on single L40S)
+# and vllm-llama-experiment (Llama 70B INT4 at 8K on single L40S):
+# the booth needs Llama 70B WITH a meaningful context window. Single
+# L40S caps Llama 70B at 8K. TP=2 across 2 L40S in one pod unlocks
+# 32K (and could go higher).
+#
+# Once verified working, chatd's openai-compat provider repoints
+# here from vllm-llama-experiment, and the old single-L40S MachineSets
+# (planner + experiment, both g6e.2xlarge) can be scaled to 0 to save
+# cost (~$4.48/hr saved, $10.49/hr new = +$6/hr net).
+#
+# Configuration:
+#   --tensor-parallel-size 2 (shards Llama 70B INT4 across 2 GPUs)
+#   --gpu-memory-utilization 0.95 (recover the framework reserve)
+#   --max-model-len 32768 (32K context — booth-target window)
+#   --enforce-eager (skip cudagraph compile; 70B compile across TP=2
+#                    is even slower than single GPU)
+#   VLLM_USE_V1=0 (V1 engine deadlocks; V0 works — see §31)
+#
+# Weight split math:
+#   Llama 70B INT4 weights: 35 GiB
+#   TP=2 split: 17.5 GiB per GPU
+#   Framework overhead per GPU: ~5 GiB
+#   Free per GPU at gpu_memory_utilization 0.95: 48 * 0.95 - 17.5 - 5
+#     = 23.1 GiB per GPU → 46.2 GiB total KV cache budget
+#   32K context for 70B per sequence: ~5 GiB (~150 KB/token)
+#   Concurrent 32K sequences supported: 46.2 / 5 ≈ 9 (plenty for booth)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-planner-tp
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner-tp
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  # First cold start: model download (~12-15 min) + load split across
+  # 2 GPUs (~5 min) + eager init (~1 min). 60 min runway for slack.
+  progressDeadlineSeconds: 3600
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+      app.kubernetes.io/component: planner-tp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm
+        app.kubernetes.io/component: planner-tp
+    spec:
+      imagePullSecrets:
+        - name: redhat-pull-secret
+      # Pin to the dedicated multi-GPU node (g6e.12xlarge has 4 L40Ses;
+      # we request 2 of them via nvidia.com/gpu: 2 below).
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-L40S
+        gpu-purpose: tensor-parallel
+      containers:
+        - name: vllm
+          image: quay.io/modh/vllm:rhoai-2.20-cuda
+          imagePullPolicy: Always
+          args:
+            - --model
+            - RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16
+            - --tool-call-parser
+            - llama3_json
+            - --enable-auto-tool-choice
+            - --enforce-eager
+            - --tensor-parallel-size
+            - "2"
+            - --gpu-memory-utilization
+            - "0.95"
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --max-model-len
+            - "32768"
+            - --disable-log-requests
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: HF_HOME
+              value: /tmp/hf-cache
+            - name: HF_HUB_OFFLINE
+              value: "0"
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            - name: VLLM_PORT
+              value: "8000"
+            # V1 engine deadlocks on Llama 70B INT4 (see decisions §31)
+            - name: VLLM_USE_V1
+              value: "0"
+          resources:
+            requests:
+              cpu: "4"
+              memory: "32Gi"
+              # Request 2 of the 4 L40S GPUs on this node. The other
+              # 2 are free for future expansion (e.g. concurrent
+              # different model serving).
+              nvidia.com/gpu: "2"
+            limits:
+              cpu: "16"
+              memory: "64Gi"
+              nvidia.com/gpu: "2"
+          # First cold start runway: model download ~15 min + TP load
+          # ~5 min + engine init ~1 min = ~21 min. 40 min ceiling.
+          startupProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 240
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 4
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /tmp/hf-cache
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: 80Gi
+        - name: shm
+          emptyDir:
+            medium: Memory
+            # TP communication uses /dev/shm for NCCL inter-GPU
+            # buffers. Larger here is better.
+            sizeLimit: 8Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-planner-tp
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner-tp
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner-tp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+# ServiceMonitor for the TP Deployment — surfaces vllm:* metrics in
+# UWM Prometheus so the existing vLLM Grafana/Console dashboards
+# automatically include this Deployment.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm-planner-tp
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner-tp
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+      app.kubernetes.io/component: planner-tp
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true

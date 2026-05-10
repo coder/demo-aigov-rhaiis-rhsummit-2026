@@ -1,0 +1,117 @@
+# Multi-GPU L40S MachineSet for tensor-parallel Llama 70B serving.
+#
+# Why a third MachineSet (after gpu-l40s and gpu-l40s-experiment):
+# Llama 3.3 70B INT4 on a SINGLE L40S 48 GiB is capped at 8K context
+# (after weights + framework overhead, only ~10 GiB KV cache budget
+# remains). For booth-grade demo (Tuesday Red Hat Summit), 8K is too
+# tight — chatd's 19-tool system prompt alone is ~4K, leaving ~4K
+# for chat history + completion combined.
+#
+# A `g6e.12xlarge` ships 4× L40S 48 GiB on a SINGLE node, total 192
+# GiB of GPU memory accessible to one pod. vLLM `--tensor-parallel-size
+# 2` (using 2 of the 4 GPUs) shards Llama 70B INT4 across them:
+#   - Weights split: 35 GiB / 2 = 17.5 GiB per GPU
+#   - Framework overhead: ~5 GiB per GPU
+#   - Free for KV cache per GPU: ~25 GiB
+#   - Total KV cache budget across 2 GPUs: ~50 GiB
+#   - 32K context for 70B uses ~5 GiB per sequence → fits with margin
+#   - Could push to 64K-128K context if needed (limit becomes batch
+#     concurrency, not single-sequence context)
+#
+# Why TP=2 inside one pod vs cross-node Ray TP across two g6e.2xlarge:
+# Cross-node TP needs a Ray cluster (KubeRay operator + RayCluster
+# CR + leader/worker pattern + NCCL networking between pods). That's
+# half a day of additional plumbing. Single-pod multi-GPU TP is one
+# vLLM flag and no operator install.
+#
+# Why TP=2 not TP=4 (we have 4 GPUs on this box):
+# TP=2 keeps weights in 2 GPUs, leaves the other 2 free for either
+# concurrent serving (DP=2 pattern) or another model. For now we
+# only need TP=2 to clear the 32K context goal. If we want more
+# concurrent throughput, can scale this Deployment to replicas=2
+# without re-provisioning hardware.
+#
+# Cost: ~$10.49/hr for g6e.12xlarge vs current 2× g6e.2xlarge =
+# $4.48/hr. Net delta: +$6/hr. Decommissioning the two old g6e.2xlarge
+# MachineSets after this is verified working is a follow-up task.
+#
+# Backout:
+#   oc scale -n openshift-machine-api machineset/<this-name> --replicas=0
+#   oc delete -f manifests/machinesets/gpu-l40s-tp.yaml
+#   PATCH chatd back to vllm-llama-experiment (the 8K-context Llama path).
+---
+apiVersion: machine.openshift.io/v1beta1
+kind: MachineSet
+metadata:
+  name: cluster-pqc4z-worker-l40s-tp-us-east-1a
+  namespace: openshift-machine-api
+  labels:
+    machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+  annotations:
+    capacity.cluster-autoscaler.kubernetes.io/labels: kubernetes.io/arch=amd64,gpu-purpose=tensor-parallel
+    machine.openshift.io/GPU: "4"
+    machine.openshift.io/memoryMb: "393216"
+    machine.openshift.io/vCPU: "48"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+      machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-tp-us-east-1a
+  template:
+    metadata:
+      labels:
+        machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+        machine.openshift.io/cluster-api-machine-role: worker
+        machine.openshift.io/cluster-api-machine-type: worker
+        machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-tp-us-east-1a
+    spec:
+      # Custom node label so the TP Deployment can target this node
+      # precisely (NVIDIA GPU operator labels nvidia.com/gpu.product
+      # = NVIDIA-L40S which matches all three of our L40S MachineSets).
+      metadata:
+        labels:
+          gpu-purpose: tensor-parallel
+      providerSpec:
+        value:
+          ami:
+            id: ami-04018496b0a1da2d2
+          apiVersion: machine.openshift.io/v1beta1
+          blockDevices:
+            - ebs:
+                encrypted: true
+                iops: 0
+                kmsKey:
+                  arn: ""
+                # Bigger root volume — 4 GPUs means 4× weight cache
+                # potential AND larger HF mirror caches. 400 GiB.
+                volumeSize: 400
+                volumeType: gp3
+          credentialsSecret:
+            name: aws-cloud-credentials
+          deviceIndex: 0
+          iamInstanceProfile:
+            id: cluster-pqc4z-worker-profile
+          instanceType: g6e.12xlarge
+          kind: AWSMachineProviderConfig
+          metadata: {}
+          metadataServiceOptions: {}
+          placement:
+            availabilityZone: us-east-1a
+            region: us-east-1
+          securityGroups:
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-node
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-lb
+          subnet:
+            id: subnet-0e22bc2846ce4faaa
+          tags:
+            - name: kubernetes.io/cluster/cluster-pqc4z
+              value: owned
+          userDataSecret:
+            name: worker-user-data
