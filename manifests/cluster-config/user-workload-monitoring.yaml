@@ -1,0 +1,66 @@
+# Enable OpenShift's User Workload Monitoring stack.
+#
+# Without this, the cluster's built-in Prometheus only scrapes
+# `openshift-*` namespaces. ServiceMonitors and PodMonitors in user
+# namespaces (including `nvidia-gpu-operator/nvidia-dcgm-exporter`,
+# Coder's `coder/coder-server`, RHAIIS, etc.) get ignored — metrics
+# aren't queryable from the OCP Console "Observe → Metrics" view, no
+# alerts fire, and dashboards stay empty.
+#
+# Enabling UWM spins up a SECOND Prometheus stack in the
+# `openshift-user-workload-monitoring` namespace. That one scrapes
+# user-namespace ServiceMonitors. The cluster Prometheus stays
+# untouched (so OpenShift's own platform metrics aren't disrupted).
+#
+# What this unlocks specifically:
+#   - GPU metrics from DCGM Exporter (utilization, memory, power,
+#     temperature) — the NVIDIA GPU Operator's bundled ServiceMonitor
+#     in `nvidia-gpu-operator` becomes effective.
+#   - vLLM Prometheus metrics from RHAIIS (token throughput, request
+#     latency, KV cache hit rate) when we add ServiceMonitors for
+#     `vllm-planner` / `vllm-executor`.
+#   - Coder server's `/metrics` endpoint (already prom-annotated in
+#     the chart values) — request rates, workspace counts, AI Bridge
+#     invocation counters.
+#   - chatd processor metrics for Coder Agents observability.
+#
+# Caveat: UWM Prometheus is NOT highly available by default. For the
+# booth, single-replica is fine. For production, set `replicas: 2`
+# and `retention: 24h` (or longer) under `prometheus` below.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    enableUserWorkload: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-workload-monitoring-config
+  namespace: openshift-user-workload-monitoring
+data:
+  config.yaml: |
+    # Single-replica Prometheus for the booth. Bump to 2+ for prod
+    # along with `prometheusOperator.tolerations` if you want UWM
+    # pods on dedicated nodes.
+    prometheus:
+      retention: 7d
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+    prometheusOperator:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+    # Allow user-namespace alerting rules to fire alerts to the
+    # cluster's Alertmanager. Without this, alerts defined in user
+    # namespaces are silently ignored.
+    alertmanager:
+      enabled: false        # use cluster Alertmanager instead of a
+                            # second stack — booth-grade simplicity
