@@ -2,7 +2,7 @@
 
 > Architectural and operational decisions made during the demo build, with the alternatives we considered and why we picked what we picked.
 > If you're tempted to revisit one of these — read the "why" first; we may have already burned that path.
-> Last updated 2026-05-08.
+> Last updated 2026-05-10.
 
 ## How to use this doc
 
@@ -379,6 +379,122 @@ If you change a decision, update this file in the same PR.
 - A small set of resources still report `OutOfSync` in Argo (orphan grafana PVC from a chart-template artifact, SSA managedFields cosmetic diffs on three StatefulSets, ClusterRole/CRB tracking-id labels). All Healthy; cosmetic-only.
 
 **Trigger to revisit:** A federal customer requires operator-managed observability — swap to OpenShift Logging (Vector + LokiStack) and consume the same dashboards via dual-source Argo. Also revisit if the Coder team publishes a non-DH `sql-exporter` mirror.
+
+---
+
+## 23. Two `-ocp` workspace templates only (not five)
+
+**Picked:** Ship just `coder-templates/ai-dev-ocp/` and `coder-templates/agents-dev-ocp/`. The earlier `openshift-ai-gov`, `ai-dev`, `agents-dev`, `demo-ai-gov-firewall-ocp`, and `demo-ai-gov-no-firewall-ocp` templates were deleted from the repo and removed from the Coder server.
+
+**Considered:** Keep the firewall-on/off A-B narrative templates for the governance story.
+
+**Why:**
+- Booth narrative is "show the open model do what Claude does on the same workspace UX" — that needs ONE solid CLI-driven workspace (`ai-dev-ocp`: code-server + Claude/Codex/Gemini/Kiro CLI + Cursor/Kiro IDE) and ONE chatd-driven workspace (`agents-dev-ocp`: code-server only, agent loop runs server-side).
+- Five templates meant five sets of UBI9 SCC fixes, five GH Actions matrix entries, five sets of sealed-secret consumers — too much surface for one event.
+- The firewall narrative still works at-cluster level (Bedrock IRSA scoping, AI Bridge `ALLOW_BYOK=false` enforcement, restricted-v2 SCC); we don't need separate templates to demonstrate it.
+
+**Tradeoffs:** No live A-B demonstration of agent-process-firewall toggling. If we want it back, the `demo-ai-gov-*-ocp` templates can be restored from git history (they were deleted, not archived).
+
+**Trigger to revisit:** Customer specifically asks "show me what the egress-blocked variant does differently."
+
+---
+
+## 24. UBI9 9.7 workspace base images on GHCR (renamed from workspace-base / enterprise-node)
+
+**Picked:** Three images at `coder-templates/images/`:
+- `ubi9-base-workspace` — UBI 9.7 + EPEL + zsh/tmux/neovim/fzf/ripgrep/fd-find + starship + the SCC-compliant `uid_entrypoint.sh` pattern + `chgrp -R 0 /home/coder && chmod -R g=u`.
+- `ubi9-node-workspace` — `FROM ubi9-base-workspace`, adds NodeSource Node 22 + corepack + TypeScript.
+- `agents-config-tools` — UBI9-minimal + aws + jq + curl, used by the `coder-agents-config` Argo Job pod.
+
+Tags: `<name>:<UBI9_VERSION>` (currently `9.7`), `<name>:<UBI9_VERSION>-<git-sha>` (immutable pinable), `<name>:latest`. Built by `.github/workflows/build-images.yml` on `coder-templates/images/**` push.
+
+**Considered:** Leave the original `codercom/workspace-base:ubuntu` and `codercom/enterprise-node:ubuntu` images.
+
+**Why:**
+- UBI9 is the right narrative for an OpenShift demo — "Red Hat's container base, on Red Hat's Kubernetes, running Red Hat's AI Inference Server."
+- Restricted-v2 SCC drops `CAP_SETUID` so `sudo` doesn't elevate; the `uid_entrypoint.sh` pattern (Red Hat's S2I convention) appends a passwd entry for the runtime UID and `chgrp 0 + chmod g=u` makes `/home/coder` writable by any UID in the namespace's allowed range.
+- The original Ubuntu images had hard-coded UID 1000 + `apt-get install` + sudo expectations; replacing them piecemeal across templates kept reintroducing Ubuntu-isms.
+
+**Tradeoffs:**
+- UBI9 strips some packages (tmux), so we pull tmux from Rocky 9 BaseOS in the base image.
+- Two-stage build (`ubi9-node-workspace FROM ubi9-base-workspace`) needs `:9.7-<sha>` pinning at FROM-time so the second image doesn't accidentally use a stale `:latest`. The build workflow does this correctly via the `WORKSPACE_BASE` build-arg.
+
+**Trigger to revisit:** Coder ships an official UBI-based workspace base; switch to it.
+
+---
+
+## 25. Static Bedrock model allowlist (not `aws bedrock list-inference-profiles` at runtime)
+
+**Picked:** `scripts/coder-agents-provider-model-config.sh` ships an explicit 7-ID allowlist of `us.anthropic.*` cross-region inference profiles:
+```
+us.anthropic.claude-sonnet-4-20250514-v1:0   ← demo primary, default
+us.anthropic.claude-sonnet-4-6
+us.anthropic.claude-sonnet-4-5-20250929-v1:0
+us.anthropic.claude-opus-4-7
+us.anthropic.claude-opus-4-6-v1
+us.anthropic.claude-opus-4-5-20251101-v1:0
+us.anthropic.claude-opus-4-1-20250805-v1:0
+```
+
+Verified subscribed + IRSA-invocable on 2026-05-09 by kiro-cli using the marketplace-permitted `ocp-deploy-acct` SSO profile. Subscription procedure documented in `bedrock-model-sub.md`.
+
+**Considered:** Dynamic discovery via `aws bedrock list-inference-profiles --type-equals SYSTEM_DEFINED | jq 'opus|sonnet'`.
+
+**Why:** Discovery returns ~16 Anthropic profiles in `us-east-1`, but only a subset is invocable — account-wide AWS Marketplace subscription must have been completed for each profile by an `aws-marketplace:Subscribe`-permitted principal. Registering an unsubscribed model in chatd surfaced a 403 ("AWS Marketplace subscription cannot be completed at this time") on first call, which the Coder Agents UI rendered as a generic "Authentication failed" — confusing for booth visitors. Pinning the allowlist makes the picker only show working models. Dynamic discovery also picked up `global.*`-prefix profiles (different from `us.*`) and legacy `claude-3-*` profiles, none of which were subscribed.
+
+**Tradeoffs:**
+- Adding a new model means editing the script + `bedrock-model-sub.md` + re-running the Job. The procedure is one paragraph in the bedrock doc.
+- Haiku 4.5 (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) is intentionally NOT in the allowlist — it requires the Anthropic use-case form in the Bedrock console (one subscription that the marketplace-permitted bedrock-runtime invoke can't complete on its own).
+
+**Trigger to revisit:** AWS exposes Bedrock FM subscription as a first-class CLI/API operation (the "marketplace-catalog start-change-set" path is documented but not yet covering Bedrock FMs as of 2026-05).
+
+---
+
+## 26. RHAIIS vLLM `--max-model-len` sized to the GPU's free KV cache budget
+
+**Picked:**
+- A10G (g5.2xlarge, 24 GiB) running 8B fp16 → `--max-model-len 16384`.
+- L40S (g6e.2xlarge, 48 GiB) running 32B AWQ → `--max-model-len 32768`.
+A `startupProbe` (15-20 min runway) gates liveness so the slow weight download doesn't get killed mid-load and force a re-download.
+
+**Considered:** Keep the original 8K, or push to 32K on A10G.
+
+**Why:**
+- 8K was too small for Coder Agents — chatd's system prompt + 19-tool schema + chat history + 4K completion budget produced 8502-token requests, vLLM 400'd, chatd surfaced "OpenAI Compatible rejected the model configuration."
+- 32K on A10G crashed at vLLM init: 8B fp16 weights consume 15.25 GiB, cudagraph buffers another ~1-2 GiB, leaving only 3.77 GiB for KV cache — and 32K context needs 5.00 GiB. Explicit error: `ValueError: To serve at least one request with the models's max seq len (32768), (5.00 GiB KV cache is needed, which is larger than the available KV cache memory (3.77 GiB).`
+- 16K on A10G fit comfortably (~2.5 GiB KV cache, ~1.2 GiB headroom) — twice the original 8K cap and well above Coder Agents' typical working set.
+- Moving to L40S (decision #27) freed the budget to run 32K + a 32B AWQ model.
+
+**Tradeoffs:** Per-GPU calibration. If GPU changes, both `--max-model-len` and the chatd `context_limit` must be re-tuned together (mismatched limits silently truncate prompts). The script is the single source of truth — re-render the configmap after edits.
+
+**Trigger to revisit:** Move to A100 80 GiB / H100 80 GiB → can extend to 128K (Granite/Qwen native) via YaRN. Or add prefix-caching tuning if observed hit rates are high.
+
+---
+
+## 27. Qwen 2.5 Coder 32B Instruct AWQ on L40S (not Granite 3.1 8B on A10G)
+
+**Picked:** RHAIIS serves `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` on a `g6e.2xlarge` (1× NVIDIA L40S, 48 GiB) provisioned by a second MachineSet (`manifests/machinesets/gpu-l40s.yaml`). vLLM args: `--quantization awq_marlin`, `--tool-call-parser hermes`, `--max-model-len 32768`. The original `g5.2xlarge`/A10G MachineSet stays in place as the backout target.
+
+**Considered:**
+1. Stay on Granite 3.1 8B / A10G.
+2. Swap model only: Qwen 2.5 7B Instruct or Hermes 3 Llama-3.1 8B on the same A10G with `--tool-call-parser hermes`.
+3. Llama 3.3 70B Instruct (FP8/INT4 quants from RedHatAI/neuralmagic) on a bigger GPU (A100 80GB / H100).
+4. Llama 4 Scout/Maverick.
+
+**Why:**
+- Granite 3.1 8B's BFCL v3 = 68.27, mid-pack. With Coder Agents' 19-tool harness (read_file, write_file, edit_files, execute, create_workspace, spawn_agent, ...) the 8B couldn't keep all schemas in working context AND chain them. Verified: chatted fine, never fired tool_calls for workspace creation / file edits / command exec. Meta and IBM both warn 8B is too small for "chat + many tools."
+- Qwen 2.5 Coder 32B is purpose-built for agentic coding (SWE-Bench Pro ~44%, well above Llama 3.3 70B on coding tasks).
+- AWQ 4-bit quant (~18 GiB on disk, ~19 GiB on GPU) fits L40S 48 GiB with room for 32K KV cache + cudagraph buffers + batch headroom.
+- Hermes parser handles Qwen 2.5 Instruct's `<tool_call>...</tool_call>` emission format correctly. (Qwen 2.5 *Coder* base uses a different `<tools>` tag the hermes parser silently fails on — that's why we run the **Instruct** variant, which the 32B quant we picked is.)
+- Cost delta: g5.2xlarge ~$1.21/hr → g6e.2xlarge ~$2.24/hr. Acceptable for booth; can scale the L40S MachineSet to 0 between events.
+
+**Tradeoffs:**
+- Cost roughly doubles for the GPU pool.
+- AWQ quant introduces small accuracy loss (~1-2% on benchmarks). Functionally invisible for the booth use case.
+- Qwen origins (Alibaba) may be a sensitivity for some PubSec audiences. **Backup model**: `meta-llama/Llama-3.3-70B-Instruct` is documented in this section as the swap target if Qwen origins come into question. License is the Llama 3.3 Community License (not OSI-OSS — has a >700M MAU clause and acceptable-use policy; fine for ~all enterprises). FP8 / INT4 quants from `RedHatAI/` and `neuralmagic/` namespaces fit either on a single L40S (INT4) or A100 80GB (FP8). vLLM parser: `--tool-call-parser llama3_json`. Caveat: vLLM docs call out Llama 3.x as not supporting parallel tool calls — agent harness still works, just one tool per turn.
+- Llama 4 was released but got a mixed reception; Llama 3.3 70B and Qwen 2.5/3 are the practical incumbents for serious tool-using deployments.
+
+**Trigger to revisit:** Qwen origins flagged → swap to Llama 3.3 70B (procedure: change `RHAIIS_MODEL_ID` + `RHAIIS_DISPLAY_NAME` in the script, change `--model` + `--tool-call-parser` in vLLM deployment, possibly bump GPU to A100 80GB if running FP8). DeepSeek V3.x or Qwen 3 Coder pulls ahead on benchmarks → re-evaluate.
 
 ---
 

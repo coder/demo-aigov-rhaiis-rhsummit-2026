@@ -54,9 +54,12 @@ oc apply -f sealed-secrets-key-backup.yaml
 
 All `kubeseal` invocations target `--controller-namespace=sealed-secrets` (matches `gitops/apps/sealed-secrets/application.yaml`'s destination).
 
-### `coder-secrets` — GitHub OAuth for the `demo-rhsummit-users` org
+### `coder-secrets` — GitHub OAuth + central OpenAI key
 
-Consumed by the Coder server (`CODER_OAUTH2_GITHUB_*` and `CODER_EXTERNAL_AUTH_0_*`).
+Consumed by the Coder server for `CODER_OAUTH2_GITHUB_*` (login),
+`CODER_EXTERNAL_AUTH_0_*` (workspace git auth), and `CODER_AIBRIDGE_OPENAI_KEY`
+(AI Bridge's upstream OpenAI key — paired with `CODER_AIBRIDGE_ALLOW_BYOK=false`
+so all OpenAI traffic goes through this central key for the audit trail).
 
 ```bash
 # Create the OAuth app at https://github.com/organizations/demo-rhsummit-users/settings/applications/new
@@ -67,6 +70,7 @@ oc create secret generic coder-secrets \
   --namespace=coder \
   --from-literal=github-client-id='Ov23li...' \
   --from-literal=github-client-secret='...' \
+  --from-literal=openai-api-key='sk-proj-...' \
   --dry-run=client -o yaml > /tmp/coder-secrets.yaml
 
 kubeseal --controller-namespace=sealed-secrets --format yaml \
@@ -76,7 +80,7 @@ kubeseal --controller-namespace=sealed-secrets --format yaml \
 rm /tmp/coder-secrets.yaml
 
 git add manifests/secrets/coder-secrets.yaml
-git commit -m "secrets: seal coder-secrets (GitHub OAuth, demo-rhsummit-users)"
+git commit -m "secrets: seal coder-secrets (GitHub OAuth + OpenAI key)"
 git push
 ```
 

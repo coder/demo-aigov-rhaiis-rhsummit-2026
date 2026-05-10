@@ -15,11 +15,11 @@ Reference architecture and deployable demo for the **Coder + Red Hat** booth at 
 
 End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenShift 4.21+ (IPI install in your AWS account)** — combining:
 
-- **Coder Workspaces** — Terraform-defined cloud development environments on OpenShift (latest RC for full Coder Agents EA functionality)
-- **Coder AI Governance Add-On** — AI Gateway (centralized LLM gateway) + Agent Firewalls (process-level egress policy) + audit trails
-- **Coder Agents (Early Access)** — self-hosted agent loop running inside the Coder control plane (no LLM API keys in the workspace)
+- **Coder Workspaces** — Terraform-defined cloud development environments on OpenShift, pinned to chart **2.33.1** / image **v2.33.1** (Coder Agents promoted to beta in this release; `CODER_EXPERIMENTS=agents` no longer required)
+- **Coder AI Bridge** (also marketed as AI Gateway) — centralized LLM proxy at `/api/v2/aibridge/{anthropic,openai}`. Anthropic traffic forwards to AWS Bedrock via the `cluster-coder-bedrock` IRSA role; OpenAI traffic uses a central `coder-secrets.openai-api-key` with `ALLOW_BYOK=false` for audit-trail integrity
+- **Coder Agents (beta as of v2.33.1)** — self-hosted chatd loop in the control plane. Providers + models registered by the `coder-agents-config` Argo Job (Bedrock-backed Anthropic models + RHAIIS-hosted Qwen 2.5 Coder 32B)
 - **Coder Tasks** — background agent execution interface for Claude Code, Aider, Goose, Amazon Q, and custom agents
-- **Red Hat AI Inference Server (RHAIIS)** — enterprise vLLM serving an OpenAI-compatible endpoint, latest image. (RHAIIS can also be deployed as a `ServingRuntime` inside the full Red Hat OpenShift AI [RHOAI] stack; this demo deploys the standalone RHAIIS image directly to keep operator surface area small for the booth.)
+- **Red Hat AI Inference Server (RHAIIS)** — enterprise vLLM serving an OpenAI-compatible endpoint on a single L40S GPU node (`g6e.2xlarge`), running `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` with `--tool-call-parser hermes` for proper agentic tool calling. (RHAIIS can also be deployed as a `ServingRuntime` inside the full Red Hat OpenShift AI [RHOAI] stack; this demo deploys the standalone RHAIIS image directly to keep operator surface area small for the booth.)
 - **CloudNativePG** — in-cluster, multi-AZ Postgres for Coder via the `cloudnative-pg` operator. No RDS — the demo stays on-prem-portable.
 - **Red Hat OpenShift GitOps** (Argo CD) — manages all cluster apps via app-of-apps pattern
 - **cert-manager Operator for Red Hat OpenShift** — wildcard TLS for `*.coder.apps.<fqdn>` via Let's Encrypt + Route 53 DNS-01
@@ -58,22 +58,31 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │  ┌─ OpenShift cluster ────────────────────────────────────────────────┐ │
 │  │                                                                     │ │
 │  │  ┌─ Argo CD manages (GitOps from this repo) ─────────────────────┐ │ │
-│  │  │   postgres/          CNPG Cluster CR (3 instances, multi-AZ)   │ │ │
-│  │  │                       → auto-generates `coder-app` Secret      │ │ │
-│  │  │   cert-manager/      Let's Encrypt ClusterIssuers (DNS-01/R53) │ │ │
-│  │  │   coder/             Coder Helm chart (RC) + AI Gov Add-On     │ │ │
-│  │  │   coder-routing/     OCP Routes + wildcard cert externalRef    │ │ │
-│  │  │   rhaiis/            RHAIIS / vLLM serving Granite-3.1-8B      │ │ │
-│  │  │   (future)           Monitoring, demo data seeding             │ │ │
+│  │  │   sealed-secrets/      Bitnami SealedSecret controller         │ │ │
+│  │  │   platform-secrets/    All sealed secrets (coder/grafana/idp/…)│ │ │
+│  │  │   cluster-config/      Scheduler/cluster, OAuth/cluster, GroupSync│ │ │
+│  │  │   group-sync-operator/ redhat-cop GH team→Group sync           │ │ │
+│  │  │   cert-manager/        Let's Encrypt ClusterIssuers (DNS-01/R53)│ │ │
+│  │  │   postgres/            CNPG Cluster CR (3 instances, multi-AZ) │ │ │
+│  │  │                          → auto-generates `coder-app` Secret   │ │ │
+│  │  │   gpu-stack/           NFD + NVIDIA ClusterPolicy              │ │ │
+│  │  │   coder/               Coder Helm chart 2.33.1 + AI Bridge     │ │ │
+│  │  │   coder-provisioner/   External provisioner Deployment         │ │ │
+│  │  │   coder-routing/       OCP Routes + wildcard cert externalRef  │ │ │
+│  │  │   coder-workspaces/    Namespace + cross-ns RBAC + ghcr-pull   │ │ │
+│  │  │   coder-agents-config/ Job: registers chatd providers + models │ │ │
+│  │  │   rhaiis/              vLLM (L40S) — Qwen2.5-Coder-32B-AWQ     │ │ │
+│  │  │   observability/       coder-observability (Grafana/Prom/Loki) │ │ │
 │  │  └────────────────────────────────────────────────────────────────┘ │ │
 │  │                                                                     │ │
-│  │  ┌─ Workspace template (pushed by GH Actions) ───────────────────┐ │ │
-│  │  │   coder-templates/openshift-ai-gov/                            │ │ │
-│  │  │     - main.tf (Coder agent + code-server + Pod)                │ │ │
-│  │  │     - config.yaml (Agent Firewall allowlist — process-level)   │ │ │
-│  │  │     - images/Dockerfile (UBI9 base)                            │ │ │
-│  │  │   Agent Firewall config mounts to                              │ │ │
-│  │  │   ~/.config/coder_boundary/config.yaml at workspace start      │ │ │
+│  │  ┌─ Workspace templates (pushed by GH Actions push-templates.yml) ┐ │ │
+│  │  │   coder-templates/ai-dev-ocp/                                  │ │ │
+│  │  │     - code-server + Kiro/Cursor IDEs + Claude/Codex/Gemini/    │ │ │
+│  │  │       Kiro CLIs; AI Bridge env wired                           │ │ │
+│  │  │   coder-templates/agents-dev-ocp/                              │ │ │
+│  │  │     - code-server only; chatd drives agent loop server-side    │ │ │
+│  │  │   Shared base images at coder-templates/images/:               │ │ │
+│  │  │     ubi9-base-workspace, ubi9-node-workspace, agents-config-tools│ │ │
 │  │  └────────────────────────────────────────────────────────────────┘ │ │
 │  │                                                                     │ │
 │  └─────────────────────────────────────────────────────────────────────┘ │
@@ -347,12 +356,12 @@ The GH Actions workflow will use these to push template updates.
 ### 3. Push your first workspace template
 
 ```bash
-git add coder-templates/openshift-ai-gov/
-git commit -m "feat(template): initial openshift-ai-gov template"
+git add coder-templates/ai-dev-ocp/ coder-templates/agents-dev-ocp/
+git commit -m "feat(templates): initial -ocp templates"
 git push origin main
 ```
 
-The `push-templates.yml` workflow will run `coder templates push` against your cluster.
+The `push-templates.yml` workflow runs the `coder templates push` matrix against your cluster — both `ai-dev-ocp` and `agents-dev-ocp` are pushed on every change to `coder-templates/**`.
 
 ### 4. Set up the booth-demo sprint-ticket flow
 
@@ -367,7 +376,7 @@ The booth demo flow becomes:
 1. Open a new GitHub Issue and pick the **🏃 Sprint Ticket (booth demo)** template
 2. Fill in the summary (e.g., *"Add input validation to checkout endpoint"*) and submit
 3. The `sprint-ticket` label is auto-applied → `.github/workflows/sprint-ticket.yml` fires
-4. The workflow calls `coder create sprint-<issue-number> --template openshift-ai-gov`
+4. The workflow calls `coder create sprint-<issue-number> --template ai-dev-ocp`
 5. The Prebuilt Workspace claim from the warm pool returns in <60s
 6. The workflow comments back on the issue with the workspace URL
 
@@ -378,7 +387,7 @@ Stand at the booth, click **New Issue → Sprint Ticket → Submit**, and the au
 ```bash
 ./scripts/tool-call-smoke-test.sh \
   https://vllm.<your-cluster-domain>/v1 \
-  granite-3.1-8b-instruct
+  Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
 ```
 
 Expected: `✅ PASS: tool_calls returned ...`
@@ -396,14 +405,20 @@ This will run `openshift-install destroy cluster` first, then the AWS infra.
 
 | Slot | Model | Why |
 |---|---|---|
-| Cloud (AI Gateway primary) | Claude Sonnet (latest) | Strongest tool-use; fast for live demo beats |
-| Sovereign (RHAIIS) | `ibm-granite/granite-3.1-8b-instruct` | RH-blessed, Apache-2.0, vLLM `granite` tool-call parser, CPU-feasible |
+| Cloud (Bedrock via AI Bridge) | `us.anthropic.claude-sonnet-4-20250514-v1:0` (default) + 6 other Sonnet/Opus inference profiles | Strongest tool-use; account-wide subscribed (see `bedrock-model-sub.md`) |
+| Sovereign (RHAIIS, L40S GPU) | `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` | Purpose-built for agentic coding (SWE-Bench Pro ~44%); AWQ 4-bit fits L40S 48 GiB; `--tool-call-parser hermes` (decision §27) |
 
-Alternates: `Qwen/Qwen2.5-Coder-7B-Instruct` (`hermes` parser) for stronger raw coding performance; `meta-llama/Llama-3.1-8B-Instruct` (`llama3_json` parser) if you need a Llama story.
+Backup sovereign model: `meta-llama/Llama-3.3-70B-Instruct` (FP8/INT4 from RedHatAI/neuralmagic, `llama3_json` parser) — documented swap if Qwen origins come into question. License is Llama 3.3 Community License (>700M MAU clause; not OSI-OSS but fine for ~all enterprises). See `docs/decisions.md` §27.
+
+## Identity
+
+- **Coder login** — GitHub OAuth scoped to the `demo-rhsummit-users` org (decision §20). Coder Owner role NOT auto-synced; granted manually post-login.
+- **OpenShift login** — same GitHub org filter (decision §21). The `admin` team in that org maps to OpenShift `cluster-admin` via redhat-cop/group-sync-operator.
+- **Grafana** at `https://graf-coder.apps.<fqdn>` — same GitHub org; `admin` team → Grafana Admin via `role_attribute_path`.
 
 ## Status
 
-Pre-event scaffold. Architecture, IaC, GitOps manifests, templates, and workflows are being authored in the run-up to Red Hat Summit 2026 (May 11).
+Cluster live (3-node converged + 1× L40S g6e.2xlarge GPU node). Sealed Secrets in place. Bedrock Marketplace subscriptions resolved 2026-05-09 (`bedrock-model-sub.md`). RHAIIS serving Qwen 2.5 Coder 32B on L40S (decisions §26, §27). Booth-ready ahead of Red Hat Summit 2026 (May 11).
 
 ## License
 

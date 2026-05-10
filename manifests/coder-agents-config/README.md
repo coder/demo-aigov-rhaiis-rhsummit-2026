@@ -9,17 +9,45 @@ What lands in chatd after this Job runs:
 | Provider | Connection | Audit |
 |---|---|---|
 | `bedrock` (or `anthropic` via AI Bridge — env-toggleable) | IRSA on the `coder-server` SA → AWS Bedrock | chatd usage rows + Bedrock CloudTrail |
-| `openai` (RHAIIS) | Direct in-cluster: `http://vllm.ocp-ai.svc.cluster.local:8000/v1` | chatd usage rows |
+| `openai-compat` (RHAIIS) | Direct in-cluster: `http://vllm.ocp-ai.svc.cluster.local:8000/v1` | chatd usage rows |
+
+(The provider type is `openai-compat`, NOT `openai` — chatd treats them
+as distinct types. `openai-compat` is the right type for any vLLM /
+LM Studio / Ollama-style upstream.)
 
 | Models | Source |
 |---|---|
-| Every Anthropic Opus + Sonnet inference profile in the configured AWS region | `aws bedrock list-inference-profiles` at Job runtime |
-| `ibm-granite/granite-3.1-8b-instruct` | Hardcoded; matches what RHAIIS is serving |
+| 7 explicitly-allowlisted `us.anthropic.*` cross-region inference profile IDs | Hardcoded `ALL_IDS` in `scripts/coder-agents-provider-model-config.sh` (verified subscribed; see `bedrock-model-sub.md`) |
+| `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` | Hardcoded `RHAIIS_MODEL_ID`; matches what RHAIIS is serving |
 
-The newest Opus profile is set as `is_default: true`. Each Bedrock
-model gets two entries — one with `provider_options.effort: "max"`
-(extended thinking) and one without — so users can flip in the UI
-without an admin round-trip.
+The Bedrock allowlist (in script order, default first):
+
+```
+us.anthropic.claude-sonnet-4-20250514-v1:0   ← demo primary, default
+us.anthropic.claude-sonnet-4-6
+us.anthropic.claude-sonnet-4-5-20250929-v1:0
+us.anthropic.claude-opus-4-7
+us.anthropic.claude-opus-4-6-v1
+us.anthropic.claude-opus-4-5-20251101-v1:0
+us.anthropic.claude-opus-4-1-20250805-v1:0
+```
+
+`is_default: true` is set on `claude-sonnet-4-20250514-v1:0` (cheapest of
+the verified-subscribed set, plenty for booth Q&A). Override at deploy
+time by exporting `DEFAULT_MODEL_ID=<other-profile-id>` before running
+the script.
+
+Each Bedrock model is registered ONCE — the previous "(Extended Thinking)"
+dual-entry pattern was dropped (would have produced too many dropdown
+options). Users who want extended thinking toggle
+`provider_options.bedrock.effort` via the admin UI.
+
+Why an explicit allowlist instead of dynamic discovery: see
+[`docs/decisions.md`](../../docs/decisions.md) §25 — `aws bedrock list-inference-profiles`
+returns ~16 Anthropic profiles, but only a subset is invocable. Models
+that are listed but not Marketplace-subscribed produce a 403 the first
+time chatd invokes them, which surfaces in the UI as a generic
+"Authentication failed."
 
 ## Files
 

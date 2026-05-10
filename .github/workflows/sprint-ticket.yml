@@ -1,7 +1,7 @@
 name: Sprint ticket → Coder workspace
 
 # Booth demo: when a GitHub Issue is opened or labeled with `sprint-ticket`,
-# this workflow provisions a Coder workspace from the openshift-ai-gov
+# this workflow provisions a Coder workspace from the ai-dev-ocp
 # template (claims a Prebuilt Workspace from the warm pool — typically
 # <60s) and comments back on the issue with the workspace link.
 #
@@ -80,7 +80,7 @@ jobs:
           USERNAME=$(coder users show me --column username --output json | jq -r '.[0].username')
           echo "username=${USERNAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Create Coder workspace from openshift-ai-gov template
+      - name: Create Coder workspace from ai-dev-ocp template
         id: create
         env:
           WS_NAME: ${{ steps.ctx.outputs.ws_name }}
@@ -94,7 +94,7 @@ jobs:
             echo "created=false" >> "$GITHUB_OUTPUT"
           else
             coder create "$WS_NAME" \
-              --template openshift-ai-gov \
+              --template ai-dev-ocp \
               --yes
             echo "created=true" >> "$GITHUB_OUTPUT"
           fi
