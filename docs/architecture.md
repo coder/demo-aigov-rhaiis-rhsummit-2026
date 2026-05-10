@@ -6,12 +6,12 @@
 
 | Slot | Booth demo | Sovereign / production narrative |
 |---|---|---|
-| Cluster | OpenShift 4.14+ on ROSA or dedicated OCP | OpenShift on AWS GovCloud, Azure Gov, on-prem, or behind a sovereign software factory pattern (e.g., Big Bang / UDS Core) |
+| Cluster | OpenShift 4.21 IPI on AWS (3-node converged + 1× L40S g6e.2xlarge GPU node) | OpenShift on AWS GovCloud, Azure Gov, on-prem, or behind a sovereign software factory pattern (e.g., Big Bang / UDS Core) |
 | Classification | Unclassified | Up to IL5 with Coder's Air-Gapped Deployments Bundle |
 | Scale (concurrent workspaces) | 5–25 (warm-pool of 3) | 10K reference architecture is live; 50K reference architecture is in flight |
-| Cloud-side LLM provider | Anthropic (BYOK) | Anthropic, OpenAI, Bedrock, Azure OpenAI, or any OpenAI-compatible — typically routed to a sovereign provider in regulated deployments |
-| Sovereign LLM provider | Red Hat AI Inference Server (RHAIIS) on a CPU node, serving Granite-3.1-8B-Instruct | RHAIIS on GPU nodes, optionally fronted by `llm-d` for distributed serving; FIPS-validated images, RHEL UBI base |
-| Pillars | Modernize-led, Multiply-centerpiece (Coder Agents EA), Migrate-substrate | Same shape; Migrate substrate becomes the dominant story in air-gap |
+| Cloud-side LLM provider | AWS Bedrock via the `cluster-coder-bedrock` IRSA role + central OpenAI key (no per-user BYOK) | Bedrock, Azure OpenAI, Anthropic direct, or any OpenAI-compatible — typically routed to a sovereign provider in regulated deployments |
+| Sovereign LLM provider | RHAIIS on a single L40S GPU node serving `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` (`--tool-call-parser hermes`); Llama 3.3 70B Instruct documented as the swap target if Qwen origins come into question (decision §27) | RHAIIS on GPU nodes, optionally fronted by `llm-d` for distributed serving; FIPS-validated images, RHEL UBI base |
+| Pillars | Modernize-led, Multiply-centerpiece (Coder Agents beta), Migrate-substrate | Same shape; Migrate substrate becomes the dominant story in air-gap |
 
 ## High-level architecture (booth shape; same shape lands in sovereign environments)
 
@@ -66,10 +66,13 @@
                                                  ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │  Backends                                                              │
-│   · Postgres (RDS, in-cluster operator, or external HA)                │
-│   · Anthropic API (cloud, BYOK)                                        │
-│   · RHAIIS / vLLM serving Granite-3.1-8B-Instruct (OpenAI-compatible)  │
-│   · Git host (GitHub, GitLab, on-prem)                                 │
+│   · Postgres (CNPG in-cluster, multi-AZ)                               │
+│   · AWS Bedrock via IRSA (no static keys; 7 subscribed Anthropic       │
+│     inference profiles — see bedrock-model-sub.md)                     │
+│   · OpenAI direct via central key in coder-secrets.openai-api-key      │
+│   · RHAIIS / vLLM serving Qwen2.5-Coder-32B-AWQ on L40S                │
+│     (OpenAI-compatible; --tool-call-parser hermes)                     │
+│   · Git host (GitHub OAuth scoped to demo-rhsummit-users org)          │
 │   · Grafana Loki (Bridge + Boundaries unified audit logs)              │
 │   · Prometheus + Alertmanager                                          │
 └────────────────────────────────────────────────────────────────────────┘
@@ -81,10 +84,10 @@
 |---|---|---|
 | Coder server (3 replicas, hardened SCC) | Coder Premium | GA |
 | External provisioners (12 replicas, dedicated nodes) | — | GA |
-| AI Gateway | **AI Gateway** | GA in Coder v2.30 |
-| Agent Firewalls | **Agent Firewalls** | GA in Coder v2.30 |
+| AI Bridge (a.k.a. AI Gateway) | **AI Gateway** | GA in Coder v2.30. In code/env vars referred to as `AIBRIDGE` (`CODER_AIBRIDGE_*`); endpoints `/api/v2/aibridge/{anthropic,openai}`. Anthropic traffic routes to Bedrock via IRSA; OpenAI traffic uses the central `coder-secrets.openai-api-key` with `ALLOW_BYOK=false` (audit-trail integrity). |
+| Agent Firewalls | **Agent Firewalls** | GA in Coder v2.30. NOT currently shipped in either booth template (decision §23). |
 | AI Governance Add-On | **AI Governance Add-On** | GA in Coder v2.30 (Feb 2026) — bundles AI Gateway + Agent Firewalls + audit |
-| Coder Agents | **Coder Agents** | Early Access (`CODER_EXPERIMENTS="agents"`) |
+| Coder Agents (chatd) | **Coder Agents** | **Beta** as of Coder v2.33.1 (no experiment flag required). Provider + model bootstrap is owned by the `coder-agents-config` Argo Job; the registered Anthropic models are an explicit 7-ID Bedrock allowlist (decision §25). |
 | Coder Tasks | **Coder Tasks** | GA |
 | Prebuilt Workspaces | **Prebuilt Workspaces** | GA |
 | Workspace template | — | OpenShift / RHEL UBI base, FIPS-validated |
