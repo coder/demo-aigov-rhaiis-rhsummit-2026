@@ -498,6 +498,55 @@ A `startupProbe` (15-20 min runway) gates liveness so the slow weight download d
 
 ---
 
+## 28. Single Llama 3.3 70B INT4 in chatd, planner+executor split deferred until a router lands
+
+**Picked:** Register a single openai-compat provider in chatd ("RHAIIS (Sovereign Llama 3.3 70B)") pointing at `vllm-planner.ocp-ai.svc.cluster.local:8000/v1`, serving `RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16`. The `vllm-executor` Deployment (Qwen 2.5 7B Instruct on A10G) stays running but is intentionally NOT registered in chatd — the planner+executor architectural goal is deferred.
+
+**The blocker we discovered:** chatd's Postgres schema enforces a UNIQUE constraint on `chat_providers.provider` (the type column — `openai-compat`, `bedrock`, `anthropic`, etc.). Inserting a second `openai-compat` provider returns:
+
+```
+HTTP 409 Conflict
+{"message":"Chat provider already exists.",
+ "detail":"pq: duplicate key value violates unique constraint \"chat_providers_provider_key\""}
+```
+
+Conceptually correct: "RHAIIS is the provider, the models it hosts are below it." Implementation-wise, vLLM 0.x serves one model per pod (separate `/v1/chat/completions` endpoints for `vllm-planner` vs `vllm-executor`), and chatd's single openai-compat provider has ONE `base_url`. To present "two backends behind one logical RHAIIS provider" we need a router between chatd and the two vLLM Services that dispatches by the `model:` field in the request body.
+
+**Considered (with research, 2026-05-10):**
+
+1. **LiteLLM** (`ghcr.io/berriai/litellm-non_root:main-stable`) — the de facto answer. ConfigMap-only deploy (`STORE_MODEL_IN_DB=false` to bypass the documented Prisma write-path bug under restricted-v2 SCC, see [BerriAI/litellm#19408](https://github.com/BerriAI/litellm/issues/19408)). Routes by `model:` field; passes vLLM `tool_calls` through cleanly (the documented LiteLLM tool-call bugs are on the Ollama and OpenAI Responses-API translation paths, not on vLLM upstreams). ~10 min to deploy. **Tactical answer if/when we want the planner+executor split now.**
+
+2. **llm-d** (`https://llm-d.ai`, v0.6.0 April 2026) — Red Hat's strategic LLM-serving project, integrated into OpenShift AI 3.0. **Solves a different problem**: intra-model routing across replicas of the SAME model with KV-cache awareness, prefix-cache hints, and queue-depth balancing. Not designed for inter-model dispatch by `model:` field across different models on heterogeneous GPUs. Wrong tool.
+
+3. **agentgateway + Gateway API Inference Extension (GAIE) + llm-d** — Red Hat's documented "MaaS for multiple LLMs on OpenShift" pattern (Red Hat Developer, March 2026). Three Helm charts plus three CRDs (`AgentgatewayPolicy`, `InferencePool`, `HTTPRoute`). The `model:` body extraction is via a CEL expression on `AgentgatewayPolicy`. **The Red-Hat-blessed path** but multi-hour install — overkill for the booth.
+
+4. **Llama Stack** (RHOAI 3.x Tech Preview) — exposes an OpenAI-compatible API and routes inference across vLLM backends. Strategic Red Hat path. **Uses its own API contract** that diverges from stock OpenAI in places (toolkit/agent abstractions). chatd would need an adapter or feature work to consume it. Worth re-evaluating post-Summit when it goes GA.
+
+5. **Coder AI Gateway** (Coder, in flight) — Coder's own answer for routing chatd's openai-compat traffic across multiple backends. Per Coder roadmap chatter, this is where the platform is heading; once it ships, chatd should be able to register N backends via the AI Gateway abstraction without the schema constraint we hit.
+
+6. **OpenShift Service Mesh / Envoy** (Tech Preview GAIE, OSSM 3.1) — Tech Preview status; same underlying GAIE/llm-d stack as #3. Deferred.
+
+7. **3scale API Management with APIcast Lua policy** — possible content-routing on JSON body fields, but no documented Red Hat pattern for LLM model dispatch. Bespoke.
+
+8. **vLLM native multi-model** — confirmed not present in vLLM 0.8.x or 0.9.x. One model per server.
+
+**Why single Llama 3.3 70B for tonight (not LiteLLM right now):**
+- The 70B model alone fixes the symptoms that drove the original "two models" discussion: hand-holding on Coder Agents sub-agent flow logic and template selection. 70B-class reasoning is the gap, not architectural separation per se.
+- LiteLLM is a 10-minute deploy but adds a new component to the booth lineup. Booth shape stays simpler with one chatd provider, one model, one path of execution to explain.
+- The vllm-executor Qwen 7B Deployment is ALREADY warm on the A10G — when we're ready to add a router, it's a config-only flip (LiteLLM ConfigMap, repoint chatd's RHAIIS provider's base_url) without touching vLLM infra.
+
+**Tradeoffs:**
+- Llama 3.3 70B Community License is NOT OSI-OSS — has the >700M MAU clause and acceptable-use policy. Acceptable for ~all enterprises; documented backup in §27 is Qwen3 32B Instruct AWQ in the same slot.
+- L40S 48 GiB is tight for Llama 70B INT4 + 16K context (`--max-model-len 16384`; 32K would need ~10 GiB additional KV cache and crash init per the same pattern that bit us with Granite at 32K on A10G in §26). Bigger GPU (A100 80 GiB) opens 32K+ context.
+- A10G is paying for an idle-from-chatd's-perspective vllm-executor pod. ~$1.21/hr. Acceptable for the tactical demo + future router-drop-in story.
+
+**Trigger to revisit:**
+- Coder AI Gateway lands → register both backends via AI Gateway, retire the workaround.
+- Llama Stack goes GA in RHOAI → evaluate whether chatd can consume it directly (or via an adapter Coder ships).
+- We decide the planner+executor split is actually load-bearing for the demo (not just architecturally interesting) → land LiteLLM ConfigMap (~10 min change documented in this section + the bootstrap script).
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":
