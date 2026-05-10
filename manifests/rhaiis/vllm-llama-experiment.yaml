@@ -1,0 +1,179 @@
+# EXPERIMENTAL: Llama 3.3 70B INT4 in isolation
+#
+# This is the debug companion to the production vllm-planner (which
+# now serves Qwen 2.5 32B Instruct AWQ as the booth-ready fallback —
+# see decisions §30). This Deployment lives on a separate L40S node
+# (provisioned by manifests/machinesets/gpu-l40s-experiment.yaml,
+# label `gpu-purpose: experimental`) so iterating here can't disrupt
+# the booth.
+#
+# It is INTENTIONALLY NOT exposed to chatd — no Service registered
+# in the openai-compat provider. To reach it for testing:
+#   oc port-forward -n ocp-ai svc/vllm-llama-experiment 8001:8000
+#   curl http://localhost:8001/v1/models
+#
+# Iteration log:
+#
+# 1. (current) --disable-frontend-multiprocessing
+#    Removes the multi-process engine_core/api_server split that's
+#    suspected of the IPC deadlock seen on the production planner.
+#    Everything runs in one Python process. Slightly higher latency
+#    under load but eliminates the IPC contract entirely. If THIS
+#    works, root cause is confirmed as the frontend multiprocessing
+#    code path.
+#
+# Flags to try next if (1) doesn't fix it:
+#   2. --gpu-memory-utilization 0.85 (default 0.9; KV cache may be
+#      hitting an allocation race)
+#   3. Switch image to a newer rhoai-cuda tag that ships vLLM ≥0.9
+#   4. Switch quant to RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+#      (different kernel path; the issue may be in the AWQ Marlin
+#      compressed-tensors loader)
+#
+# Backout: just `oc delete -f this-file.yaml`. The experimental
+# MachineSet stays put for reuse.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-llama-experiment
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm-experiment
+    app.kubernetes.io/component: llama-debug
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  progressDeadlineSeconds: 3600
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm-experiment
+      app.kubernetes.io/component: llama-debug
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm-experiment
+        app.kubernetes.io/component: llama-debug
+    spec:
+      imagePullSecrets:
+        - name: redhat-pull-secret
+      # Pin to the EXPERIMENTAL L40S node (not the production planner
+      # one). Both have nvidia.com/gpu.product=NVIDIA-L40S; the extra
+      # `gpu-purpose=experimental` label distinguishes them.
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-L40S
+        gpu-purpose: experimental
+      containers:
+        - name: vllm
+          image: quay.io/modh/vllm:rhoai-2.20-cuda
+          imagePullPolicy: Always
+          args:
+            - --model
+            - RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16
+            - --tool-call-parser
+            - llama3_json
+            - --enable-auto-tool-choice
+            # Try (1): no frontend multiprocessing → no engine_core
+            # child → no IPC deadlock surface.
+            - --disable-frontend-multiprocessing
+            # Conservative cudagraph: --enforce-eager skips compile
+            # entirely so we don't burn 10-15 min there. We're
+            # debugging the post-load hang, not the compile time.
+            - --enforce-eager
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --max-model-len
+            - "16384"
+            # Verbose by default — we WANT to see what's happening.
+            # Drop --disable-log-requests so we see incoming traffic
+            # in logs when we curl this endpoint.
+            - --tensor-parallel-size
+            - "1"
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: HF_HOME
+              value: /tmp/hf-cache
+            - name: HF_HUB_OFFLINE
+              value: "0"
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            - name: VLLM_PORT
+              value: "8000"
+            # Crank vLLM logging to maximum verbosity — we want to
+            # see every step of engine init.
+            - name: VLLM_LOGGING_LEVEL
+              value: DEBUG
+          resources:
+            requests:
+              cpu: "2"
+              memory: "16Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "6"
+              memory: "32Gi"
+              nvidia.com/gpu: "1"
+          # 70B INT4 cold start: ~12-15 min download + ~2-3 min load
+          # + 0 compile time (--enforce-eager). 40 min runway is the
+          # buffer we tuned in decisions §30 attempt.
+          startupProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 240
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 4
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /tmp/hf-cache
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: 80Gi
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-llama-experiment
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm-experiment
+    app.kubernetes.io/component: llama-debug
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vllm-experiment
+    app.kubernetes.io/component: llama-debug
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

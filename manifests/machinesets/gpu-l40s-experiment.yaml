@@ -1,0 +1,108 @@
+# Second L40S MachineSet — isolated experimental GPU for Llama 70B
+# debugging. Booth-tonight Qwen 2.5 32B Instruct AWQ planner runs on
+# the original L40S MachineSet (cluster-pqc4z-worker-l40s-us-east-1a)
+# and stays untouched as a known-good fallback.
+#
+# This experimental node lets us iterate on Llama 3.3 70B INT4 +
+# vLLM args / quants / images without affecting the booth demo.
+# Discovered hang on the original MachineSet's L40S: vLLM 0.8.4 +
+# RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16 with --enforce-eager
+# loads the weights to GPU then both python processes go to
+# `State: S (sleeping)` with zero log output — multiprocessing IPC
+# deadlock between the engine_core child and API server parent.
+# See docs/decisions.md §30.
+#
+# Things to try on this experimental node (in priority order):
+#   1. --disable-frontend-multiprocessing  (kills the multi-process
+#      pattern that's deadlocking)
+#   2. --gpu-memory-utilization 0.85  (more conservative; default 0.9
+#      may be cutting too close on KV cache allocation)
+#   3. Different quant: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+#      (FP8 instead of INT4 — different kernel path, might dodge
+#      compressed-tensors Marlin issue if that's the deadlock source)
+#   4. Newer image: quay.io/modh/vllm:rhoai-2.21-cuda or 2.22 (vLLM
+#      ≥0.9 may have fixed whatever 0.8.4 IPC bug is biting us)
+#
+# Custom node label `gpu-purpose: experimental` keeps the vLLM
+# Deployment targeting THIS node specifically; the production planner
+# Deployment selects on `nvidia.com/gpu.product=NVIDIA-L40S` which
+# would match BOTH MachineSets (so we add an antipreference there if
+# this experimental MachineSet starts being mistaken for the prod one
+# by other workloads).
+#
+# Backout: oc scale --replicas=0 + oc delete -f this-file.
+---
+apiVersion: machine.openshift.io/v1beta1
+kind: MachineSet
+metadata:
+  name: cluster-pqc4z-worker-l40s-experiment-us-east-1a
+  namespace: openshift-machine-api
+  labels:
+    machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+  annotations:
+    capacity.cluster-autoscaler.kubernetes.io/labels: kubernetes.io/arch=amd64,gpu-purpose=experimental
+    machine.openshift.io/GPU: "1"
+    machine.openshift.io/memoryMb: "65536"
+    machine.openshift.io/vCPU: "8"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+      machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-experiment-us-east-1a
+  template:
+    metadata:
+      labels:
+        machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+        machine.openshift.io/cluster-api-machine-role: worker
+        machine.openshift.io/cluster-api-machine-type: worker
+        machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-experiment-us-east-1a
+    spec:
+      # Inject a node label so the experimental vLLM Deployment can
+      # nodeSelector to it precisely. The NVIDIA GPU operator will
+      # ALSO label the node with nvidia.com/gpu.product=NVIDIA-L40S
+      # once drivers load.
+      metadata:
+        labels:
+          gpu-purpose: experimental
+      providerSpec:
+        value:
+          ami:
+            id: ami-04018496b0a1da2d2
+          apiVersion: machine.openshift.io/v1beta1
+          blockDevices:
+            - ebs:
+                encrypted: true
+                iops: 0
+                kmsKey:
+                  arn: ""
+                volumeSize: 200
+                volumeType: gp3
+          credentialsSecret:
+            name: aws-cloud-credentials
+          deviceIndex: 0
+          iamInstanceProfile:
+            id: cluster-pqc4z-worker-profile
+          instanceType: g6e.2xlarge
+          kind: AWSMachineProviderConfig
+          metadata: {}
+          metadataServiceOptions: {}
+          placement:
+            availabilityZone: us-east-1a
+            region: us-east-1
+          securityGroups:
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-node
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-lb
+          subnet:
+            id: subnet-0e22bc2846ce4faaa
+          tags:
+            - name: kubernetes.io/cluster/cluster-pqc4z
+              value: owned
+          userDataSecret:
+            name: worker-user-data
