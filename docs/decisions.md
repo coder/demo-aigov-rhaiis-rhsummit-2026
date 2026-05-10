@@ -569,6 +569,30 @@ Conceptually correct: "RHAIIS is the provider, the models it hosts are below it.
 
 ---
 
+## 30. Reverted RHAIIS planner from Llama 3.3 70B INT4 → Qwen 2.5 32B Instruct AWQ
+
+**Picked:** vllm-planner serves `Qwen/Qwen2.5-32B-Instruct-AWQ` with `--tool-call-parser hermes` on the L40S g6e.2xlarge node. The `vllm-executor` Deployment serving Qwen 2.5 7B Instruct on the A10G stays in place but unregistered in chatd (still no router; see §28).
+
+**Considered + tried:** `RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16` (Llama 3.3 70B INT4, the canonical Red-Hat-blessed quant). Rationale per §27 — strongest planning/reasoning at the 70B-class for sub-agent flow logic and template selection.
+
+**Why the revert:**
+- Tried with default cudagraph capture: container hit the 25-min `startupProbe.failureThreshold` mid-compile, cycled 4 times in 50 min without binding `/v1/models` (kubelet SIGKILL at exit 137).
+- Bumped startupProbe to 40 min runway + added `--enforce-eager` to skip cudagraph compile entirely.
+- Container then **hung silently** after weight load: 38 GiB allocated on the L40S, both python processes (`vllm_tgis_adapter` parent + engine_core child) in `State: S (sleeping)`, total CPU time ~25 seconds across both, ZERO new log output for 37+ minutes, no restart, no crash. Almost certainly a multiprocessing IPC deadlock specific to vLLM 0.8.4 + this INT4 quant + `quay.io/modh/vllm:rhoai-2.20-cuda` image.
+- We have no path to debug or work around the deadlock in the booth window. The Qwen 2.5 32B Instruct AWQ stack on the same L40S, same vLLM image, same `--enable-auto-tool-choice` was previously verified end-to-end (per §27): structured tool_calls under `tool_choice: auto`, multi-step agentic chats, no hangs. Known-good > almost-working.
+
+**Tradeoffs:**
+- 32B-class reasoning vs 70B-class. User-visible difference: 32B needs more nudging on long sub-agent chains and template selection (the original symptom that pushed us to consider 70B). For booth conversations this is a "see this open model do work like Claude does" demo, not a production agentic harness — 32B is a credible booth-grade exhibit.
+- AWQ 4-bit quant has a small accuracy gap vs fp16. Functionally invisible at booth scale.
+- We lose the Red-Hat-published-quant booth talking point (RedHatAI/...). Qwen-AWQ is community quant. Acceptable.
+
+**Trigger to revisit:**
+- vLLM ≥0.9 ships in a future RHAIIS image (the rhoai-2.20-cuda we use is pinned to vLLM 0.8.4) — re-test Llama 3.3 70B INT4 against it. The deadlock may be resolved upstream.
+- Customer specifically demands a Llama-on-OpenShift demo and we have time to debug the engine_core deadlock with NVIDIA / RHAIIS support.
+- We add LiteLLM / llm-d as a router (see §28); that introduces a new code path that may also expose or work around the issue.
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":

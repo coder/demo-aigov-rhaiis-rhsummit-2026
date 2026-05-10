@@ -99,9 +99,9 @@ data:
     # router-driven swap is a config-only change, not a redeploy. See
     # docs/decisions.md §27 + §28 for the full reasoning.
     : "${RHAIIS_BASE_URL:=http://vllm-planner.ocp-ai.svc.cluster.local:8000/v1}"
-    : "${RHAIIS_MODEL_ID:=RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16}"
-    : "${RHAIIS_DISPLAY_NAME:=Llama 3.3 70B Instruct INT4 (RHAIIS sovereign)}"
-    : "${RHAIIS_PROVIDER_DISPLAY:=RHAIIS (Sovereign Llama 3.3 70B)}"
+    : "${RHAIIS_MODEL_ID:=Qwen/Qwen2.5-32B-Instruct-AWQ}"
+    : "${RHAIIS_DISPLAY_NAME:=Qwen 2.5 32B Instruct AWQ (RHAIIS sovereign)}"
+    : "${RHAIIS_PROVIDER_DISPLAY:=RHAIIS (Sovereign Qwen 2.5 32B Instruct)}"
     
     : "${BEDROCK_PROVIDER_MODE:=native}"   # native | aibridge
     

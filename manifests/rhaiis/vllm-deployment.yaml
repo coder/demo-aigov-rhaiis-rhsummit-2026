@@ -102,37 +102,39 @@ spec:
           imagePullPolicy: Always
           args:
             - --model
-            - RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16
-            # INT4 GPTQ quant published by RedHatAI on HuggingFace —
-            # ~35 GiB weights, vetted on vLLM. Auto-detect handles
-            # the format; --quantization not strictly needed but
-            # explicit is safer.
+            - Qwen/Qwen2.5-32B-Instruct-AWQ
+            # AWQ 4-bit quant of Qwen 2.5 32B Instruct (NOT the Coder
+            # variant — see decisions §27 for why Coder-32B-AWQ has
+            # tool-call format drift under tool_choice=auto). ~18 GiB
+            # weights on GPU, fits L40S 48 GiB with ample headroom for
+            # 32K context KV cache.
+            #
+            # Why we landed here (not Llama 3.3 70B):
+            #   Llama 3.3 70B INT4 (RedHatAI/...quantized.w4a16) on
+            #   vLLM 0.8.4 + this image hung silently after weight
+            #   load on the L40S — both python processes went to
+            #   `State: S (sleeping)` with 38 GiB on GPU and no
+            #   further log output for 37+ minutes, no restart, no
+            #   crash. Tried with and without --enforce-eager; same
+            #   hang. Likely a multiprocessing IPC deadlock between
+            #   the engine_core child and the API server parent in
+            #   this specific quant + vLLM version combo. Logged in
+            #   decisions §30. Re-evaluate when vLLM ≥0.9 ships in
+            #   a future RHAIIS image.
+            - --quantization
+            - awq_marlin
             - --tool-call-parser
-            - llama3_json
+            - hermes
             - --enable-auto-tool-choice
-            # Skip cudagraph compilation. Reasoning: Llama 70B INT4 +
-            # vLLM 0.8.4's default ~70 cudagraph capture sizes takes
-            # 10-15 min to compile, on top of the ~12-15 min download.
-            # The startupProbe runway can't reasonably cover that
-            # before kubelet kills the container, and we ended up in a
-            # restart loop where every attempt timed out mid-compile.
-            # --enforce-eager disables cudagraph capture entirely,
-            # cutting startup time roughly in half. Inference latency
-            # is ~10-15% slower per token vs cudagraph mode — a fine
-            # tradeoff for the booth, where reliable warm-up beats
-            # peak per-token speed.
-            - --enforce-eager
             - --host
             - 0.0.0.0
             - --port
             - "8000"
-            # 16K context. L40S 48 GiB - 35 GiB weights - 2 GiB
-            # cudagraph = ~11 GiB free. 16K KV cache for 70B is
-            # ~6-8 GiB. Tight; if init fails with "available KV cache
-            # memory" error, drop to 8192. Llama 3.3's native 128K
-            # context is far out of reach on this GPU regardless.
+            # 32K context — plenty of room on L40S 48 GiB (18 GiB
+            # weights + ~6 GiB KV cache for 32K + cudagraph buffers
+            # leaves ~20 GiB free, comfortable margin).
             - --max-model-len
-            - "16384"
+            - "32768"
             - --disable-log-requests
             - --tensor-parallel-size
             - "1"
