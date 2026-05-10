@@ -1,7 +1,5 @@
-# NVIDIA DCGM GPU dashboard — Grafana sidecar variant. kiwigrid
-# k8s-sidecar discovers ConfigMaps in this namespace labeled
-# `grafana_dashboard=1` and provisions the JSON into Grafana via its
-# provisioning API. Same vendored + patched source as
+# NVIDIA DCGM GPU dashboard for the coder-observability Grafana.
+# Same vendored + patched source as
 # manifests/cluster-config/gpu-dashboard-console.yaml.
 ---
 apiVersion: v1
@@ -45,7 +43,7 @@ data:
           {
             "$$hashKey": "object:192",
             "builtIn": 1,
-            "datasource": "-- Grafana --",
+            "datasource": null,
             "enable": true,
             "hide": true,
             "iconColor": "rgba(0, 211, 255, 1)",
@@ -67,7 +65,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -154,7 +152,7 @@ data:
           }
         },
         {
-          "datasource": "$datasource",
+          "datasource": null,
           "gridPos": {
             "h": 8,
             "w": 6,
@@ -219,7 +217,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -307,7 +305,7 @@ data:
         },
         {
           "cacheTimeout": null,
-          "datasource": "$datasource",
+          "datasource": null,
           "gridPos": {
             "h": 8,
             "w": 6,
@@ -376,7 +374,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -471,7 +469,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -561,7 +559,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -651,7 +649,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -744,27 +742,9 @@ data:
       "templating": {
         "list": [
           {
-            "current": {
-              "selected": true,
-              "text": "Prometheus",
-              "value": "Prometheus"
-            },
-            "hide": 0,
-            "includeAll": false,
-            "multi": false,
-            "name": "datasource",
-            "options": [],
-            "query": "prometheus",
-            "queryValue": "",
-            "refresh": 1,
-            "regex": "",
-            "skipUrlSync": false,
-            "type": "datasource"
-          },
-          {
             "allValue": null,
             "current": {},
-            "datasource": "$datasource",
+            "datasource": null,
             "definition": "label_values(DCGM_FI_DEV_GPU_TEMP, instance)",
             "hide": 0,
             "includeAll": true,
@@ -787,7 +767,7 @@ data:
           {
             "allValue": null,
             "current": {},
-            "datasource": "$datasource",
+            "datasource": null,
             "definition": "label_values(DCGM_FI_DEV_GPU_TEMP, gpu)",
             "hide": 0,
             "includeAll": true,

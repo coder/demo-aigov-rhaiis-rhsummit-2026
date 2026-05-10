@@ -1,7 +1,5 @@
-# vLLM serving dashboard for Grafana — same vendored source as
-# manifests/cluster-config/vllm-dashboard-console.yaml. Provisioned
-# automatically by the kiwigrid k8s-sidecar in the
-# coder-observability Grafana pod.
+# vLLM serving dashboard for Grafana. Same vendored + datasource-
+# stripped source as manifests/cluster-config/vllm-dashboard-console.yaml.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -17,10 +15,7 @@ data:
         "list": [
           {
             "builtIn": 1,
-            "datasource": {
-              "type": "grafana",
-              "uid": "-- Grafana --"
-            },
+            "datasource": null,
             "enable": true,
             "hide": true,
             "iconColor": "rgba(0, 211, 255, 1)",
@@ -44,10 +39,7 @@ data:
       "liveNow": false,
       "panels": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "description": "End to end request latency measured in seconds.",
           "fieldConfig": {
             "defaults": {
@@ -126,10 +118,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.99, sum by(le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -142,10 +131,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.95, sum by(le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -159,10 +145,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.9, sum by(le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -176,10 +159,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.5, sum by(le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -193,10 +173,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "editorMode": "code",
               "expr": "rate(vllm:e2e_request_latency_seconds_sum{model_name=\"$model_name\"}[$__rate_interval])\n/\nrate(vllm:e2e_request_latency_seconds_count{model_name=\"$model_name\"}[$__rate_interval])",
               "hide": false,
@@ -210,10 +187,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "description": "Number of tokens processed per second",
           "fieldConfig": {
             "defaults": {
@@ -291,10 +265,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "rate(vllm:prompt_tokens_total{model_name=\"$model_name\"}[$__rate_interval])",
@@ -307,10 +278,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "rate(vllm:generation_tokens_total{model_name=\"$model_name\"}[$__rate_interval])",
@@ -328,10 +296,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "description": "Inter token latency in seconds.",
           "fieldConfig": {
             "defaults": {
@@ -410,10 +375,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.99, sum by(le) (rate(vllm:inter_token_latency_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -426,10 +388,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.95, sum by(le) (rate(vllm:inter_token_latency_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -443,10 +402,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.9, sum by(le) (rate(vllm:inter_token_latency_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -460,10 +416,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.5, sum by(le) (rate(vllm:inter_token_latency_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -477,10 +430,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "editorMode": "code",
               "expr": "rate(vllm:inter_token_latency_seconds_sum{model_name=\"$model_name\"}[$__rate_interval])\n/\nrate(vllm:inter_token_latency_seconds_count{model_name=\"$model_name\"}[$__rate_interval])",
               "hide": false,
@@ -494,10 +444,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "description": "Number of requests in RUNNING, WAITING, and SWAPPED state",
           "fieldConfig": {
             "defaults": {
@@ -576,10 +523,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "vllm:num_requests_running{model_name=\"$model_name\"}",
@@ -592,10 +536,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "vllm:num_requests_waiting{model_name=\"$model_name\"}",
@@ -613,10 +554,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "description": "P50, P90, P95, and P99 TTFT latency in seconds.",
           "fieldConfig": {
             "defaults": {
@@ -695,10 +633,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.99, sum by(le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -712,10 +647,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.95, sum by(le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -728,10 +660,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.9, sum by(le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -745,10 +674,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "histogram_quantile(0.5, sum by(le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=\"$model_name\"}[$__rate_interval])))",
@@ -762,10 +688,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "editorMode": "code",
               "expr": "rate(vllm:time_to_first_token_seconds_sum{model_name=\"$model_name\"}[$__rate_interval])\n/\nrate(vllm:time_to_first_token_seconds_count{model_name=\"$model_name\"}[$__rate_interval])",
               "hide": false,
@@ -779,10 +702,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "description": "Percentage of used cache blocks by vLLM.",
           "fieldConfig": {
             "defaults": {
@@ -861,10 +781,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "editorMode": "code",
               "expr": "vllm:kv_cache_usage_perc{model_name=\"$model_name\"}",
               "instant": false,
@@ -877,10 +794,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "description": "Heatmap of request prompt length",
           "fieldConfig": {
             "defaults": {
@@ -924,7 +838,7 @@ data:
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1e-9
+              "le": 1E-9
             },
             "legend": {
               "show": true
@@ -948,10 +862,7 @@ data:
           "pluginVersion": "11.2.0",
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "sum by(le) (increase(vllm:request_prompt_tokens_bucket{model_name=\"$model_name\"}[$__rate_interval]))",
@@ -969,10 +880,7 @@ data:
           "type": "heatmap"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "description": "Heatmap of request generation length",
           "fieldConfig": {
             "defaults": {
@@ -1016,7 +924,7 @@ data:
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1e-9
+              "le": 1E-9
             },
             "legend": {
               "show": true
@@ -1040,10 +948,7 @@ data:
           "pluginVersion": "11.2.0",
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "sum by(le) (increase(vllm:request_generation_tokens_bucket{model_name=\"$model_name\"}[$__rate_interval]))",
@@ -1061,10 +966,7 @@ data:
           "type": "heatmap"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "description": "Number of finished requests by their finish reason: either an EOS token was generated or the max sequence length was reached.",
           "fieldConfig": {
             "defaults": {
@@ -1141,10 +1043,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "builder",
               "expr": "sum by(finished_reason) (increase(vllm:request_success_total{model_name=\"$model_name\"}[$__rate_interval]))",
@@ -1162,11 +1061,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "default": false,
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -1242,10 +1137,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "code",
               "expr": "rate(vllm:request_queue_time_seconds_sum{model_name=\"$model_name\"}[$__rate_interval])",
@@ -1262,11 +1154,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "default": false,
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -1342,10 +1230,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "code",
               "expr": "rate(vllm:request_prefill_time_seconds_sum{model_name=\"$model_name\"}[$__rate_interval])",
@@ -1358,10 +1243,7 @@ data:
               "useBackend": false
             },
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "editorMode": "code",
               "expr": "rate(vllm:request_decode_time_seconds_sum{model_name=\"$model_name\"}[$__rate_interval])",
               "hide": false,
@@ -1375,11 +1257,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "default": false,
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
+          "datasource": null,
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -1455,10 +1333,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
+              "datasource": null,
               "disableTextWrap": false,
               "editorMode": "code",
               "expr": "rate(vllm:request_max_num_generation_tokens_sum{model_name=\"$model_name\"}[$__rate_interval])",
@@ -1483,32 +1358,10 @@ data:
           {
             "current": {
               "selected": false,
-              "text": "prometheus",
-              "value": "edx8memhpd9tsa"
-            },
-            "hide": 0,
-            "includeAll": false,
-            "label": "datasource",
-            "multi": false,
-            "name": "DS_PROMETHEUS",
-            "options": [],
-            "query": "prometheus",
-            "queryValue": "",
-            "refresh": 1,
-            "regex": "",
-            "skipUrlSync": false,
-            "type": "datasource"
-          },
-          {
-            "current": {
-              "selected": false,
               "text": "/share/datasets/public_models/Meta-Llama-3-8B-Instruct",
               "value": "/share/datasets/public_models/Meta-Llama-3-8B-Instruct"
             },
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
+            "datasource": null,
             "definition": "label_values(model_name)",
             "hide": 0,
             "includeAll": false,

@@ -1,19 +1,10 @@
-# NVIDIA DCGM GPU dashboard — surfaced in the OpenShift Console under
-# Observe → Dashboards. The console picks up any ConfigMap in
-# `openshift-config-managed` with the label
-# `console.openshift.io/dashboard: "true"`.
-#
-# Source: vendored from NVIDIA's reference dcgm-exporter dashboard,
-# patched to:
-#   - wrap each raw GPU query with `max by (instance, gpu, modelName,
-#     Hostname)` to collapse the per-pod cardinality DCGM emits
-#     (every workload pod that touches the GPU spawns a new
-#     `exported_pod`-labeled time series; old pods leave stale
-#     series that lingered in the dashboard as duplicate "GPU 0"
-#     lines until they aged out)
-#   - improve `legendFormat` from "GPU {{gpu}}" to
-#     "{{modelName}} ({{Hostname}})" so the multi-GPU-node case
-#     (A10G + L40S in this cluster) is readable in the legend.
+# NVIDIA DCGM GPU dashboard for OCP Console.
+# Patched against upstream NVIDIA reference:
+#   - max-by aggregation collapses per-pod stale series
+#   - legendFormat shows {{modelName}} ({{Hostname}})
+#   - datasource template variable + per-panel datasource refs
+#     stripped (forces consumer to use its default Prometheus —
+#     same pattern as the working aibridge-dashboard)
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -56,7 +47,7 @@ data:
           {
             "$$hashKey": "object:192",
             "builtIn": 1,
-            "datasource": "-- Grafana --",
+            "datasource": null,
             "enable": true,
             "hide": true,
             "iconColor": "rgba(0, 211, 255, 1)",
@@ -78,7 +69,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -165,7 +156,7 @@ data:
           }
         },
         {
-          "datasource": "$datasource",
+          "datasource": null,
           "gridPos": {
             "h": 8,
             "w": 6,
@@ -230,7 +221,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -318,7 +309,7 @@ data:
         },
         {
           "cacheTimeout": null,
-          "datasource": "$datasource",
+          "datasource": null,
           "gridPos": {
             "h": 8,
             "w": 6,
@@ -387,7 +378,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -482,7 +473,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -572,7 +563,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -662,7 +653,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "$datasource",
+          "datasource": null,
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -755,27 +746,9 @@ data:
       "templating": {
         "list": [
           {
-            "current": {
-              "selected": true,
-              "text": "Prometheus",
-              "value": "Prometheus"
-            },
-            "hide": 0,
-            "includeAll": false,
-            "multi": false,
-            "name": "datasource",
-            "options": [],
-            "query": "prometheus",
-            "queryValue": "",
-            "refresh": 1,
-            "regex": "",
-            "skipUrlSync": false,
-            "type": "datasource"
-          },
-          {
             "allValue": null,
             "current": {},
-            "datasource": "$datasource",
+            "datasource": null,
             "definition": "label_values(DCGM_FI_DEV_GPU_TEMP, instance)",
             "hide": 0,
             "includeAll": true,
@@ -798,7 +771,7 @@ data:
           {
             "allValue": null,
             "current": {},
-            "datasource": "$datasource",
+            "datasource": null,
             "definition": "label_values(DCGM_FI_DEV_GPU_TEMP, gpu)",
             "hide": 0,
             "includeAll": true,
