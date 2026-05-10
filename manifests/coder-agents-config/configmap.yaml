@@ -84,19 +84,24 @@ data:
     : "${CODER_TOKEN:?CODER_TOKEN must be set}"
     : "${AWS_REGION:=us-east-1}"
     
-    # RHAIIS now ships TWO openai-compat backends (planner + executor) —
-    # see manifests/rhaiis/vllm-deployment.yaml for the rationale and
-    # docs/decisions.md §27. Override any of these env vars at deploy time
-    # if you swap models.
-    : "${RHAIIS_PLANNER_BASE_URL:=http://vllm-planner.ocp-ai.svc.cluster.local:8000/v1}"
-    : "${RHAIIS_PLANNER_MODEL_ID:=RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16}"
-    : "${RHAIIS_PLANNER_DISPLAY_NAME:=Llama 3.3 70B Instruct INT4 — Planner (RHAIIS sovereign)}"
-    : "${RHAIIS_PLANNER_PROVIDER_DISPLAY:=RHAIIS Planner (Llama 3.3 70B INT4 / L40S)}"
-    
-    : "${RHAIIS_EXECUTOR_BASE_URL:=http://vllm-executor.ocp-ai.svc.cluster.local:8000/v1}"
-    : "${RHAIIS_EXECUTOR_MODEL_ID:=Qwen/Qwen2.5-7B-Instruct}"
-    : "${RHAIIS_EXECUTOR_DISPLAY_NAME:=Qwen 2.5 7B Instruct — Executor (RHAIIS sovereign)}"
-    : "${RHAIIS_EXECUTOR_PROVIDER_DISPLAY:=RHAIIS Executor (Qwen 2.5 7B / A10G)}"
+    # RHAIIS — single openai-compat provider for tonight's booth shape.
+    # A planner+executor split exists at the manifest layer (vllm-planner
+    # + vllm-executor Deployments in manifests/rhaiis/vllm-deployment.yaml),
+    # but chatd's database has a UNIQUE constraint on the `provider` type
+    # column — only ONE openai-compat provider can exist at a time. Routing
+    # multiple vLLM backends behind one chatd provider needs a router
+    # (LiteLLM / llm-d / Coder AI Gateway when it lands) sitting between
+    # chatd and the two vLLM Services. Until that lands, we register the
+    # heavier of the two backends (Llama 3.3 70B INT4 on L40S) — the
+    # 70B's reasoning is what drives reliable sub-agent flow logic and
+    # template selection in Coder Agents' 19-tool harness. The
+    # vllm-executor Qwen 2.5 7B Deployment is left running (warm) so the
+    # router-driven swap is a config-only change, not a redeploy. See
+    # docs/decisions.md §27 + §28 for the full reasoning.
+    : "${RHAIIS_BASE_URL:=http://vllm-planner.ocp-ai.svc.cluster.local:8000/v1}"
+    : "${RHAIIS_MODEL_ID:=RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16}"
+    : "${RHAIIS_DISPLAY_NAME:=Llama 3.3 70B Instruct INT4 (RHAIIS sovereign)}"
+    : "${RHAIIS_PROVIDER_DISPLAY:=RHAIIS (Sovereign Llama 3.3 70B)}"
     
     : "${BEDROCK_PROVIDER_MODE:=native}"   # native | aibridge
     
@@ -348,10 +353,10 @@ data:
     esac
     
     echo ""
-    echo "==> Configuring RHAIIS Planner provider (direct, OpenAI-compatible)..."
-    RHAIIS_PLANNER_PROVIDER_PAYLOAD=$(jq -n \
-      --arg url "$RHAIIS_PLANNER_BASE_URL" \
-      --arg name "$RHAIIS_PLANNER_PROVIDER_DISPLAY" '{
+    echo "==> Configuring RHAIIS provider (direct, OpenAI-compatible)..."
+    RHAIIS_PROVIDER_PAYLOAD=$(jq -n \
+      --arg url "$RHAIIS_BASE_URL" \
+      --arg name "$RHAIIS_PROVIDER_DISPLAY" '{
       provider: "openai-compat",
       display_name: $name,
       base_url: $url,
@@ -359,23 +364,8 @@ data:
       central_api_key_enabled: true,
       allow_user_api_key: false
     }')
-    RHAIIS_PLANNER_PROVIDER_ID=$(upsert_provider "openai-compat" "$RHAIIS_PLANNER_PROVIDER_PAYLOAD" "$RHAIIS_PLANNER_PROVIDER_DISPLAY")
-    echo "    -> planner provider id: $RHAIIS_PLANNER_PROVIDER_ID"
-    
-    echo ""
-    echo "==> Configuring RHAIIS Executor provider (direct, OpenAI-compatible)..."
-    RHAIIS_EXECUTOR_PROVIDER_PAYLOAD=$(jq -n \
-      --arg url "$RHAIIS_EXECUTOR_BASE_URL" \
-      --arg name "$RHAIIS_EXECUTOR_PROVIDER_DISPLAY" '{
-      provider: "openai-compat",
-      display_name: $name,
-      base_url: $url,
-      api_key: "EMPTY",
-      central_api_key_enabled: true,
-      allow_user_api_key: false
-    }')
-    RHAIIS_EXECUTOR_PROVIDER_ID=$(upsert_provider "openai-compat" "$RHAIIS_EXECUTOR_PROVIDER_PAYLOAD" "$RHAIIS_EXECUTOR_PROVIDER_DISPLAY")
-    echo "    -> executor provider id: $RHAIIS_EXECUTOR_PROVIDER_ID"
+    RHAIIS_PROVIDER_ID=$(upsert_provider "openai-compat" "$RHAIIS_PROVIDER_PAYLOAD")
+    echo "    -> RHAIIS provider id: $RHAIIS_PROVIDER_ID"
     
     # ---------------------------------------------------------------------------
     # Bedrock Anthropic Opus + Sonnet models — explicit allowlist
@@ -513,25 +503,18 @@ data:
     done
     
     # ---------------------------------------------------------------------------
-    # RHAIIS planner + executor model-configs
+    # RHAIIS model — single openai-compat model for tonight (Llama 3.3 70B)
     # ---------------------------------------------------------------------------
-    #
-    # Each model_config is registered against the matching provider's
-    # display_name so chatd's openai-compat dispatcher routes traffic to
-    # the right vLLM backend (planner -> Llama 70B INT4 / L40S; executor
-    # -> Qwen 7B / A10G).
     
     RHAIIS_COST='{"input_price_per_million_tokens":0,"output_price_per_million_tokens":0,"cache_read_price_per_million_tokens":0}'
     
     echo ""
-    echo "==> Configuring RHAIIS Planner model..."
-    RHAIIS_PLANNER_PAYLOAD=$(jq -n \
-      --arg model "$RHAIIS_PLANNER_MODEL_ID" \
-      --arg display "$RHAIIS_PLANNER_DISPLAY_NAME" \
-      --arg provider_id "$RHAIIS_PLANNER_PROVIDER_ID" \
+    echo "==> Configuring RHAIIS model..."
+    RHAIIS_PAYLOAD=$(jq -n \
+      --arg model "$RHAIIS_MODEL_ID" \
+      --arg display "$RHAIIS_DISPLAY_NAME" \
       --argjson cost "$RHAIIS_COST" '{
         provider: "openai-compat",
-        provider_id: $provider_id,
         model: $model,
         display_name: $display,
         context_limit: 16384,
@@ -542,28 +525,7 @@ data:
           cost: $cost
         }
       }')
-    upsert_model_by_name "$RHAIIS_PLANNER_DISPLAY_NAME" "$RHAIIS_PLANNER_PAYLOAD"
-    
-    echo ""
-    echo "==> Configuring RHAIIS Executor model..."
-    RHAIIS_EXECUTOR_PAYLOAD=$(jq -n \
-      --arg model "$RHAIIS_EXECUTOR_MODEL_ID" \
-      --arg display "$RHAIIS_EXECUTOR_DISPLAY_NAME" \
-      --arg provider_id "$RHAIIS_EXECUTOR_PROVIDER_ID" \
-      --argjson cost "$RHAIIS_COST" '{
-        provider: "openai-compat",
-        provider_id: $provider_id,
-        model: $model,
-        display_name: $display,
-        context_limit: 16384,
-        enabled: true,
-        is_default: false,
-        model_config: {
-          max_output_tokens: 4096,
-          cost: $cost
-        }
-      }')
-    upsert_model_by_name "$RHAIIS_EXECUTOR_DISPLAY_NAME" "$RHAIIS_EXECUTOR_PAYLOAD"
+    upsert_model_by_name "$RHAIIS_DISPLAY_NAME" "$RHAIIS_PAYLOAD"
     
     # ---------------------------------------------------------------------------
     # Summary
