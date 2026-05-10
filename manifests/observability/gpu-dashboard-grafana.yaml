@@ -1,15 +1,8 @@
-# NVIDIA DCGM GPU dashboard — Grafana sidecar variant. The
-# coder-observability Grafana uses kiwigrid/k8s-sidecar to discover
-# dashboards from ConfigMaps in this namespace labeled
-# `grafana_dashboard=1` (matches the existing aibridge-dashboard +
-# agent-boundaries-dashboard convention). The sidecar pushes the
-# dashboard JSON into Grafana via its provisioning API on a periodic
-# poll, so Argo can manage the source-of-truth in git and Grafana
-# reflects it automatically.
-#
-# Same vendored NVIDIA reference dashboard as
-# manifests/cluster-config/gpu-dashboard-console.yaml — pinned for
-# booth predictability.
+# NVIDIA DCGM GPU dashboard — Grafana sidecar variant. kiwigrid
+# k8s-sidecar discovers ConfigMaps in this namespace labeled
+# `grafana_dashboard=1` and provisions the JSON into Grafana via its
+# provisioning API. Same vendored + patched source as
+# manifests/cluster-config/gpu-dashboard-console.yaml.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -112,10 +105,10 @@ data:
           "steppedLine": false,
           "targets": [
             {
-              "expr": "DCGM_FI_DEV_GPU_TEMP{instance=~\"$instance\", gpu=~\"$gpu\"}",
+              "expr": "max by (instance, gpu, modelName, Hostname) (DCGM_FI_DEV_GPU_TEMP{instance=~\"$instance\", gpu=~\"$gpu\"})",
               "instant": false,
               "interval": "",
-              "legendFormat": "GPU {{gpu}}",
+              "legendFormat": "{{modelName}} ({{Hostname}})",
               "refId": "A"
             }
           ],
@@ -265,9 +258,9 @@ data:
           "steppedLine": false,
           "targets": [
             {
-              "expr": "DCGM_FI_DEV_POWER_USAGE{instance=~\"$instance\", gpu=~\"$gpu\"}",
+              "expr": "max by (instance, gpu, modelName, Hostname) (DCGM_FI_DEV_POWER_USAGE{instance=~\"$instance\", gpu=~\"$gpu\"})",
               "interval": "",
-              "legendFormat": "GPU {{gpu}}",
+              "legendFormat": "{{modelName}} ({{Hostname}})",
               "refId": "A"
             }
           ],
@@ -423,11 +416,11 @@ data:
           "steppedLine": false,
           "targets": [
             {
-              "expr": "DCGM_FI_DEV_SM_CLOCK{instance=~\"$instance\", gpu=~\"$gpu\"} * 1000000",
+              "expr": "max by (instance, gpu, modelName, Hostname) (DCGM_FI_DEV_SM_CLOCK{instance=~\"$instance\", gpu=~\"$gpu\"} * 1000000)",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
-              "legendFormat": "GPU {{gpu}}",
+              "legendFormat": "{{modelName}} ({{Hostname}})",
               "refId": "A"
             }
           ],
@@ -516,9 +509,9 @@ data:
           "steppedLine": false,
           "targets": [
             {
-              "expr": "DCGM_FI_DEV_GPU_UTIL{instance=~\"$instance\", gpu=~\"$gpu\"}",
+              "expr": "max by (instance, gpu, modelName, Hostname) (DCGM_FI_DEV_GPU_UTIL{instance=~\"$instance\", gpu=~\"$gpu\"})",
               "interval": "",
-              "legendFormat": "GPU {{gpu}}",
+              "legendFormat": "{{modelName}} ({{Hostname}})",
               "refId": "A"
             }
           ],
@@ -606,9 +599,9 @@ data:
           "steppedLine": false,
           "targets": [
             {
-              "expr": "DCGM_FI_DEV_FB_USED{instance=~\"$instance\", gpu=~\"$gpu\"}",
+              "expr": "max by (instance, gpu, modelName, Hostname) (DCGM_FI_DEV_FB_USED{instance=~\"$instance\", gpu=~\"$gpu\"})",
               "interval": "",
-              "legendFormat": "GPU {{gpu}}",
+              "legendFormat": "{{modelName}} ({{Hostname}})",
               "refId": "A"
             }
           ],
@@ -696,9 +689,9 @@ data:
           "steppedLine": false,
           "targets": [
             {
-              "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE{instance=~\"$instance\", gpu=~\"$gpu\"}",
+              "expr": "max by (instance, gpu, modelName, Hostname) (DCGM_FI_PROF_PIPE_TENSOR_ACTIVE{instance=~\"$instance\", gpu=~\"$gpu\"})",
               "interval": "",
-              "legendFormat": "GPU {{gpu}}",
+              "legendFormat": "{{modelName}} ({{Hostname}})",
               "refId": "A"
             }
           ],
