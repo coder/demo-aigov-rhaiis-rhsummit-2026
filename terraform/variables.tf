@@ -154,3 +154,57 @@ variable "coder_oidc_provider_url" {
 # manifests/secrets/coder-secrets.yaml — sealed by an operator with
 # kubeseal, decrypted in-cluster by the Bitnami controller. See
 # docs/secrets.md for the workflow and docs/decisions.md §19 for why.
+
+###############################################################################
+# GitLab (self-hosted on EC2) — see terraform/gitlab.tf + terraform/gitlab/
+#
+# GitLab is the SCM for the demo-persona flow (alice/bob/carol/dave work
+# against GitLab issues, NOT GitHub). Runs on a separate EC2 VM rather
+# than in-cluster — 5-min Omnibus install vs 30-45 min Helm on OCP, zero
+# cluster resource contention, failure-isolated. See
+# docs/identity-architecture.md for the full architecture.
+###############################################################################
+
+variable "gitlab_enabled" {
+  description = "Whether to provision the GitLab EC2 VM. Set false to skip during dev iteration. Default true."
+  type        = bool
+  default     = true
+}
+
+variable "gitlab_instance_type" {
+  description = "EC2 instance type for the GitLab VM. m7a.2xlarge (8 vCPU AMD Genoa, 32 GiB, ~$0.46/hr) is the sweet spot for GitLab CE + 2-3 Docker runners on the same host."
+  type        = string
+  default     = "m7a.2xlarge"
+}
+
+variable "gitlab_ami_id" {
+  description = "AMI ID for the GitLab VM. Default is the latest Amazon Linux 2023 x86_64 (May 2026). Bump when AL2023 ships a newer minor."
+  type        = string
+  default     = "ami-0a59ec92177ec3fad"
+}
+
+variable "gitlab_ssh_key_name" {
+  description = "EC2 KeyPair name for SSH access to the GitLab VM. Create out-of-band via AWS Console or `aws ec2 import-key-pair`."
+  type        = string
+  default     = ""
+}
+
+variable "gitlab_ssh_ingress_cidr" {
+  description = "CIDR allowed to SSH (port 22) to the GitLab VM. Default 0.0.0.0/0 — narrow this to your office IP in terraform.tfvars before applying to prod."
+  type        = string
+  default     = "0.0.0.0/0"
+}
+
+variable "gitlab_keycloak_oidc_client_secret" {
+  description = "OIDC client secret for the `gitlab` client in the Keycloak `demo` realm. Hardcoded in manifests/keycloak/realm-demo.yaml as 'gitlab-client-secret-demo-2026' — pass the same value here so cloud-init wires the right secret into gitlab.rb's omniauth_providers config."
+  type        = string
+  default     = "gitlab-client-secret-demo-2026"
+  sensitive   = true
+}
+
+variable "gitlab_root_password" {
+  description = "Initial password for GitLab's `root` user. Primary booth login is Keycloak SSO; root is for emergency console access only (e.g. when SSO is misconfigured). Set in terraform.tfvars."
+  type        = string
+  sensitive   = true
+  default     = "ChangeMeBeforeApply2026!"
+}

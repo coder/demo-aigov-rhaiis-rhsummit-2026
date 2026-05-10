@@ -63,3 +63,38 @@ coder_oidc_provider_url = ""     # unused — GitHub OAuth replaces OIDC, see de
 # GitHub OAuth credentials for Coder SSO live in the coder-secrets
 # SealedSecret (manifests/secrets/coder-secrets.yaml). Seal them with
 # `kubeseal` after the cluster is up — see docs/secrets.md.
+
+###############################################################################
+# GitLab (self-hosted on EC2)
+###############################################################################
+
+# Default: true. Set false during dev iteration if you don't need GitLab.
+# gitlab_enabled = true
+
+# Instance type: m7a.2xlarge (AMD Genoa, 8 vCPU, 32 GiB) — comfortable for
+# GitLab CE + 2-3 Docker runners on the same host. Bump to m7a.4xlarge if
+# you plan heavy CI traffic during the booth.
+# gitlab_instance_type = "m7a.2xlarge"
+
+# Latest Amazon Linux 2023 x86_64 AMI (May 2026). Bump when AL2023 ships
+# a newer minor: `aws ec2 describe-images --owners amazon \
+#   --filters Name=name,Values=al2023-ami-2023.*-x86_64 \
+#   --query 'sort_by(Images,&CreationDate)|[-1]'`
+# gitlab_ami_id = "ami-0a59ec92177ec3fad"
+
+# EC2 KeyPair name. Create via:
+#   aws ec2 import-key-pair --key-name rhsummit-gitlab \
+#     --public-key-material fileb://~/.ssh/id_ed25519.pub
+gitlab_ssh_key_name = "rhsummit-gitlab"
+
+# Narrow to your office IP for prod. Default open is fine for booth.
+# gitlab_ssh_ingress_cidr = "0.0.0.0/0"
+
+# OIDC client secret — keep in sync with the value hardcoded in
+# manifests/keycloak/realm-demo.yaml's `gitlab` client. Default is fine
+# for booth (demo-realm secret, not a prod secret).
+# gitlab_keycloak_oidc_client_secret = "gitlab-client-secret-demo-2026"
+
+# GitLab `root` user password — emergency console access only (primary
+# auth is Keycloak SSO). Set a unique value before apply.
+gitlab_root_password = "ChangeMeBeforeApply2026!"
