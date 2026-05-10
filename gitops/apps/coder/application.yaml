@@ -101,10 +101,22 @@ spec:
             - name: CODER_MAX_ADMIN_TOKEN_LIFETIME
               value: "8760h"
 
-            # ── Auth: GitHub OAuth for `demo-rhsummit-users` org ────────
-            # Password auth disabled — GitHub is the only login method.
+            # ── Auth: dual IdP — GitHub OAuth (admins) + Keycloak OIDC (demo users) ──
+            # Password auth disabled. Two SSO paths:
+            #   - GitHub OAuth: filtered to `demo-rhsummit-users` org;
+            #     admin-tier (Coder team, SE presenters using their
+            #     personal GH account in that org). Original IdP.
+            #   - Keycloak OIDC: realm `demo` on the in-cluster RHBK
+            #     instance; demo-user personas (alice/bob/carol/dave/madmin).
+            #     Added 2026-05-10 per docs/identity-architecture.md.
+            #
+            # Both run simultaneously — the Coder login page shows two
+            # "Sign in with..." buttons. See docs/decisions.md §33
+            # (forthcoming) for the dual-IdP rationale.
             - name: CODER_DISABLE_PASSWORD_AUTH
               value: "true"
+
+            # GitHub OAuth — admin path
             - name: CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS
               value: "true"
             - name: CODER_OAUTH2_GITHUB_CLIENT_ID
@@ -119,6 +131,46 @@ spec:
                   key: github-client-secret
             - name: CODER_OAUTH2_GITHUB_ALLOWED_ORGS
               value: "demo-rhsummit-users"
+
+            # Keycloak OIDC — demo-user path. Issuer URL points at the
+            # in-cluster RHBK demo realm; Coder fetches the OIDC discovery
+            # doc and derives auth/token/userinfo endpoints automatically.
+            # Client secret is the booth-grade hardcoded value in
+            # manifests/keycloak/realm-demo.yaml; for prod, move to
+            # the coder-secrets SealedSecret with a `oidc-client-secret` key.
+            - name: CODER_OIDC_ISSUER_URL
+              value: "https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo"
+            - name: CODER_OIDC_CLIENT_ID
+              value: "coder"
+            - name: CODER_OIDC_CLIENT_SECRET
+              value: "coder-client-secret-demo-2026"
+            - name: CODER_OIDC_SIGN_IN_TEXT
+              value: "Sign in with Keycloak (demo users)"
+            - name: CODER_OIDC_ICON_URL
+              value: "https://www.keycloak.org/resources/images/keycloak_icon_512px.svg"
+            # Auto-create Coder user records on first OIDC login.
+            - name: CODER_OIDC_ALLOW_SIGNUPS
+              value: "true"
+            # Match users on the OIDC `email` claim (Keycloak emits this
+            # from the user record we set in realm-demo.yaml).
+            - name: CODER_OIDC_EMAIL_FIELD
+              value: "email"
+            # Trust Keycloak's email_verified claim — our demo users
+            # have emailVerified: true in the realm import, so this is
+            # always true. Setting it false would let unverified users
+            # log in too; we don't want that even in booth.
+            - name: CODER_OIDC_IGNORE_EMAIL_VERIFIED
+              value: "false"
+            # Map the OIDC `groups` claim into Coder's group sync so
+            # the `developers` group from Keycloak becomes a Coder
+            # group of the same name (users land in it on login).
+            - name: CODER_OIDC_GROUP_FIELD
+              value: "groups"
+            - name: CODER_OIDC_GROUP_AUTO_CREATE
+              value: "true"
+            # Scopes: standard + groups for the group claim.
+            - name: CODER_OIDC_SCOPES
+              value: "openid,profile,email,groups"
 
             # ── External git auth (GitHub) for workspace clone/push ─────
             # Reuses the same OAuth app as login.
