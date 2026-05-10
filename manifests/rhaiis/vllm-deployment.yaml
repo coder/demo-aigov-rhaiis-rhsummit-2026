@@ -77,6 +77,11 @@ spec:
   replicas: 1
   strategy:
     type: Recreate
+  # 60-min progress deadline so K8s doesn't mark the Deployment as
+  # Failed (which Argo surfaces as Degraded health) while a 70B model
+  # is doing its first cold-start download + load. Default 600s is
+  # well below what Llama 70B INT4 needs even with --enforce-eager.
+  progressDeadlineSeconds: 3600
   selector:
     matchLabels:
       app.kubernetes.io/name: vllm
@@ -105,6 +110,18 @@ spec:
             - --tool-call-parser
             - llama3_json
             - --enable-auto-tool-choice
+            # Skip cudagraph compilation. Reasoning: Llama 70B INT4 +
+            # vLLM 0.8.4's default ~70 cudagraph capture sizes takes
+            # 10-15 min to compile, on top of the ~12-15 min download.
+            # The startupProbe runway can't reasonably cover that
+            # before kubelet kills the container, and we ended up in a
+            # restart loop where every attempt timed out mid-compile.
+            # --enforce-eager disables cudagraph capture entirely,
+            # cutting startup time roughly in half. Inference latency
+            # is ~10-15% slower per token vs cudagraph mode — a fine
+            # tradeoff for the booth, where reliable warm-up beats
+            # peak per-token speed.
+            - --enforce-eager
             - --host
             - 0.0.0.0
             - --port
@@ -142,7 +159,11 @@ spec:
               cpu: "6"
               memory: "32Gi"
               nvidia.com/gpu: "1"
-          # 70B INT4 download is ~35 GiB; allow 25 min runway.
+          # 70B INT4 first cold start: ~12-15 min HF download +
+          # ~1-2 min shard load. With --enforce-eager (no cudagraph
+          # compile) total is ~15-18 min. We give 40 min runway as
+          # buffer for slow HF mirror days. failureThreshold 240 *
+          # periodSeconds 10 = 2400s = 40 min.
           startupProbe:
             httpGet:
               path: /v1/models
@@ -150,7 +171,7 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 150
+            failureThreshold: 240
           readinessProbe:
             httpGet:
               path: /v1/models
