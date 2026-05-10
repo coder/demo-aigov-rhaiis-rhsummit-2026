@@ -547,6 +547,28 @@ Conceptually correct: "RHAIIS is the provider, the models it hosts are below it.
 
 ---
 
+## 29. GPU + vLLM dashboards in OCP Console only (not Grafana)
+
+**Picked:** Ship the NVIDIA DCGM GPU dashboard and the vLLM serving dashboard as ConfigMaps in `openshift-config-managed` (label `console.openshift.io/dashboard=true`) — surfacing under the OpenShift Console's "Observe → Dashboards" view. **Do not** ship them to the `coder-observability` Grafana.
+
+**Considered:** Ship to both. Initially we did — turned out neither dashboard could populate panels in Grafana because the `coder-observability` Prometheus only scrapes its in-namespace ServiceMonitors (Coder, kube-state-metrics, etc.) and doesn't see the cluster-wide DCGM exporter (`nvidia-gpu-operator/nvidia-dcgm-exporter`) or vLLM metrics (`ocp-ai/vllm-{planner,executor}`).
+
+**Why OCP Console only:**
+- OCP Console's dashboard rendering defaults to **Thanos Querier**, which federates BOTH the cluster Prometheus (which scrapes `nvidia-gpu-operator` because that namespace has `openshift.io/cluster-monitoring=true`) AND User Workload Monitoring Prometheus (which scrapes the vLLM ServiceMonitors in `ocp-ai`). Every metric we care about is visible from the OCP Console out of the box.
+- Making Grafana see the same metrics would require adding Thanos Querier as a Grafana datasource with a bearer token from a SA bound to `cluster-monitoring-view`, plus TLS wiring against the cluster-internal CA. That's ~30 min of plumbing for "the same dashboard, in a second place." Booth-tonight tradeoff: skip it, document the path.
+- Coder-specific dashboards (AI Bridge usage, Agent Boundaries activity, Coder server metrics) keep their home in Grafana — Coder's Prometheus IS positioned to scrape them. Two dashboard surfaces, each scoped to what they're best at.
+
+**Tradeoffs:**
+- Operators have to know to look in two places (OCP Console for cluster + GPU + vLLM, Grafana for Coder-specific). Mitigation: link from each to the other in the booth runbook.
+- Customers asking "we want all dashboards in one Grafana" need the Thanos federation work done. Documented as future work below.
+
+**Trigger to revisit:**
+- Customer requirement for single-pane-of-glass Grafana → land the Thanos datasource + RBAC + TLS plumbing.
+- Coder ships its own AI Gateway observability that obviates the need for this dashboard set.
+- llm-d goes GA in RHOAI 3.x and includes its own observability dashboards we can adopt directly.
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":

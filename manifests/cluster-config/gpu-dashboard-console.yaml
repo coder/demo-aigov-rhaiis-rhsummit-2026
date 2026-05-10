@@ -1,10 +1,12 @@
-# NVIDIA DCGM GPU dashboard for OCP Console.
+# NVIDIA DCGM GPU dashboard for OCP Console (Observe → Dashboards).
 # Patched against upstream NVIDIA reference:
 #   - max-by aggregation collapses per-pod stale series
 #   - legendFormat shows {{modelName}} ({{Hostname}})
 #   - datasource template variable + per-panel datasource refs
-#     stripped (forces consumer to use its default Prometheus —
-#     same pattern as the working aibridge-dashboard)
+#     stripped (OCP Console defaults to Thanos Querier).
+#
+# This dashboard lives ONLY in the OCP Console — see
+# docs/decisions.md §29 for why the Grafana variant was removed.
 ---
 apiVersion: v1
 kind: ConfigMap

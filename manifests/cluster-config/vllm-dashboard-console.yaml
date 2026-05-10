@@ -1,8 +1,27 @@
-# vLLM serving dashboard for OCP Console.
+# vLLM serving dashboard for OCP Console (Observe → Dashboards).
 # Vendored from vllm-project/vllm
-# examples/observability/prometheus_grafana/grafana.json with the
-# datasource template variable + per-panel datasource refs stripped
-# so Grafana / OCP Console use their default Prometheus datasource.
+# examples/observability/prometheus_grafana/grafana.json with two
+# patches:
+#   - datasource template variable + per-panel datasource refs
+#     stripped (forces consumer to use its default Prometheus —
+#     OCP Console's monitoring view defaults to Thanos Querier
+#     which federates cluster Prometheus + UWM Prometheus, so vLLM
+#     metrics from ocp-ai/vllm-* services are visible).
+#   - model_name template variable's `label_values()` query is
+#     specific: `label_values(vllm:num_requests_running, model_name)`
+#     instead of bare `label_values(model_name)`. The bare form
+#     resolves all model_name labels in the entire cluster
+#     (including any other workloads that happen to use that
+#     label), which OCP Console's templating engine doesn't always
+#     resolve cleanly — the explicit metric reference is reliable
+#     across both Grafana and OCP Console.
+#
+# This dashboard lives ONLY in the OCP Console — see
+# docs/decisions.md §29 for why we don't ship it to Grafana too
+# (Grafana queries the in-namespace coder-observability Prometheus,
+# which doesn't scrape ocp-ai; federating to UWM/Thanos would
+# require bearer-token auth + cluster-monitoring-view RBAC + TLS
+# wiring that's out of scope for the booth).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -1365,7 +1384,7 @@ data:
               "value": "/share/datasets/public_models/Meta-Llama-3-8B-Instruct"
             },
             "datasource": null,
-            "definition": "label_values(model_name)",
+            "definition": "label_values(vllm:num_requests_running, model_name)",
             "hide": 0,
             "includeAll": false,
             "label": "model_name",
@@ -1373,7 +1392,7 @@ data:
             "name": "model_name",
             "options": [],
             "query": {
-              "query": "label_values(model_name)",
+              "query": "label_values(vllm:num_requests_running, model_name)",
               "refId": "StandardVariableQuery"
             },
             "refresh": 1,
