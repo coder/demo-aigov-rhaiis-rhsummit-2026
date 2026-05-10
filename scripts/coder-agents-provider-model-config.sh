@@ -511,6 +511,47 @@ RHAIIS_PAYLOAD=$(jq -n \
 upsert_model_by_name "$RHAIIS_DISPLAY_NAME" "$RHAIIS_PAYLOAD"
 
 # ---------------------------------------------------------------------------
+# Coder Agents system prompt + plan-mode instructions
+# ---------------------------------------------------------------------------
+#
+# Re-applies the custom system prompt appendix and plan-mode instructions
+# on every Job run. Same files that are committed to the repo at
+# manifests/coder-agents-config/{system-prompt.md,plan-mode-instructions.md}
+# get baked into the configmap and mounted at /etc/coder-agents-prompts/
+# alongside this script. PUTs to /api/experimental/chats/config/* — same
+# endpoints the Coder Console UI uses under
+# https://${CODER_URL}/agents/instructions.
+#
+# Why this is here and not declarative: chatd stores prompt config in
+# its Postgres, NOT in a Kubernetes CR. Doing it via API ensures the
+# state in Postgres matches the text in git on every reconcile.
+
+SYSTEM_PROMPT_FILE="/etc/coder-agents-prompts/system-prompt.md"
+PLAN_MODE_FILE="/etc/coder-agents-prompts/plan-mode-instructions.md"
+
+if [ -f "$SYSTEM_PROMPT_FILE" ]; then
+  echo ""
+  echo "==> Setting chat system-prompt appendix..."
+  jq -n --rawfile prompt "$SYSTEM_PROMPT_FILE" \
+        '{system_prompt: $prompt, include_default_system_prompt: true}' \
+    | curl -sf -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+        --data-binary @- "${BASE}/config/system-prompt" \
+        >/dev/null && echo "    OK ($(wc -c <"$SYSTEM_PROMPT_FILE") bytes)" \
+                     || echo "    FAILED — check Coder build supports /chats/config/system-prompt"
+fi
+
+if [ -f "$PLAN_MODE_FILE" ]; then
+  echo ""
+  echo "==> Setting chat plan-mode instructions..."
+  jq -n --rawfile prompt "$PLAN_MODE_FILE" \
+        '{plan_mode_instructions: $prompt}' \
+    | curl -sf -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+        --data-binary @- "${BASE}/config/plan-mode-instructions" \
+        >/dev/null && echo "    OK ($(wc -c <"$PLAN_MODE_FILE") bytes)" \
+                     || echo "    FAILED — check Coder build supports /chats/config/plan-mode-instructions"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
@@ -518,3 +559,4 @@ echo ""
 echo "Done."
 echo "  Verify: ${CODER_URL%/}/admin/ai-governance"
 echo "  Or via API: curl -H \"$AUTH\" ${BASE}/model-configs | jq '.[] | {provider,model,display_name,enabled,is_default}'"
+echo "  Instructions (UI): ${CODER_URL%/}/agents/instructions"

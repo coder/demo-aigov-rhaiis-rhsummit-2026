@@ -123,6 +123,12 @@ spec:
             - name: script
               mountPath: /scripts
               readOnly: true
+            # The prompt files (system-prompt.md, plan-mode-instructions.md)
+            # are mounted at /etc/coder-agents-prompts/ where the script
+            # picks them up and PUTs to /chats/config/system-prompt + /chats/config/plan-mode-instructions.
+            - name: prompts
+              mountPath: /etc/coder-agents-prompts
+              readOnly: true
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -130,6 +136,18 @@ spec:
           configMap:
             name: coder-agents-config-script
             defaultMode: 0555
+            items:
+              - key: coder-agents-provider-model-config.sh
+                path: coder-agents-provider-model-config.sh
+                mode: 0555
+        - name: prompts
+          configMap:
+            name: coder-agents-config-script
+            items:
+              - key: system-prompt.md
+                path: system-prompt.md
+              - key: plan-mode-instructions.md
+                path: plan-mode-instructions.md
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
