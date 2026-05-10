@@ -170,14 +170,18 @@ This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat 
 │
 ├── coder-templates/                # demo workspace templates pushed by GH Actions
 │   ├── README.md
-│   └── openshift-ai-gov/
-│       ├── main.tf                 # Coder template Terraform
-│       ├── README.md
-│       └── images/
-│           └── Dockerfile          # workspace base image
-│
-├── helm/                           # (WIP) supplemental Helm values for app-of-apps
-│   └── coder/
+│   ├── ai-dev-ocp/                 # code-server + Kiro/Cursor IDEs + LLM CLIs (AI Bridge)
+│   │   ├── main.tf
+│   │   ├── README.md
+│   │   └── metadata.json
+│   ├── agents-dev-ocp/             # code-server only; chatd drives the agent loop server-side
+│   │   ├── main.tf
+│   │   ├── README.md
+│   │   └── metadata.json
+│   └── images/                     # SHARED base images (one tree, not per-template)
+│       ├── ubi9-base-workspace/    # UBI 9.7 + EPEL + uid_entrypoint
+│       ├── ubi9-node-workspace/    # FROM ubi9-base + Node 22 + corepack
+│       └── agents-config-tools/    # UBI9-minimal + aws + jq + curl (used by Argo Job)
 │
 ├── scripts/
 │   ├── configure-manifests.sh         # patch manifests with cluster-specific values + apply root app

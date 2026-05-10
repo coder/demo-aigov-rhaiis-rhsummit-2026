@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         ### Demo issue template — stands in for Jira / sprint planning
-        On submit, the `sprint-ticket` label is auto-applied and the workflow at `.github/workflows/sprint-ticket.yml` provisions a Coder workspace from the `openshift-ai-gov` template. The workspace link will appear as a comment on this issue once it's claimed from the Prebuilt warm pool (typically <60s).
+        On submit, the `sprint-ticket` label is auto-applied and the workflow at `.github/workflows/sprint-ticket.yml` provisions a Coder workspace from the `ai-dev-ocp` template. The workspace link will appear as a comment on this issue once it's claimed from the Prebuilt warm pool (typically <60s).
 
   - type: input
     id: summary
