@@ -1,0 +1,67 @@
+# Prometheus ServiceMonitors for the two vLLM Deployments.
+#
+# vLLM 0.x exposes Prometheus metrics on the SAME port as the
+# OpenAI-compatible API endpoint (8000) at the path /metrics — no
+# separate exporter sidecar needed. Metrics include:
+#   - vllm:num_requests_running / waiting / preempted
+#   - vllm:time_to_first_token_seconds_bucket  (histogram)
+#   - vllm:e2e_request_latency_seconds_bucket
+#   - vllm:gpu_cache_usage_perc
+#   - vllm:prompt_tokens_total / generation_tokens_total (per-model)
+#   - vllm:cpu_cache_usage_perc (when cpu offload active; not used here)
+#
+# Scraped by OpenShift's User Workload Monitoring Prometheus (enabled
+# in manifests/cluster-config/user-workload-monitoring.yaml) — UWM
+# picks up ServiceMonitors in any user namespace whose ns label
+# `openshift.io/cluster-monitoring` is NOT set to "true". The `ocp-ai`
+# namespace doesn't carry that label, so these SMs land in UWM
+# Prometheus, NOT cluster Prometheus.
+#
+# (DCGM Exporter SMs are scraped by cluster Prometheus instead because
+# `nvidia-gpu-operator` namespace IS labeled `cluster-monitoring=true`.
+# Different scrape paths but same metrics surface in the OCP Console
+# under Observe → Metrics, so the operator experience is unified.)
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm-planner
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+      app.kubernetes.io/component: planner
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      # Honor the labels the metrics already have (vLLM emits
+      # `model_name=...` per metric — preserve that for dashboards).
+      honorLabels: true
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm-executor
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: executor
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+      app.kubernetes.io/component: executor
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
