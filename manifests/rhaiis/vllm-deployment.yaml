@@ -93,11 +93,20 @@ spec:
             # config but explicit is safer across vLLM versions.
             - --quantization
             - awq_marlin
-            # Hermes parser handles Qwen 2.5's `<tool_call>` format.
-            # Note: this is for Qwen 2.5 *Instruct* and Qwen 2.5 *Coder*
-            # Instruct (32B variant uses the same template). Don't
-            # confuse with the Qwen2.5-Coder *base* model which uses a
-            # different `<tools>` tag.
+            # Hermes parser handles `<tool_call>{"name": ..., "arguments": ...}</tool_call>`.
+            # Qwen 2.5 Coder Instruct's bundled tokenizer chat_template
+            # does NOT include the tool-calling block — so when chatd
+            # sends `tools` + `tool_choice: auto`, vLLM's auto-injected
+            # prompt asks the model for JSON but doesn't tell it to wrap
+            # in `<tool_call>` tags. Result: model emits bare JSON in
+            # `content`, hermes parser finds nothing in `tool_calls`,
+            # chatd never executes anything. The fix is to force vLLM
+            # to use the hermes-style tool template that ships in the
+            # vLLM image. Verified: same model with `tool_choice: required`
+            # already emits properly-structured tool_calls (parser is
+            # fine), so this is purely a prompt-formatting issue.
+            - --chat-template
+            - /app/data/template/tool_chat_template_hermes.jinja
             - --tool-call-parser
             - hermes
             - --enable-auto-tool-choice
