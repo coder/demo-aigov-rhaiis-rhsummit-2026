@@ -45,7 +45,7 @@ data "aws_route53_zone" "cluster" {
 
 resource "aws_security_group" "gitlab" {
   name        = "${var.cluster_name}-gitlab"
-  description = "GitLab CE on EC2 — HTTPS for booth/cluster, SSH for ops"
+  description = "GitLab CE on EC2 - HTTPS for booth/cluster, SSH for ops"
   vpc_id      = var.vpc_id
 
   # HTTPS — booth laptops + in-cluster webhook callbacks
@@ -54,7 +54,7 @@ resource "aws_security_group" "gitlab" {
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTPS — booth + cluster"
+    description = "HTTPS - booth + cluster"
   }
 
   # HTTP — needed transiently for Let's Encrypt HTTP-01 ACME challenge.
@@ -64,7 +64,7 @@ resource "aws_security_group" "gitlab" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTP — Let's Encrypt HTTP-01 challenge + initial setup"
+    description = "HTTP - Let's Encrypt HTTP-01 challenge + initial setup"
   }
 
   # SSH for operators. Default is wide-open; narrow in tfvars.
@@ -73,7 +73,7 @@ resource "aws_security_group" "gitlab" {
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.ssh_ingress_cidr]
-    description = "SSH — operator access (default open; narrow in tfvars)"
+    description = "SSH - operator access (default open; narrow in tfvars)"
   }
 
   egress {
@@ -81,7 +81,7 @@ resource "aws_security_group" "gitlab" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "Egress unrestricted — GitLab needs to fetch packages, hit Keycloak (in cluster public route), webhook the bridge, etc."
+    description = "Egress unrestricted - packages, Keycloak via public route, webhook the bridge, etc."
   }
 
   tags = {
@@ -111,6 +111,7 @@ resource "aws_ebs_volume" "gitlab_data" {
 
 locals {
   gitlab_hostname   = "gitlab.${var.base_domain}"
+  registry_hostname = "registry.gitlab.${var.base_domain}"
   keycloak_hostname = "keycloak.apps.cluster.${var.base_domain}"
   letsencrypt_email = "admin@${var.base_domain}"
 }
@@ -133,10 +134,11 @@ resource "aws_instance" "gitlab" {
 
   # Cloud-init: install gitlab-ce + Docker + runner, wire OIDC.
   user_data = templatefile("${path.module}/userdata.sh.tpl", {
-    gitlab_hostname     = local.gitlab_hostname
-    keycloak_hostname   = local.keycloak_hostname
-    letsencrypt_email   = local.letsencrypt_email
-    oidc_client_secret  = var.keycloak_oidc_client_secret
+    gitlab_hostname      = local.gitlab_hostname
+    registry_hostname    = local.registry_hostname
+    keycloak_hostname    = local.keycloak_hostname
+    letsencrypt_email    = local.letsencrypt_email
+    oidc_client_secret   = var.keycloak_oidc_client_secret
     gitlab_root_password = var.gitlab_root_password
   })
 
@@ -156,12 +158,26 @@ resource "aws_volume_attachment" "gitlab_data" {
 }
 
 ###############################################################################
-# Route 53 A record — `gitlab.<base_domain>` → EC2 public IP
+# Route 53 A records:
+#   - gitlab.<base_domain>          → EC2 public IP (main UI + Git)
+#   - registry.gitlab.<base_domain> → EC2 public IP (container registry)
+#
+# Both point at the same EC2 instance — Omnibus runs the registry on
+# the same VM behind its own NGINX vhost and requests a separate
+# Let's Encrypt cert for the registry hostname.
 ###############################################################################
 
 resource "aws_route53_record" "gitlab" {
   zone_id = data.aws_route53_zone.cluster.zone_id
   name    = local.gitlab_hostname
+  type    = "A"
+  ttl     = 60
+  records = [aws_instance.gitlab.public_ip]
+}
+
+resource "aws_route53_record" "registry" {
+  zone_id = data.aws_route53_zone.cluster.zone_id
+  name    = local.registry_hostname
   type    = "A"
   ttl     = 60
   records = [aws_instance.gitlab.public_ip]

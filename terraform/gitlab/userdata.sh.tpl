@@ -12,6 +12,7 @@ set -euxo pipefail
 exec > >(tee /var/log/gitlab-bootstrap.log | logger -t gitlab-bootstrap) 2>&1
 
 GITLAB_HOSTNAME="${gitlab_hostname}"
+REGISTRY_HOSTNAME="${registry_hostname}"
 KEYCLOAK_HOSTNAME="${keycloak_hostname}"
 LE_EMAIL="${letsencrypt_email}"
 OIDC_CLIENT_SECRET='${oidc_client_secret}'
@@ -113,9 +114,20 @@ gitaly['gitconfig'] = [{ key: 'pack.threads', value: '1' }]
 pages_external_url ''
 gitlab_pages['enable'] = false
 
-# Container Registry: leave it on at the default Omnibus subdomain
-# (registry.<external_url>). Even if we don't push to it during the
-# booth, the demo template's image-pull paths can hit it.
+# ── Container Registry ───────────────────────────────────────────
+# Enabled on its own subdomain (registry.<external_url>) — this is
+# the standard Omnibus pattern. Omnibus auto-requests a second
+# Let's Encrypt cert for the registry FQDN (port 80 ACME challenge
+# already open in the SG); registry traffic runs over 443 same as
+# the main GitLab UI, so no extra SG rule is needed.
+#
+# Booth demo uses this for:
+#   - Coder workspace template images pushed by the bridge service
+#   - Anything the persona flow needs to docker push / docker pull
+#     against a "their company's registry" rather than a public one.
+registry_external_url 'https://$${REGISTRY_HOSTNAME}'
+registry['enable'] = true
+registry_nginx['letsencrypt_contact_emails'] = ['$${LE_EMAIL}']
 EOF
 
 # ── 5. Reconfigure (applies gitlab.rb, triggers Let's Encrypt cert request) ─

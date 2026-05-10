@@ -182,22 +182,22 @@ resource "null_resource" "sts_setup" {
   depends_on = [local_sensitive_file.install_config]
 
   triggers = {
-    install_dir    = var.install_dir
-    cluster_name   = var.cluster_name
-    ccoctl_name    = local.ccoctl_name
-    aws_region     = var.aws_region
-    aws_profile    = var.aws_profile != null ? var.aws_profile : ""
-    install_binary = var.openshift_install_binary
+    install_dir        = var.install_dir
+    cluster_name       = var.cluster_name
+    ccoctl_name        = local.ccoctl_name
+    aws_region         = var.aws_region
+    aws_profile        = var.aws_profile != null ? var.aws_profile : ""
+    install_binary     = var.openshift_install_binary
     install_config_md5 = local_sensitive_file.install_config.content_md5
   }
 
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
-    command = <<-EOT
+    command     = <<-EOT
       set -euo pipefail
-%{ if var.aws_profile != null ~}
+%{if var.aws_profile != null~}
       export AWS_PROFILE="${var.aws_profile}"
-%{ endif ~}
+%{endif~}
       export AWS_REGION="${var.aws_region}"
       INSTALL_DIR="${var.install_dir}"
       PULL_SECRET="${pathexpand(var.pull_secret_path)}"
@@ -234,13 +234,13 @@ resource "null_resource" "sts_setup" {
   }
 
   provisioner "local-exec" {
-    when    = destroy
+    when        = destroy
     interpreter = ["/bin/bash", "-c"]
-    command = <<-EOT
+    command     = <<-EOT
       set -euo pipefail
-%{ if self.triggers.aws_profile != "" ~}
+%{if self.triggers.aws_profile != ""~}
       export AWS_PROFILE="${self.triggers.aws_profile}"
-%{ endif ~}
+%{endif~}
       export AWS_REGION="${self.triggers.aws_region}"
 
       echo "==> Cleaning up ccoctl-created AWS resources (OIDC provider + platform IAM roles)..."
@@ -270,7 +270,7 @@ resource "null_resource" "openshift_install" {
 
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
-    command = <<-EOT
+    command     = <<-EOT
       set -euo pipefail
       echo "Running openshift-install create cluster (this takes 30-45 min)..."
       echo "The installer will use the pre-created STS manifests from ccoctl."
@@ -281,9 +281,9 @@ resource "null_resource" "openshift_install" {
   }
 
   provisioner "local-exec" {
-    when    = destroy
+    when        = destroy
     interpreter = ["/bin/bash", "-c"]
-    command = <<-EOT
+    command     = <<-EOT
       set -euo pipefail
       echo "Running openshift-install destroy cluster..."
       ${self.triggers.install_binary} destroy cluster \
@@ -312,7 +312,7 @@ resource "null_resource" "gitops_bootstrap" {
 
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
-    command = <<-EOT
+    command     = <<-EOT
       set -euo pipefail
       export KUBECONFIG="${var.install_dir}/auth/kubeconfig"
 

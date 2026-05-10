@@ -8,6 +8,16 @@ output "gitlab_hostname" {
   value       = local.gitlab_hostname
 }
 
+output "registry_url" {
+  description = "GitLab container registry URL. Use as the registry host for `docker login` / `podman login` from inside Coder workspaces and from CI runners."
+  value       = "https://${local.registry_hostname}"
+}
+
+output "registry_hostname" {
+  description = "DNS hostname (without scheme) of the GitLab container registry — same EC2 instance, separate Omnibus vhost + LE cert."
+  value       = local.registry_hostname
+}
+
 output "gitlab_public_ip" {
   description = "EC2 public IP. Useful for SSH troubleshooting."
   value       = aws_instance.gitlab.public_ip

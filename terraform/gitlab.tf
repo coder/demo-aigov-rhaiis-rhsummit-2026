@@ -17,17 +17,17 @@ module "gitlab" {
   count  = var.gitlab_enabled ? 1 : 0
   source = "./gitlab"
 
-  cluster_name      = var.cluster_name
-  base_domain       = var.base_domain
-  aws_region        = var.aws_region
-  vpc_id            = module.vpc.vpc_id
+  cluster_name = var.cluster_name
+  base_domain  = var.base_domain
+  aws_region   = var.aws_region
+  vpc_id       = module.vpc.vpc_id
   # First public subnet — same AZ as the primary GPU node + the rest
   # of the cluster's pre-pinned-to-1a workload.
-  public_subnet_id  = module.vpc.public_subnets[0]
-  instance_type     = var.gitlab_instance_type
-  ami_id            = var.gitlab_ami_id
-  ssh_key_name      = var.gitlab_ssh_key_name
-  ssh_ingress_cidr  = var.gitlab_ssh_ingress_cidr
+  public_subnet_id = module.vpc.public_subnets[0]
+  instance_type    = var.gitlab_instance_type
+  ami_id           = var.gitlab_ami_id
+  ssh_key_name     = var.gitlab_ssh_key_name
+  ssh_ingress_cidr = var.gitlab_ssh_ingress_cidr
 
   # OIDC client secret — must match the value in
   # manifests/keycloak/realm-demo.yaml's `gitlab` client. See the
@@ -48,4 +48,9 @@ output "gitlab_url" {
 output "gitlab_public_ip" {
   description = "GitLab EC2 public IP — for SSH troubleshooting."
   value       = var.gitlab_enabled ? module.gitlab[0].gitlab_public_ip : ""
+}
+
+output "gitlab_registry_url" {
+  description = "GitLab container registry URL — same EC2 host, separate Omnibus vhost (registry.gitlab.<base_domain>). Empty if gitlab_enabled = false."
+  value       = var.gitlab_enabled ? module.gitlab[0].registry_url : ""
 }
