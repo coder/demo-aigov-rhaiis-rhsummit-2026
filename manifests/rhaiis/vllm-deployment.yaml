@@ -13,19 +13,34 @@
 #   POST /v1/embeddings
 #   GET  /v1/models
 #
-# Tool-call support requires the right per-model parser. This example uses
-# `granite` for IBM Granite-3.1-8B-Instruct. Alternates:
-#   --tool-call-parser hermes        (Qwen2.5 / Qwen2.5-Coder, OpenHermes)
-#   --tool-call-parser llama3_json   (Llama-3.1+ Instruct)
-#   --tool-call-parser mistral       (Mistral / Mixtral Instruct)
+# Tool-call support requires the right per-model parser. Active model:
+# Qwen2.5-Coder-32B-Instruct-AWQ — the hermes parser is the right match
+# for Qwen 2.5's `<tool_call>...</tool_call>` emission format.
+# Alternates (kept for reference; switch by changing args + parser):
+#   --tool-call-parser granite       (Granite 3.x Instruct)
+#   --tool-call-parser hermes        (Qwen2.5 / Qwen2.5-Coder, OpenHermes, Hermes 3)
+#   --tool-call-parser llama3_json   (Llama-3.1+ / Llama 3.3 Instruct)
+#   --tool-call-parser mistral       (Mistral / Mixtral / Devstral Instruct)
 #   --tool-call-parser deepseek      (DeepSeek-V3 / DeepSeek-Coder-V2.5+)
 #
-# GPU node placement: this Deployment ALWAYS runs on the cluster's GPU
-# pool (provisioned by openshift-install via the `gpu` compute pool in
-# install-config.yaml). The nodeSelector `nvidia.com/gpu.present=true` is
-# auto-applied by the NVIDIA GPU operator's GPU Feature Discovery
-# DaemonSet once drivers are loaded. No CPU fallback path — RHAIIS
-# requires the GPU to be ready before pods schedule.
+# Why Qwen2.5-Coder-32B-Instruct-AWQ on L40S, not Granite-3.1-8B on A10G:
+#   The booth demo wants to show the open model driving the same agentic
+#   workflow as Claude (clone repo, edit files, run commands). Coder
+#   Agents (chatd) ships a 19-tool harness. An 8B model can't reliably
+#   keep all 19 schemas in working context AND chain them — Granite's
+#   BFCL v3 is 68.27, mid-pack. Qwen2.5-Coder-32B is purpose-built for
+#   agentic coding (SWE-Bench Pro ~44%) and the AWQ 4-bit quant fits
+#   comfortably on a single L40S 48 GiB. Llama 3.3 70B is documented
+#   as the backup if Qwen origins come into question (see
+#   docs/decisions.md and bedrock-model-sub.md).
+#
+# GPU node placement: pinned to NVIDIA L40S only. The L40S MachineSet
+# (manifests/machinesets/gpu-l40s.yaml) provisions a g6e.2xlarge in
+# us-east-1a; the GPU operator's GPU Feature Discovery DaemonSet labels
+# it `nvidia.com/gpu.product=NVIDIA-L40S` once the driver loads, and the
+# nodeSelector below targets that label so this Deployment cannot land
+# back on the legacy A10G g5.2xlarge node. Backout: change the
+# nodeSelector value to NVIDIA-A10G and revert the model + parser args.
 #
 # Pull-secret expectation: a `redhat-pull-secret` of type
 # kubernetes.io/dockerconfigjson exists in this namespace, sourced from
@@ -56,11 +71,12 @@ spec:
     spec:
       imagePullSecrets:
         - name: redhat-pull-secret
-      # Land on the GPU node only. The label is auto-applied by the
-      # NVIDIA GPU operator's GPU Feature Discovery DaemonSet after
-      # drivers are running.
+      # Pin to L40S only. Both A10G (g5.2xlarge) and L40S (g6e.2xlarge)
+      # nodes are present in the cluster; the looser
+      # `nvidia.com/gpu.present=true` selector would let the pod land on
+      # either, and AWQ 4-bit + 32K context does NOT fit on A10G's 24 GiB.
       nodeSelector:
-        nvidia.com/gpu.present: "true"
+        nvidia.com/gpu.product: NVIDIA-L40S
       containers:
         - name: vllm
           # CUDA-enabled RHAIIS image. Using the quay.io mirror which
@@ -71,29 +87,34 @@ spec:
           imagePullPolicy: Always
           args:
             - --model
-            - ibm-granite/granite-3.1-8b-instruct
+            - Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
+            # AWQ 4-bit weights — ~18 GiB on disk, ~19 GiB on GPU after
+            # framework overhead. vLLM auto-detects AWQ from the model
+            # config but explicit is safer across vLLM versions.
+            - --quantization
+            - awq_marlin
+            # Hermes parser handles Qwen 2.5's `<tool_call>` format.
+            # Note: this is for Qwen 2.5 *Instruct* and Qwen 2.5 *Coder*
+            # Instruct (32B variant uses the same template). Don't
+            # confuse with the Qwen2.5-Coder *base* model which uses a
+            # different `<tools>` tag.
             - --tool-call-parser
-            - granite
+            - hermes
             - --enable-auto-tool-choice
             - --host
             - 0.0.0.0
             - --port
             - "8000"
-            # Granite 3.1 8B's native context is 128K, but the A10G has 23GB
-            # GPU memory and 8B fp16 weights consume 15.25 GiB of that — once
-            # cudagraph overhead is in (~1-2 GB) the KV-cache budget is
-            # ~3.7 GiB. 32K context needs 5 GiB KV cache → vLLM crashes at
-            # init with "available KV cache memory (3.77 GiB)". 16K context
-            # needs ~2.5 GiB → fits with headroom. That's still 2× the
-            # original 8K cap and comfortably above Coder Agents' typical
-            # working set (~3-4K system prompt + tools, ~4K chat history,
-            # 4K completion budget = ~12K worst case). If we move to a
-            # bigger GPU (L40S/A100), bump to 32K+.
+            # Qwen 2.5 Coder 32B native context is 32K. AWQ on L40S
+            # (48 GiB) leaves ~25 GiB free for KV cache after weights +
+            # cudagraph buffers, which covers 32K context with a
+            # comfortable batch budget. If we ever move to L40S+ or
+            # A100 80GB, can extend to 128K via YaRN config.
             - --max-model-len
-            - "16384"
+            - "32768"
             - --disable-log-requests
             - --tensor-parallel-size
-            - "1"            # 1 GPU per pod; A10G handles 8B fp16 alone
+            - "1"            # single L40S — no TP needed
           ports:
             - name: http
               containerPort: 8000
@@ -114,21 +135,20 @@ spec:
           resources:
             requests:
               cpu: "2"
-              memory: "8Gi"
+              memory: "16Gi"
               nvidia.com/gpu: "1"
             limits:
-              cpu: "4"
-              memory: "16Gi"
+              cpu: "6"
+              memory: "32Gi"            # bumped from 16Gi — 32B vLLM Python proc + tokenizer pool
               nvidia.com/gpu: "1"
           # startupProbe gates the container's "started" state until vLLM
           # has actually loaded weights and bound /v1/models. Without this,
-          # liveness fires at 180s, kills vLLM mid-load, and the emptyDir
-          # cache is wiped — the next attempt re-downloads ~16GB and the
-          # cycle repeats forever. Granite 3.1 8B over the public HF mirror
-          # consistently takes ~4-5 min to download + ~1-2 min to load
-          # checkpoint shards + cudagraph capture (longer at higher
-          # max-model-len), so 15 min of startup runway is the safe
-          # ceiling. failureThreshold 90 * periodSeconds 10 = 900s.
+          # liveness fires too early, kills vLLM mid-load, and the emptyDir
+          # cache is wiped — the next attempt re-downloads ~18GB and the
+          # cycle repeats forever. Qwen 2.5 Coder 32B AWQ over the public
+          # HF mirror takes ~5-7 min to download + ~2-3 min to load
+          # checkpoint shards + cudagraph capture. failureThreshold 120 *
+          # periodSeconds 10 = 1200s = 20 min runway.
           startupProbe:
             httpGet:
               path: /v1/models
@@ -136,7 +156,7 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 90
+            failureThreshold: 120
           readinessProbe:
             httpGet:
               path: /v1/models
@@ -159,11 +179,11 @@ spec:
       volumes:
         - name: hf-cache
           emptyDir:
-            sizeLimit: 30Gi              # 8B fp16 ≈ 16GB; leave headroom
+            sizeLimit: 60Gi              # 32B AWQ ≈ 18GB; leave headroom for checkpoint download retries
         - name: shm
           emptyDir:
             medium: Memory
-            sizeLimit: 2Gi
+            sizeLimit: 4Gi
 ---
 apiVersion: v1
 kind: Service

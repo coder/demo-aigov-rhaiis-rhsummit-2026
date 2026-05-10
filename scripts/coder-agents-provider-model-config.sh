@@ -67,8 +67,15 @@ set -euo pipefail
 : "${CODER_TOKEN:?CODER_TOKEN must be set}"
 : "${AWS_REGION:=us-east-1}"
 : "${RHAIIS_BASE_URL:=http://vllm.ocp-ai.svc.cluster.local:8000/v1}"
-: "${RHAIIS_MODEL_ID:=ibm-granite/granite-3.1-8b-instruct}"
-: "${RHAIIS_DISPLAY_NAME:=Granite 3.1 8B Instruct (RHAIIS sovereign)}"
+# Active RHAIIS model — must match what vLLM is serving in
+# manifests/rhaiis/vllm-deployment.yaml. Qwen 2.5 Coder 32B AWQ on L40S
+# is the booth-demo lineup; see docs/decisions.md for the model-tier
+# rationale (Granite 3.1 8B was too small for the Coder Agents 19-tool
+# harness — workspace creation / file edits never fired tool_calls).
+# To roll back to Granite, change BOTH this script AND the vLLM
+# deployment, then re-run the Job.
+: "${RHAIIS_MODEL_ID:=Qwen/Qwen2.5-Coder-32B-Instruct-AWQ}"
+: "${RHAIIS_DISPLAY_NAME:=Qwen 2.5 Coder 32B Instruct AWQ (RHAIIS sovereign)}"
 : "${BEDROCK_PROVIDER_MODE:=native}"   # native | aibridge
 
 BASE="${CODER_URL%/}/api/experimental/chats"
@@ -461,7 +468,7 @@ GRANITE_PAYLOAD=$(jq -n \
     provider: "openai-compat",
     model: $model,
     display_name: $display,
-    context_limit: 16384,
+    context_limit: 32768,
     enabled: true,
     is_default: false,
     model_config: {

@@ -1,0 +1,94 @@
+# L40S GPU MachineSet — added 2026-05-10 to host the upgraded RHAIIS
+# vLLM serving Qwen2.5-Coder-32B-Instruct-AWQ for the booth demo.
+#
+# Why a SECOND MachineSet instead of mutating the original A10G one:
+#   The original `cluster-<id>-worker-us-east-1a` MachineSet (g5.2xlarge,
+#   A10G 24GB) was provisioned by openshift-install at cluster-create time
+#   from the install-config.yaml compute pool. It is NOT GitOps-managed.
+#   We keep it running so the previous Granite-on-A10G stack is a one-line
+#   nodeSelector flip away (backout for vLLM is to point its
+#   `nvidia.com/gpu.product` selector back at NVIDIA-A10G).
+#
+# Subnet, AMI, security groups, IAM profile are copied from the existing
+# A10G MachineSet (same AZ — us-east-1a — so all live in the same VPC
+# subnet without needing extra route-table or NLB plumbing).
+#
+# The NVIDIA GPU operator's GPU Feature Discovery DaemonSet auto-labels
+# this node with `nvidia.com/gpu.product=NVIDIA-L40S` once the driver is
+# loaded. vLLM's nodeSelector targets that exact label so the workload
+# pins to L40S and never lands back on A10G.
+#
+# Backout:
+#   oc scale -n openshift-machine-api machineset/cluster-pqc4z-worker-l40s-us-east-1a --replicas=0
+#   oc delete -f manifests/machinesets/gpu-l40s.yaml
+#   # then revert vllm-deployment.yaml's nodeSelector to nvidia.com/gpu.product=NVIDIA-A10G
+#   #   (or back to the original `nvidia.com/gpu.present: "true"`)
+---
+apiVersion: machine.openshift.io/v1beta1
+kind: MachineSet
+metadata:
+  name: cluster-pqc4z-worker-l40s-us-east-1a
+  namespace: openshift-machine-api
+  labels:
+    machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+  annotations:
+    # Cluster-autoscaler hints. memoryMb / vCPU describe the EC2 type.
+    capacity.cluster-autoscaler.kubernetes.io/labels: kubernetes.io/arch=amd64
+    machine.openshift.io/GPU: "1"
+    machine.openshift.io/memoryMb: "65536"
+    machine.openshift.io/vCPU: "8"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+      machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-us-east-1a
+  template:
+    metadata:
+      labels:
+        machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+        machine.openshift.io/cluster-api-machine-role: worker
+        machine.openshift.io/cluster-api-machine-type: worker
+        machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-us-east-1a
+    spec:
+      providerSpec:
+        value:
+          ami:
+            id: ami-04018496b0a1da2d2     # same OCP RHCOS image as g5 MS
+          apiVersion: machine.openshift.io/v1beta1
+          blockDevices:
+            - ebs:
+                encrypted: true
+                iops: 0
+                kmsKey:
+                  arn: ""
+                volumeSize: 200
+                volumeType: gp3
+          credentialsSecret:
+            name: aws-cloud-credentials
+          deviceIndex: 0
+          iamInstanceProfile:
+            id: cluster-pqc4z-worker-profile
+          instanceType: g6e.2xlarge        # 1× NVIDIA L40S 48 GiB, 8 vCPU, 64 GiB RAM
+          kind: AWSMachineProviderConfig
+          metadata: {}
+          metadataServiceOptions: {}
+          placement:
+            availabilityZone: us-east-1a    # matches existing g5 MS — same subnet
+            region: us-east-1
+          securityGroups:
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-node
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-lb
+          subnet:
+            id: subnet-0e22bc2846ce4faaa     # us-east-1a worker subnet
+          tags:
+            - name: kubernetes.io/cluster/cluster-pqc4z
+              value: owned
+          userDataSecret:
+            name: worker-user-data
