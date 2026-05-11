@@ -10,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -281,6 +283,13 @@ func (h *Handler) findExistingAgentChat(ctx context.Context, ownerID, workspaceI
 // chatd use the deployment default. Unknown slug → error so the handler
 // can surface it to the operator without spawning a chat on the wrong
 // model.
+//
+// When multiple enabled models match the slug (e.g. "opus" matches Opus
+// 4.1, 4.5, 4.6, 4.7), the bridge picks the HIGHEST version. Version
+// parsing extracts the first "<int>" or "<int>.<int>" token from the
+// display name and sorts descending. The booth presenter typing
+// `coder-agent:opus` gets the latest Opus, not the oldest one the API
+// happens to return first.
 func (h *Handler) resolveModelSlug(ctx context.Context, slug string) (string, error) {
 	if slug == "" {
 		return "", nil
@@ -289,20 +298,52 @@ func (h *Handler) resolveModelSlug(ctx context.Context, slug string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("list model configs: %w", err)
 	}
-	// Case-insensitive substring match against display_name. First
-	// matching enabled config wins. Allows aliases like "llama" to
-	// hit "Llama 3.3 70B Instruct INT4 (RHAIIS sovereign)" without
-	// requiring an exact mapping table.
 	needle := strings.ToLower(slug)
+	var matches []coder.ModelConfig
 	for _, m := range mcs {
 		if !m.Enabled {
 			continue
 		}
 		if strings.Contains(strings.ToLower(m.DisplayName), needle) {
-			return m.ID, nil
+			matches = append(matches, m)
 		}
 	}
-	return "", fmt.Errorf("unknown model slug %q (no enabled chatd model has %q in its display name)", slug, slug)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("unknown model slug %q (no enabled chatd model has %q in its display name)", slug, slug)
+	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		mi, ni := parseModelVersion(matches[i].DisplayName)
+		mj, nj := parseModelVersion(matches[j].DisplayName)
+		if mi != mj {
+			return mi > mj
+		}
+		if ni != nj {
+			return ni > nj
+		}
+		// Final tiebreaker: longer display name (usually carries the
+		// more-specific patch/date suffix) sorts first.
+		return len(matches[i].DisplayName) > len(matches[j].DisplayName)
+	})
+	return matches[0].ID, nil
+}
+
+var modelVersionRE = regexp.MustCompile(`\b(\d+)(?:\.(\d+))?\b`)
+
+// parseModelVersion returns the (major, minor) parsed from the first
+// version-looking token in the display name. "Claude Opus 4.7 [US]" →
+// (4, 7). "Claude Sonnet 4 (2025-05-14)" → (4, 0). "Llama 3.3 70B" →
+// (3, 3). No version token → (0, 0) so it sorts last.
+func parseModelVersion(displayName string) (int, int) {
+	m := modelVersionRE.FindStringSubmatch(displayName)
+	if m == nil {
+		return 0, 0
+	}
+	major, _ := strconv.Atoi(m[1])
+	var minor int
+	if m[2] != "" {
+		minor, _ = strconv.Atoi(m[2])
+	}
+	return major, minor
 }
 
 // spawnAgentChat mints a per-user token for the assignee (admin token can't
