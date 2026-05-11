@@ -113,23 +113,34 @@ RUN useradd --uid ${UID} --create-home --shell /bin/bash --user-group ${USER} \
 RUN chgrp -R 0 /home/${USER} \
     && chmod -R g=u /home/${USER}
 
-# Compatibility symlink — many smaller / quantized LLMs (notably
-# Llama 3.3 70B INT4 via RHAIIS chatd) hallucinate `/home/user/...`
-# as the working directory when calling Coder Agents' `execute` /
-# `write_file` tools with an explicit `workdir` arg, because that
-# path is common in their training data (Anthropic's computer-use
-# sandbox, etc.). The Coder agent here runs as `coder` with HOME
-# = /home/coder. Without this symlink, those hallucinated calls
-# fail with `mkdir /home/user: permission denied` (write_file) or
-# the ENOENT-disguised-as-shell-error `fork/exec /usr/bin/sh: no
-# such file or directory` (execute, when chdir to a nonexistent
-# workdir fails).
+# Compatibility symlinks for hallucinated workdir / path values from
+# smaller / quantized LLMs (notably Llama 3.3 70B INT4 via RHAIIS
+# chatd). Smaller models skip the `pwd` probe + supply explicit
+# workdir/path args with values pulled from training-data priors.
+# Each Llama session picks a different one — observed so far:
+#   /home/user/...   — Anthropic computer-use sandbox, Modal, etc.
+#   /workspace/...   — Codespaces, Cloud Workstations
+#   /sandbox/...     — older Jupyter / tutor sandboxes
+#   /work/...        — CI examples
+# The Coder agent here runs as `coder` with HOME = /home/coder.
+# Without these symlinks, hallucinated paths fail with
+# `mkdir /<path>: permission denied` (write_file) or
+# ENOENT-disguised-as-shell-error `fork/exec /usr/bin/sh: no
+# such file or directory` (execute, when chdir to nonexistent
+# workdir).
 #
-# Bigger frontier models (Sonnet/Opus) probe with `pwd` first
-# and then omit `workdir` on subsequent calls, so they don't
-# care about this symlink. It's a graceful-degradation patch
-# for weaker models — never harms the stronger ones.
-RUN ln -s /home/${USER} /home/user
+# Frontier models (Sonnet/Opus) probe with `pwd` first and then
+# OMIT optional args, letting the tool's defaults take over — so
+# they don't care about these symlinks. Pure graceful-degradation
+# for weaker models. See docs/decisions.md §35 + the memory entry
+# llm_tool_args_probe_gap for the full diagnosis.
+RUN mkdir -p /home/${USER}/workspace \
+    && chgrp -R 0 /home/${USER}/workspace \
+    && chmod -R g=u /home/${USER}/workspace \
+    && ln -s /home/${USER} /home/user \
+    && ln -s /home/${USER}/workspace /workspace \
+    && ln -s /home/${USER} /sandbox \
+    && ln -s /home/${USER} /work
 
 # Make /etc/passwd group-writable so the entrypoint can append a passwd
 # entry for the SCC-injected UID at startup. Same pattern Red Hat uses
