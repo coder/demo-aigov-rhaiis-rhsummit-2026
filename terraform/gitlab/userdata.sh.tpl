@@ -113,7 +113,10 @@ prometheus_monitoring['enable'] = false   # we use OCP UWM Prom
 gitaly['gitconfig'] = [{ key: 'pack.threads', value: '1' }]
 
 # Keep the default GitLab Pages off (not needed for the booth flow).
-pages_external_url ''
+# NOTE: Don't set `pages_external_url ''` — Omnibus validates the URL
+# format *before* checking the enable flag, so an empty string blows
+# up the reconfigure with "must include a schema and FQDN". Just
+# disabling Pages is enough.
 gitlab_pages['enable'] = false
 
 # ── Container Registry ───────────────────────────────────────────
