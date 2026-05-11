@@ -552,6 +552,107 @@ if [ -f "$PLAN_MODE_FILE" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# RBAC: custom org role + OIDC group->role sync for Keycloak demo users
+# ---------------------------------------------------------------------------
+#
+# Goal: demo personas (alice/bob/carol/dave — all in Keycloak `developers`
+# group) get site-level `auditor` (read everything across the deployment)
+# PLUS an organization-scoped custom role that gives them workspace.create
+# + chat.*. The admins group (madmin) gets site `owner`.
+#
+# Why split site + org sync:
+#   - Site-level CODER_OIDC_USER_ROLE_MAPPING only accepts built-in role
+#     names. We use it for `auditor`/`owner`.
+#   - Custom roles are organization-scoped and configured per-org. The
+#     extra workspace+chat verbs need a custom org role + per-org OIDC
+#     role-sync settings PATCH.
+#   - Together: site auditor gives the read surface; org custom role
+#     adds the "create my own stuff" verbs.
+#
+# License requirement: OIDC role sync needs the Premium
+# `user_role_management` license entitlement. If the cluster's Coder
+# license doesn't include it, the role-sync env vars are silent no-ops
+# and the role creation API returns 402/403. The Job logs will surface
+# either condition; we don't fail the Job — model + prompt config still
+# need to apply.
+
+CODER_API="${CODER_URL%/}/api/v2"
+ROLE_NAME="developers-auditor-plus"
+ROLE_DISPLAY="Developers (Auditor + Create)"
+
+echo ""
+echo "==> Fetching default organization ID..."
+ORG_ID=$(curl -sf -H "$AUTH" "${CODER_API}/organizations/default" 2>/dev/null | jq -r '.id // empty')
+
+if [ -z "$ORG_ID" ]; then
+  echo "    SKIP — could not resolve default org (Coder may still be starting)."
+else
+  echo "    Default org: $ORG_ID"
+
+  ROLE_PAYLOAD=$(jq -n \
+    --arg name "$ROLE_NAME" \
+    --arg display "$ROLE_DISPLAY" \
+    --arg org "$ORG_ID" \
+    '{
+      name: $name,
+      organization_id: $org,
+      display_name: $display,
+      site_permissions: [],
+      user_permissions: [],
+      organization_member_permissions: [],
+      organization_permissions: [
+        {negate:false,resource_type:"audit_log",action:"read"},
+        {negate:false,resource_type:"connection_log",action:"read"},
+        {negate:false,resource_type:"template",action:"read"},
+        {negate:false,resource_type:"template",action:"view_insights"},
+        {negate:false,resource_type:"group",action:"read"},
+        {negate:false,resource_type:"group_member",action:"read"},
+        {negate:false,resource_type:"organization",action:"read"},
+        {negate:false,resource_type:"organization_member",action:"read"},
+        {negate:false,resource_type:"workspace",action:"create"},
+        {negate:false,resource_type:"workspace",action:"read"},
+        {negate:false,resource_type:"workspace",action:"start"},
+        {negate:false,resource_type:"workspace",action:"stop"},
+        {negate:false,resource_type:"workspace",action:"application_connect"},
+        {negate:false,resource_type:"workspace",action:"ssh"},
+        {negate:false,resource_type:"chat",action:"create"},
+        {negate:false,resource_type:"chat",action:"read"},
+        {negate:false,resource_type:"chat",action:"update"},
+        {negate:false,resource_type:"chat",action:"delete"}
+      ]
+    }')
+
+  echo "==> Upserting custom org role '${ROLE_NAME}'..."
+  # POST creates; PUT upserts. We always PUT so it's idempotent across
+  # Argo re-syncs — Coder accepts PUT on a non-existent role and creates
+  # it (`putOrgRoles` in enterprise/coderd/roles.go).
+  ROLE_HTTP=$(echo "$ROLE_PAYLOAD" | curl -s -o /tmp/role-resp.json -w "%{http_code}" \
+      -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+      --data-binary @- "${CODER_API}/organizations/${ORG_ID}/members/roles")
+  if [ "$ROLE_HTTP" = "200" ] || [ "$ROLE_HTTP" = "201" ]; then
+    echo "    OK (HTTP $ROLE_HTTP)"
+  elif [ "$ROLE_HTTP" = "402" ] || [ "$ROLE_HTTP" = "403" ]; then
+    echo "    SKIP — Coder license lacks FeatureCustomRoles (HTTP $ROLE_HTTP). $(cat /tmp/role-resp.json | jq -r '.message // .detail // empty')"
+  else
+    echo "    FAILED (HTTP $ROLE_HTTP): $(cat /tmp/role-resp.json)"
+  fi
+
+  echo "==> Configuring org OIDC role-sync mapping (developers -> ${ROLE_NAME})..."
+  SYNC_PAYLOAD=$(jq -n --arg role "$ROLE_NAME" \
+    '{field: "groups", mapping: {developers: [$role]}}')
+  SYNC_HTTP=$(echo "$SYNC_PAYLOAD" | curl -s -o /tmp/sync-resp.json -w "%{http_code}" \
+      -X PATCH -H "$AUTH" -H "Content-Type: application/json" \
+      --data-binary @- "${CODER_API}/organizations/${ORG_ID}/settings/idpsync/roles")
+  if [ "$SYNC_HTTP" = "200" ]; then
+    echo "    OK"
+  elif [ "$SYNC_HTTP" = "402" ] || [ "$SYNC_HTTP" = "403" ]; then
+    echo "    SKIP — Coder license lacks FeatureUserRoleManagement (HTTP $SYNC_HTTP)."
+  else
+    echo "    FAILED (HTTP $SYNC_HTTP): $(cat /tmp/sync-resp.json)"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
