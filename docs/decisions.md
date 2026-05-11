@@ -721,6 +721,37 @@ Each iteration plugged the observed gap. But on the fourth iteration (`da7955b8-
 - A failure pattern shows up on Sonnet or Opus that the default prompt mishandles. Then add ONE narrow rule, not eight.
 - vLLM ships a Llama variant with structurally better tool-call adherence (e.g., a Llama 3.3 instruct-tuned-for-tools quant). Re-test with full appendix at that point.
 
+## 35. Workspace image symlinks `/home/user` → `/home/coder` so Llama's hallucinated workdirs resolve
+
+**Context:** Watching Llama 3.3 70B INT4 drive a chatd sub-agent against an `agents-dev-ocp` workspace, every `execute` and `write_file` tool call set `workdir` (or path prefix) to `/home/user/workspace/<project>` and failed:
+- `write_file` → `mkdir /home/user: permission denied` (uid 1000830000 can't create `/home/user`)
+- `execute` → `fork/exec /usr/bin/sh: no such file or directory` (misleading — the shell exists; the failure is chdir to a nonexistent workdir, kernel returns ENOENT from `execve`, the Coder agent surfaces it as a shell-missing error)
+
+The workspace's HOME is `/home/coder` (verified via `oc exec` + the agent's own env). Llama picked `/home/user/...` from training-data priors — that path is common in sandbox configs (Anthropic computer-use, Modal, etc.). The chatd `execute` tool description (chattool/execute.go:80-82) just says "Working directory for the command" with no default hint — so when a model supplies one, it has to guess.
+
+**The knowledge gap behind the bug** (the structural difference, not a prompt fix):
+
+Bigger frontier models (Sonnet, Opus) succeed at this not because they "know" the right HOME, but because they:
+1. **Probe before assuming.** Opus 4.7's literal first action in a parallel test chat was `node --version && npm --version && pwd && ls`. It discovered `/home/coder` empirically.
+2. **Omit optional arguments by default.** Subsequent `execute` calls didn't carry `workdir` — and the chatd `WorkDir *string \`json:"workdir,omitempty"\`` definition causes the agent to fall back to its own cwd, which IS `/home/coder`.
+
+Llama-INT4 doesn't do either reliably. It skips the probe (no `pwd` first turn) and supplies `workdir` explicitly with a hallucinated value. Prompt-engineering this away is fragile (decision §34 documents three iterations of failed attempts to do exactly that).
+
+**Picked:** Structural fix in the workspace base image — `RUN ln -s /home/coder /home/user` in `coder-templates/images/ubi9-base-workspace/Dockerfile`. Wrong guesses transparently resolve to the right path. Sonnet/Opus unaffected (they don't pass `workdir`). Future weaker models or new quants that make the same mistake also work. Build-time, root context, no SCC issues at workspace runtime.
+
+Cost: one Dockerfile line + a `build-images.yml` GHA run (~5 min to rebuild + push ubi9-base + ubi9-node + re-pull on workspace start).
+
+**Why we didn't fix this upstream (yet):**
+- Patching chatd's `execute` tool to fall back to `$HOME` when `workdir` is missing OR points at a nonexistent path would help every consumer. File as an upstream issue post-event.
+- Updating the tool's `description` field to read `"Working directory for the command. Defaults to /home/coder; omit unless overriding"` would help models that read tool docs carefully (more frontier-class than Llama-INT4). Also upstream.
+- Symlink is the booth-grade workaround that doesn't require forking chatd.
+
+**Trigger to revisit:**
+- Upstream chatd lands a workdir-default fix — we can remove the symlink as cleanup.
+- Llama (or any future on-prem model) starts hallucinating a different path (`/workspace/...`, `/sandbox/...`, etc.). Add the symlink for each as observed; the cost is bounded.
+
+**Related decision:** §34 (default-only system prompt — don't fight this at the prompt layer).
+
 ---
 
 ## Decisions explicitly deferred to post-event
