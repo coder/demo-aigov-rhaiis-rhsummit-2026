@@ -238,8 +238,14 @@ spec:
             # /api/v4/user, which 403s without read_user. The default
             # Coder behavior is to request only `write_repository`,
             # which is why explicit configuration is required here.
+            #
+            # IMPORTANT: separator is a SPACE, not a comma. Coder
+            # forwards this value verbatim into the OAuth `scope=`
+            # parameter and RFC 6749 mandates space-separated scopes.
+            # Comma-separated values produce GitLab's
+            # "requested scope is invalid, unknown, or malformed".
             - name: CODER_EXTERNAL_AUTH_0_SCOPES
-              value: "read_user,read_repository,write_repository"
+              value: "read_user read_repository write_repository"
 
             # ── External provisioner mode ───────────────────────────────
             # Disable in-process provisioners; the coder-provisioner
