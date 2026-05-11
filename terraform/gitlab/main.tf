@@ -64,7 +64,7 @@ resource "aws_security_group" "gitlab" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTP - Let's Encrypt HTTP-01 challenge + initial setup"
+    description = "HTTP - Lets Encrypt HTTP-01 challenge + initial setup"
   }
 
   # SSH for operators. Default is wide-open; narrow in tfvars.
@@ -123,6 +123,12 @@ resource "aws_instance" "gitlab" {
   vpc_security_group_ids = [aws_security_group.gitlab.id]
   key_name               = var.ssh_key_name
   iam_instance_profile   = null # no IAM role for now; GitLab doesn't need AWS API access
+
+  # The cluster VPC's "public" subnets don't auto-assign public IPs
+  # by default (map_public_ip_on_launch=false on the subnet), so set
+  # it on the instance. R53 records below reference public_ip and
+  # require a non-null value at apply time.
+  associate_public_ip_address = true
 
   # Bigger root volume than default — GitLab Omnibus + Docker images
   # + Let's Encrypt + runners all share root.
