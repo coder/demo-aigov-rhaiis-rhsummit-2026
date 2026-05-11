@@ -86,6 +86,15 @@ spec:
             - "8000"
             - --max-model-len
             - "32768"
+            # Cap concurrent sequences to ~the realistic KV-cache budget.
+            # vLLM's default of 256 lets the scheduler accept way more
+            # requests than the GPU can actually serve at 32K, then
+            # preempts mid-decode (expensive). 8 matches the ~9-seq
+            # capacity the weight-split math allows above and gives
+            # spawn_agent fan-out predictable per-sequence latency
+            # instead of death-by-preemption under load.
+            - --max-num-seqs
+            - "8"
             - --disable-log-requests
           ports:
             - name: http

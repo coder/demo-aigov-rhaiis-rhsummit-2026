@@ -1,0 +1,198 @@
+# vllm-planner-tp-v1 — V1 ENGINE TEST deployment (parallel to production)
+#
+# Same node, same model, same TP-2 sharding as vllm-planner-tp BUT with:
+#   - V1 engine enabled (no VLLM_USE_V1=0 forcing)
+#   - cudagraphs ON (no --enforce-eager)
+#   - newer image (quay.io/modh/vllm:rhoai-2.22-cuda)
+#
+# Purpose: see if the V1 deadlock that bit us on rhoai-2.20 + vLLM 0.8.4
+# (decisions §31) is resolved in newer RHAIIS images. If yes, this
+# config is 2-3x faster per sequence due to cudagraphs + better V1
+# scheduling, which makes spawn_agent fan-out viable.
+#
+# Hardware split on g6e.12xlarge (4× L40S):
+#   - vllm-planner-tp  : 2 GPUs (production Llama 70B INT4, V0 + eager)
+#   - vllm-planner-tp-v1 : 2 GPUs (this — V1 test)
+#   - Total: 4 GPUs used, $0 marginal hardware cost.
+#
+# Service endpoint: http://vllm-planner-tp-v1.ocp-ai.svc.cluster.local:8000/v1
+# (distinct from the production Service; chatd stays pointed at the
+# production one).
+#
+# Test plan:
+#   1. Wait for /v1/models 200 (cold start ~20 min — same model weights).
+#   2. Hit /v1/completions with a 200-token prompt; check that it
+#      DOES NOT silently hang for 5+ min. V1 hanging here = same
+#      deadlock; rollback.
+#   3. Hit /v1/chat/completions with a tool_call prompt to verify
+#      structured output works under V1.
+#   4. Fire 4 concurrent requests; measure per-token throughput vs the
+#      V0 deployment under the same load. If V1 is faster, plan
+#      cutover (just swap chatd's openai-compat base_url).
+#
+# Rollback if deadlock returns: scale to 0 + leave manifest in git for
+# the NEXT re-test (e.g. rhoai-2.23 / vLLM ≥0.9 ships).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-planner-tp-v1
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner-tp-v1
+    app.kubernetes.io/part-of: coder-aigov-demo
+    coder.com/lifecycle: experiment
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  progressDeadlineSeconds: 3600
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+      app.kubernetes.io/component: planner-tp-v1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm
+        app.kubernetes.io/component: planner-tp-v1
+    spec:
+      imagePullSecrets:
+        - name: redhat-pull-secret
+      # Co-tenant of vllm-planner-tp on the g6e.12xlarge — the node has
+      # 4 L40S; we request 2 here, leaving the other 2 to production.
+      nodeSelector:
+        nvidia.com/gpu.product: NVIDIA-L40S
+        gpu-purpose: tensor-parallel
+      containers:
+        - name: vllm
+          # rhoai-2.22 — two minor RHAIIS releases newer than the
+          # rhoai-2.20-cuda image production runs. Picks up vLLM ≥0.9
+          # which (per upstream changelog) addresses several V1 IPC
+          # hang reports.
+          image: quay.io/modh/vllm:rhoai-2.22-cuda
+          imagePullPolicy: Always
+          args:
+            - --model
+            - RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16
+            - --tool-call-parser
+            - llama3_json
+            - --enable-auto-tool-choice
+            # NO --enforce-eager — V1 + cudagraphs is the whole point.
+            - --tensor-parallel-size
+            - "2"
+            - --gpu-memory-utilization
+            - "0.95"
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --max-model-len
+            - "32768"
+            - --max-num-seqs
+            - "8"
+            - --disable-log-requests
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: HF_HOME
+              value: /tmp/hf-cache
+            - name: HF_HUB_OFFLINE
+              value: "0"
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            - name: VLLM_PORT
+              value: "8000"
+            # NO VLLM_USE_V1=0 — let it default to V1 (newer vLLM
+            # versions default V1). If it deadlocks like 0.8.4 did,
+            # the manifest stays in git for the next iteration.
+          resources:
+            requests:
+              cpu: "4"
+              memory: "32Gi"
+              nvidia.com/gpu: "2"
+            limits:
+              cpu: "16"
+              memory: "64Gi"
+              nvidia.com/gpu: "2"
+          startupProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            # 30-min runway. If still failing after this, deadlock is
+            # back — manual scale-down + inspect logs.
+            failureThreshold: 180
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 4
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /tmp/hf-cache
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: 80Gi
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-planner-tp-v1
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner-tp-v1
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner-tp-v1
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm-planner-tp-v1
+  namespace: ocp-ai
+  labels:
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/component: planner-tp-v1
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+      app.kubernetes.io/component: planner-tp-v1
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
