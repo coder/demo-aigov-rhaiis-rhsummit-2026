@@ -142,14 +142,18 @@ RUN mkdir -p /home/${USER}/workspace \
     && ln -s /home/${USER} /sandbox \
     && ln -s /home/${USER} /work
 
-# Similar graceful-degradation symlink for `python` → `python3`. The
-# UBI9 base ships python3 + python3.11 but not the unversioned
-# `python` binary; smaller LLMs (Llama-INT4) emit `python foo.py`
-# from training-data priors and hit "python: command not found".
-# Same pattern as the workdir symlinks: make wrong guesses work
-# transparently. Sonnet/Opus usually call `python3` directly, so
-# this is a no-op for them.
-RUN ln -sf /usr/bin/python3 /usr/local/bin/python
+# Similar graceful-degradation symlinks for `python` → `python3` and
+# `pip` / `pip3` → `pip3.11`. UBI9 ships python3.11 + python3.11-pip
+# but not the unversioned `python` binary AND not the major-version
+# `pip3` shim. Smaller LLMs (Llama-INT4) emit `python foo.py` /
+# `pip install ...` / `pip3 install ...` from training-data priors
+# and hit "command not found". Same pattern as the workdir symlinks:
+# make wrong guesses work transparently. Sonnet/Opus usually call
+# `python3` + `python3 -m pip` directly, so these are no-ops for
+# them.
+RUN ln -sf /usr/bin/python3 /usr/local/bin/python \
+    && ln -sf /usr/bin/pip3.11 /usr/local/bin/pip3 \
+    && ln -sf /usr/bin/pip3.11 /usr/local/bin/pip
 
 # Make /etc/passwd group-writable so the entrypoint can append a passwd
 # entry for the SCC-injected UID at startup. Same pattern Red Hat uses
