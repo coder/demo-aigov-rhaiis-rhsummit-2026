@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,17 +14,19 @@ import (
 
 	"github.com/coder/demo-aigov-rhaiis-rhsummit-2026/services/bridge/internal/coder"
 	"github.com/coder/demo-aigov-rhaiis-rhsummit-2026/services/bridge/internal/config"
+	"github.com/coder/demo-aigov-rhaiis-rhsummit-2026/services/bridge/internal/gitlab"
 	"github.com/coder/demo-aigov-rhaiis-rhsummit-2026/services/bridge/internal/webhook"
 )
 
 type Handler struct {
 	cfg    *config.Config
 	coder  *coder.Client
+	gitlab *gitlab.Client
 	logger *slog.Logger
 }
 
-func New(cfg *config.Config, c *coder.Client, logger *slog.Logger) *Handler {
-	return &Handler{cfg: cfg, coder: c, logger: logger}
+func New(cfg *config.Config, c *coder.Client, gl *gitlab.Client, logger *slog.Logger) *Handler {
+	return &Handler{cfg: cfg, coder: c, gitlab: gl, logger: logger}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -82,7 +85,7 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		"action", p.ObjectAttributes.Action,
 		"iid", p.ObjectAttributes.IID,
 		"project", p.Project.PathWithNamespace,
-		"username", p.User.Username,
+		"actor", p.User.Username,
 	)
 
 	if ok, reason := p.IsActionable(); !ok {
@@ -91,32 +94,44 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmplName := webhook.ExtractTemplate(p.Labels)
-	if tmplName == "" {
-		log.Info("noop: no template label")
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "action": "noop", "reason": "no template label"})
+	// Both conditions must be true for spawn: a coder-* label AND an
+	// assignee. Either alone is a noop — order doesn't matter, whichever
+	// webhook event satisfies both conditions triggers the spawn. Repeat
+	// events after that hit the workspace-exists idempotency check below.
+	mode := webhook.ExtractMode(p.Labels)
+	if mode == webhook.ModeNone {
+		log.Info("noop: no coder-{hitl,agent} label")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "action": "noop",
+			"reason": "no coder-{hitl,agent} label",
+		})
 		return
 	}
-	log = log.With("template", tmplName)
-
-	if p.User.Username == "" {
-		log.Warn("payload missing user.username")
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "payload missing user.username"})
+	assignee := p.FirstAssignee()
+	if assignee == "" {
+		log.Info("noop: no assignee (author is typically a PM, not the worker)")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "action": "noop",
+			"reason": "no assignee — assign the issue to trigger spawn",
+		})
 		return
 	}
+	log = log.With("mode", string(mode), "assignee", assignee)
 
-	wsName := webhook.WorkspaceName(p.User.Username, p.ObjectAttributes.IID)
+	wsName := webhook.WorkspaceName(assignee, p.ObjectAttributes.IID)
 	log = log.With("workspace", wsName)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if _, err := h.coder.GetUser(ctx, p.User.Username); err != nil {
+	// 1. Confirm the assignee exists in Coder.
+	user, err := h.coder.GetUser(ctx, assignee)
+	if err != nil {
 		if errors.Is(err, coder.ErrNotFound) {
 			log.Warn("coder user not found")
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 				"ok":    false,
-				"error": "coder user not found: " + p.User.Username,
+				"error": "coder user not found: " + assignee + " — sign in to Coder via Keycloak first",
 			})
 			return
 		}
@@ -124,7 +139,8 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existing, err := h.coder.GetWorkspaceByName(ctx, p.User.Username, wsName); err == nil {
+	// 2. Already-created idempotency check.
+	if existing, err := h.coder.GetWorkspaceByName(ctx, assignee, wsName); err == nil {
 		log.Info("workspace exists, no-op", "workspace_id", existing.ID)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":             true,
@@ -138,6 +154,8 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3. Resolve the template. Default to cfg.DefaultTemplate; project-
+	// level override (GitLab CI variable / .coder file) is a TODO.
 	templates, err := h.coder.ListTemplates(ctx)
 	if err != nil {
 		h.forwardCoderError(w, log, "list templates", err)
@@ -145,21 +163,22 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	var tmpl *coder.Template
 	for i := range templates {
-		if templates[i].Name == tmplName {
+		if templates[i].Name == h.cfg.DefaultTemplate {
 			tmpl = &templates[i]
 			break
 		}
 	}
 	if tmpl == nil {
-		log.Warn("template not found in coder")
+		log.Warn("default template not found", "template", h.cfg.DefaultTemplate)
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 			"ok":    false,
-			"error": "template not found: " + tmplName,
+			"error": "default template not found in coder: " + h.cfg.DefaultTemplate,
 		})
 		return
 	}
 
-	created, err := h.coder.CreateWorkspace(ctx, p.User.Username, coder.CreateWorkspaceRequest{
+	// 4. Create the workspace.
+	created, err := h.coder.CreateWorkspace(ctx, assignee, coder.CreateWorkspaceRequest{
 		TemplateID: tmpl.ID,
 		Name:       wsName,
 	})
@@ -167,15 +186,95 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		h.forwardCoderError(w, log, "create workspace", err)
 		return
 	}
+	wsURL := h.cfg.CoderPublicURL + "/@" + assignee + "/" + created.Name
+	log = log.With("workspace_id", created.ID)
+	log.Info("workspace created")
 
-	wsURL := h.cfg.CoderPublicURL + "/@" + p.User.Username + "/" + created.Name
-	log.Info("workspace created", "workspace_id", created.ID)
-	writeJSON(w, http.StatusCreated, map[string]any{
+	// 5. Compose the issue URL — prefer the payload-provided one, fall
+	// back to constructed.
+	issueURL := p.ObjectAttributes.URL
+	if issueURL == "" {
+		issueURL = gitlab.IssueURL(p.Project.WebURL, p.ObjectAttributes.IID)
+	}
+
+	resp := map[string]any{
 		"ok":             true,
 		"action":         "created",
+		"mode":           string(mode),
 		"workspace_name": created.Name,
 		"workspace_url":  wsURL,
+	}
+
+	// 6. For coder-agent, create a chat owned by the assignee.
+	if mode == webhook.ModeAgent {
+		chatURL, chatErr := h.spawnAgentChat(ctx, assignee, created.OrganizationID, created.ID, issueURL, log)
+		if chatErr != nil {
+			// Workspace created but chat failed — surface in the response
+			// so the operator can see what happened. Don't fail the request
+			// since the workspace is usable.
+			log.Error("chat creation failed", "err", chatErr)
+			resp["chat_error"] = chatErr.Error()
+		} else {
+			resp["chat_url"] = chatURL
+		}
+	}
+
+	// 7. Comment back on the GitLab issue.
+	go h.commentBack(p.Project.ID, p.ObjectAttributes.IID, mode, wsURL, resp["chat_url"], resp["chat_error"], log)
+
+	_ = user // keep the user lookup result for future use (display name in comments, etc.)
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// spawnAgentChat mints a per-user token for the assignee (admin token can't
+// create chats with a different owner — chatd hardcodes owner_id from the
+// caller), then POSTs the chat with the issue-URL seed prompt.
+func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspaceID, issueURL string, log *slog.Logger) (string, error) {
+	userToken, err := h.coder.MintUserToken(ctx, username, 3600) // 1h plenty for chat create
+	if err != nil {
+		return "", fmt.Errorf("mint user token: %w", err)
+	}
+	chat, err := h.coder.CreateChat(ctx, userToken, coder.CreateChatRequest{
+		OrganizationID: orgID,
+		WorkspaceID:    workspaceID,
+		Content: []coder.ChatInputPart{{
+			Type: "text",
+			Text: "Go work on this GitLab issue: " + issueURL +
+				". Investigate the request, make the needed changes in the workspace's repo, " +
+				"and when you're done push a branch and open a Merge Request.",
+		}},
 	})
+	if err != nil {
+		return "", fmt.Errorf("create chat: %w", err)
+	}
+	log.Info("chat created", "chat_id", chat.ID)
+	return h.cfg.CoderPublicURL + "/agents/chats/" + chat.ID, nil
+}
+
+// commentBack posts a comment back on the GitLab issue. Best-effort, fires
+// in a goroutine; logs failures but doesn't surface them in the HTTP response.
+func (h *Handler) commentBack(projectID, iid int, mode webhook.Mode, wsURL string, chatURL, chatErr any, log *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var body string
+	switch mode {
+	case webhook.ModeHITL:
+		body = "🛠️ Workspace ready: " + wsURL + "\n\n_Open it and start working._"
+	case webhook.ModeAgent:
+		body = "🤖 Coder agent dispatched.\n\n- **Workspace:** " + wsURL
+		if s, ok := chatURL.(string); ok {
+			body += "\n- **Chat:** " + s
+		}
+		if s, ok := chatErr.(string); ok {
+			body += "\n- ⚠️ Chat creation failed: " + s
+		}
+	}
+	body += "\n\n_Posted by the GitLab → Coder bridge._"
+
+	if err := h.gitlab.PostIssueComment(ctx, projectID, iid, body); err != nil {
+		log.Error("issue comment failed", "err", err)
+	}
 }
 
 func (h *Handler) forwardCoderError(w http.ResponseWriter, log *slog.Logger, op string, err error) {
@@ -184,7 +283,6 @@ func (h *Handler) forwardCoderError(w http.ResponseWriter, log *slog.Logger, op 
 		log.Error("coder api error", "op", op, "status", apiErr.Status, "body", string(apiErr.Body))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(apiErr.Status)
-		// Pass through body verbatim if it's valid JSON; otherwise wrap.
 		if json.Valid(apiErr.Body) {
 			_, _ = w.Write(apiErr.Body)
 			return
@@ -214,3 +312,4 @@ func newRequestID() string {
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
+

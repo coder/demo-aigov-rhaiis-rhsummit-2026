@@ -81,30 +81,46 @@ Multiple projects? Comma-separated: `GITLAB_DEMO_PROJECTS="alice/foo,bob/bar"`.
 
 ## Then: the demo loop
 
-1. Alice opens a GitLab issue in `alice/sample-app`.
-2. She applies one label:
-   - `template:demo-ai-gov-firewall-ocp` → workspace with egress
-     restricted to Coder's AI Bridge (governed AI access)
-   - `template:demo-ai-gov-no-firewall-ocp` → workspace with open
-     egress to public LLM APIs (the "ungoverned" story)
-   - Or any other `template:<name>` where `<name>` is a valid Coder
-     template — `agents-dev-ocp`, `ai-dev-ocp`, `openshift-ai-gov`.
-3. GitLab fires the webhook → bridge looks up alice's Coder user,
-   looks up the template by name, POSTs to
-   `/api/v2/users/alice/workspaces` with a deterministic workspace
-   name `alice-gl<issue-iid>` (e.g. `alice-gl42`).
-4. Coder spins the workspace. Alice clicks through to it from the
-   Coder UI; bridge response also carries the workspace URL.
-5. Alice authenticates to GitLab inside the workspace (step 4 above)
-   once per workspace lifetime.
-6. Same issue re-triggered → same workspace name → bridge no-ops.
+The bridge requires **BOTH** of these on an issue before it spawns
+anything; either alone is a no-op. Whichever event (label-add OR
+assignee-add) is applied second triggers the spawn — order doesn't
+matter.
+
+1. PM (or anyone) opens a GitLab issue in `alice/sample-app`.
+2. **Assign** the issue to a Keycloak persona (alice, bob, carol, dave).
+   The assignee — not the author — owns the resulting workspace and
+   chat. (Rationale: authors are typically PMs, not the people who
+   do the work.)
+3. **Apply one label**:
+   - `coder-hitl` → "human in the loop". Bridge spawns a workspace
+     for the assignee; assignee opens it and works manually.
+   - `coder-agent` → "agent". Bridge spawns a workspace AND creates
+     a Coder Agents chat owned by the assignee, pre-seeded with
+     *"Go work on this GitLab issue: <url>. When done, push a branch
+     and open a Merge Request."* Llama 70B then drives the chat
+     autonomously inside the workspace.
+   - Both labels? `coder-agent` wins.
+4. Bridge posts a comment back on the issue with the workspace URL
+   (always) and chat URL (coder-agent only).
+5. Workspace name format: `{assignee}-gl{issue-iid}` (deterministic,
+   so re-triggers on the same issue no-op via the workspace-exists
+   check).
+6. Inside the workspace, assignee clicks "Authenticate with GitLab"
+   once to wire git push (Coder external_auth).
+
+**Template selection**: the bridge uses the `DEFAULT_TEMPLATE` env
+on its Deployment (currently `ai-dev-ocp`). Per-project override via
+GitLab CI variable or `.coder` file is a future enhancement.
 
 ## When something breaks
 
 | Bridge response | What happened | Fix |
 |---|---|---|
-| `200 {"action":"noop","reason":"no template label"}` | Issue doesn't carry a `template:` label | Add one |
-| `422 {"error":"coder user not found"}` | Persona hasn't signed in to Coder yet | Step 1 above |
-| `422 {"error":"template not found"}` | Label references a template that doesn't exist in Coder | Check `template:<name>` against the templates list in Coder admin |
-| `401 {"error":"unauthorized"}` | Webhook secret mismatch | Re-run the webhook registration script — it'll rotate the token in place |
-| Workspace boots but `git push` fails | GitLab external_auth not connected | Step 4 above |
+| `200 {"action":"noop","reason":"no coder-{hitl,agent} label"}` | Issue is missing the trigger label | Add `coder-hitl` or `coder-agent` |
+| `200 {"action":"noop","reason":"no assignee — assign the issue to trigger spawn"}` | Label present but no assignee | Assign the issue to a Keycloak persona |
+| `200 {"action":"noop","reason":"workspace exists"}` | Re-trigger of same issue | Working as designed; idempotent |
+| `422 {"error":"coder user not found"}` | Assignee hasn't signed in to Coder yet | Persona needs to log in once via Keycloak |
+| `422 {"error":"default template not found"}` | DEFAULT_TEMPLATE env points at a non-existent template | Check `oc -n coder logs deploy/bridge` for the name being looked up; either push the template via `coder templates push` or update the env |
+| `401 {"error":"unauthorized"}` | Webhook secret mismatch | Re-run `./scripts/gitlab-register-bridge-webhook.sh` |
+| `chat_error` in response, workspace_url still present | Coder chat creation failed (likely vLLM unreachable or chat API change) | Workspace is usable; check `bridge` logs for the chat_error detail |
+| Workspace boots but `git push` fails | GitLab external_auth not connected | Click "Authenticate with GitLab (Demo)" inside the workspace |

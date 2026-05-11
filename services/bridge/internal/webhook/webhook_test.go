@@ -2,27 +2,38 @@ package webhook
 
 import "testing"
 
-func TestExtractTemplate(t *testing.T) {
+func TestExtractMode(t *testing.T) {
 	tests := []struct {
 		name   string
 		labels []Label
-		want   string
+		want   Mode
 	}{
-		{"no labels", nil, ""},
-		{"no template label", []Label{{Title: "bug"}, {Title: "priority:high"}}, ""},
-		{"basic match", []Label{{Title: "template:python-data"}}, "python-data"},
-		{"first match wins", []Label{{Title: "template:rust"}, {Title: "template:go"}}, "rust"},
-		{"trims whitespace", []Label{{Title: "  template:web  "}}, "web"},
-		{"case sensitive prefix", []Label{{Title: "Template:foo"}}, ""},
-		{"empty capture", []Label{{Title: "template:"}}, ""},
+		{"no labels", nil, ModeNone},
+		{"unrelated", []Label{{Title: "bug"}, {Title: "priority:high"}}, ModeNone},
+		{"hitl only", []Label{{Title: "coder-hitl"}}, ModeHITL},
+		{"agent only", []Label{{Title: "coder-agent"}}, ModeAgent},
+		{"both → agent wins", []Label{{Title: "coder-hitl"}, {Title: "coder-agent"}}, ModeAgent},
+		{"trims whitespace", []Label{{Title: "  coder-agent  "}}, ModeAgent},
+		{"prefix-only doesn't match", []Label{{Title: "coder-hitl-x"}}, ModeNone},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ExtractTemplate(tc.labels)
+			got := ExtractMode(tc.labels)
 			if got != tc.want {
 				t.Errorf("got %q want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFirstAssignee(t *testing.T) {
+	var empty Payload
+	if got := empty.FirstAssignee(); got != "" {
+		t.Errorf("empty assignees should return empty string, got %q", got)
+	}
+	p := Payload{Assignees: []Assignee{{Username: "alice"}, {Username: "bob"}}}
+	if got := p.FirstAssignee(); got != "alice" {
+		t.Errorf("first assignee should win, got %q", got)
 	}
 }
 

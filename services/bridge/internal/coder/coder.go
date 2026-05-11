@@ -41,12 +41,47 @@ type Template struct {
 }
 
 type Workspace struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	OwnerID      string `json:"owner_id"`
-	OwnerName    string `json:"owner_name"`
-	TemplateID   string `json:"template_id"`
-	TemplateName string `json:"template_name"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	OwnerID        string `json:"owner_id"`
+	OwnerName      string `json:"owner_name"`
+	OrganizationID string `json:"organization_id"`
+	TemplateID     string `json:"template_id"`
+	TemplateName   string `json:"template_name"`
+}
+
+// MintTokenRequest creates a per-user API token; admin-token authenticated
+// caller can mint on behalf of {user}. POST /api/v2/users/{user}/keys/tokens.
+type MintTokenRequest struct {
+	TokenName string `json:"token_name"`
+	Lifetime  int64  `json:"lifetime"` // nanoseconds
+	Scope     string `json:"scope,omitempty"`
+}
+
+type MintTokenResponse struct {
+	Key string `json:"key"`
+}
+
+// CreateChatRequest body for POST /api/experimental/chats.
+// Wire format from codersdk.CreateChatRequest (subagent research).
+type CreateChatRequest struct {
+	OrganizationID string          `json:"organization_id"`
+	WorkspaceID    string          `json:"workspace_id,omitempty"`
+	Content        []ChatInputPart `json:"content"`
+	ClientType     string          `json:"client_type,omitempty"`
+}
+
+type ChatInputPart struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type Chat struct {
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	OwnerID        string `json:"owner_id"`
+	WorkspaceID    string `json:"workspace_id"`
+	Title          string `json:"title"`
 }
 
 type CreateWorkspaceRequest struct {
@@ -68,6 +103,13 @@ func (e *APIError) Error() string {
 var ErrNotFound = errors.New("coder: not found")
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
+	return c.doWithToken(ctx, c.token, method, path, body, out)
+}
+
+// doWithToken is like do but uses the supplied token instead of the client's
+// admin token. Used for chat creation calls that must run as the target user
+// (chatd hardcodes owner_id = caller's user; see decisions §32 followup).
+func (c *Client) doWithToken(ctx context.Context, token, method, path string, body any, out any) error {
 	var reader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -80,7 +122,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Coder-Session-Token", c.token)
+	req.Header.Set("Coder-Session-Token", token)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -140,6 +182,36 @@ func (c *Client) CreateWorkspace(ctx context.Context, username string, req Creat
 		return nil, err
 	}
 	return &w, nil
+}
+
+// MintUserToken creates a short-lived API token for {username} on behalf of
+// the admin caller. Used to then create a chat as that user.
+func (c *Client) MintUserToken(ctx context.Context, username string, lifetimeSeconds int64) (string, error) {
+	req := MintTokenRequest{
+		TokenName: "bridge-jit-" + fmt.Sprint(time.Now().UnixNano()),
+		Lifetime:  lifetimeSeconds * int64(time.Second),
+	}
+	var resp MintTokenResponse
+	if err := c.do(ctx, http.MethodPost,
+		"/api/v2/users/"+url.PathEscape(username)+"/keys/tokens", req, &resp); err != nil {
+		return "", err
+	}
+	return resp.Key, nil
+}
+
+// CreateChat creates a new chat session AS the supplied user (uses userToken,
+// NOT the admin token — chatd hardcodes owner_id = caller's user). Returns
+// the chat ID.
+func (c *Client) CreateChat(ctx context.Context, userToken string, req CreateChatRequest) (*Chat, error) {
+	if req.ClientType == "" {
+		req.ClientType = "api"
+	}
+	var chat Chat
+	if err := c.doWithToken(ctx, userToken, http.MethodPost,
+		"/api/experimental/chats", req, &chat); err != nil {
+		return nil, err
+	}
+	return &chat, nil
 }
 
 // Ping checks Coder reachability for readiness probes.

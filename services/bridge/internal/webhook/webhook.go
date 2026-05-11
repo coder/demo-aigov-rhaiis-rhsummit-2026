@@ -12,40 +12,75 @@ import (
 // Full schema: https://docs.gitlab.com/ee/user/project/integrations/webhook_events.html#issue-events
 type Payload struct {
 	ObjectKind string `json:"object_kind"`
-	// User is the actor who triggered the webhook (top-level field per GitLab docs).
-	// We use this as the workspace owner since GitLab usernames == Coder usernames via Keycloak.
+	// User is the actor who triggered the webhook. Not necessarily the
+	// assignee — issue authors are often PMs. We do NOT use this as the
+	// workspace owner; we use the assignee instead.
 	User struct {
 		Username string `json:"username"`
 	} `json:"user"`
 	Project struct {
+		ID                int    `json:"id"`
 		PathWithNamespace string `json:"path_with_namespace"`
+		WebURL            string `json:"web_url"`
 	} `json:"project"`
 	ObjectAttributes struct {
 		IID    int    `json:"iid"`
 		Action string `json:"action"`
 		Title  string `json:"title"`
 		State  string `json:"state"`
+		URL    string `json:"url"`
 	} `json:"object_attributes"`
+	// Top-level assignees list. GitLab issues can have multiple
+	// assignees; we use the first one as the workspace owner.
+	Assignees []Assignee `json:"assignees"`
 	// Labels appear at top-level and under object_attributes; we use top-level since
 	// it's the canonical list per docs.
 	Labels []Label `json:"labels"`
+}
+
+type Assignee struct {
+	Username string `json:"username"`
+	Name     string `json:"name"`
 }
 
 type Label struct {
 	Title string `json:"title"`
 }
 
-var templateLabelRE = regexp.MustCompile(`^template:(.+)$`)
+// Mode is the action the bridge should take for an issue.
+type Mode string
 
-// ExtractTemplate returns the template name from the first matching label, or "" if none.
-func ExtractTemplate(labels []Label) string {
+const (
+	ModeNone  Mode = ""
+	ModeHITL  Mode = "coder-hitl"  // create workspace, owner opens it
+	ModeAgent Mode = "coder-agent" // create workspace + autonomous chat
+)
+
+// ExtractMode scans labels for `coder-hitl` or `coder-agent`. If both are
+// present, agent wins (more capable). Returns ModeNone if neither is set.
+func ExtractMode(labels []Label) Mode {
+	var hitl bool
 	for _, l := range labels {
-		m := templateLabelRE.FindStringSubmatch(strings.TrimSpace(l.Title))
-		if len(m) == 2 {
-			return strings.TrimSpace(m[1])
+		t := strings.TrimSpace(l.Title)
+		switch t {
+		case string(ModeAgent):
+			return ModeAgent
+		case string(ModeHITL):
+			hitl = true
 		}
 	}
-	return ""
+	if hitl {
+		return ModeHITL
+	}
+	return ModeNone
+}
+
+// FirstAssignee returns the username of the first assignee, or "" if none.
+func (p *Payload) FirstAssignee() string {
+	if len(p.Assignees) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(p.Assignees[0].Username)
 }
 
 var allowedActions = map[string]bool{

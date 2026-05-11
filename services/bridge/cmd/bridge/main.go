@@ -12,6 +12,7 @@ import (
 
 	"github.com/coder/demo-aigov-rhaiis-rhsummit-2026/services/bridge/internal/coder"
 	"github.com/coder/demo-aigov-rhaiis-rhsummit-2026/services/bridge/internal/config"
+	"github.com/coder/demo-aigov-rhaiis-rhsummit-2026/services/bridge/internal/gitlab"
 	"github.com/coder/demo-aigov-rhaiis-rhsummit-2026/services/bridge/internal/handler"
 )
 
@@ -27,9 +28,10 @@ func main() {
 	slog.SetDefault(logger)
 
 	coderClient := coder.New(cfg.CoderURL, cfg.CoderToken, 15*time.Second)
+	gitlabClient := gitlab.New(cfg.GitLabAPIURL, cfg.GitLabPAT, 10*time.Second)
 
 	mux := http.NewServeMux()
-	h := handler.New(cfg, coderClient, logger)
+	h := handler.New(cfg, coderClient, gitlabClient, logger)
 	h.Register(mux)
 
 	srv := &http.Server{

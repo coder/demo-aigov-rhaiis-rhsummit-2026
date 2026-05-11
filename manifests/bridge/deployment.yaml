@@ -68,6 +68,18 @@ spec:
                 secretKeyRef:
                   name: bridge-webhook-secret
                   key: token
+            - name: GITLAB_API_URL
+              value: "https://gitlab.rhsummit.coderdemo.io/api/v4"
+            - name: GITLAB_BRIDGE_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: gitlab-bridge-pat
+                  key: token
+            # Default Coder template name to use when an issue triggers.
+            # Project-level override via GitLab CI var / .coder file is
+            # a future enhancement.
+            - name: DEFAULT_TEMPLATE
+              value: "ai-dev-ocp"
             - name: LOG_LEVEL
               value: "info"
           securityContext:
