@@ -1,0 +1,41 @@
+# Keycloak demo-users RBAC.
+#
+# Binds the OIDC `developers` group (from the Keycloak `demo` realm)
+# to the built-in cluster-reader ClusterRole. Demo personas can SEE
+# everything (dashboards, workloads, configmaps, events, audit log,
+# cluster CRs) but cannot mutate the cluster.
+#
+# How group resolution works:
+#   The OAuth/cluster CR's `openID.claims.groups: [groups]` mapping
+#   surfaces the user's Keycloak `groups` claim as the user's
+#   OpenShift identity-time group membership. At authz time, OCP's
+#   RBAC evaluator matches `subjects[].name: developers` against
+#   that claim directly — no separate `Group` resource needed in
+#   `user.openshift.io/v1` (those are only required if you manage
+#   group membership manually).
+#
+# Admin-tier elevation for the Keycloak `admins` group is handled
+# separately by manifests/cluster-config/cluster-admin-binding.yaml
+# (which already gives cluster-admin to the GitHub `admin` team and
+# can be extended to the OIDC `admins` group if/when we want
+# Keycloak-only admins).
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: keycloak-developers-cluster-reader
+  labels:
+    app.kubernetes.io/part-of: identity-pivot
+    app.kubernetes.io/component: keycloak-rbac
+  annotations:
+    # Pin sync order so this binding lands AFTER the OAuth CR change
+    # (otherwise the `developers` group reference is meaningless).
+    argocd.argoproj.io/sync-wave: "10"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-reader
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: developers
