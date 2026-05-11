@@ -43,7 +43,14 @@ fi
 
 REDIRECT_URI="${1:-https://coder.apps.cluster.rhsummit.coderdemo.io/external-auth/gitlab/callback}"
 APP_NAME="coder-workspace-external-auth"
-SCOPES="read_user read_repository write_repository api"
+# Scopes must be a SUPERSET of what CODER_EXTERNAL_AUTH_0_SCOPES
+# requests — GitLab rejects /oauth/authorize with "invalid scope" if
+# any requested scope isn't in this list. See docs/decisions.md §32.
+#  - api              : full API, covers /oauth/token/info validate
+#  - write_repository : git push to GitLab repos
+#  - read_registry    : pull from registry.gitlab.<base_domain>
+#  - write_registry   : push to registry.gitlab.<base_domain>
+SCOPES="api write_repository read_registry write_registry"
 
 # ── Get root password from Terraform sensitive output ──────────────
 GITLAB_ROOT_PASSWORD=$(cd "${TF_DIR}" && env -u AWS_ENDPOINT_URL AWS_PROFILE=ocp-deploy-acct terraform output -raw gitlab_root_password 2>/dev/null)
@@ -64,31 +71,48 @@ for i in $(seq 1 30); do
   sleep 10
 done
 
-# ── Get a session-bound API token via root password grant ──────────
-echo "==> Acquiring root API token via resource-owner password grant..."
-TOKEN_JSON=$(curl -sf -X POST "${GITLAB_URL}/oauth/token" \
-  -H "Content-Type: application/json" \
-  -d "{\"grant_type\":\"password\",\"username\":\"root\",\"password\":\"${GITLAB_ROOT_PASSWORD}\"}")
-ROOT_TOKEN=$(echo "${TOKEN_JSON}" | jq -r '.access_token')
-if [ -z "${ROOT_TOKEN}" ] || [ "${ROOT_TOKEN}" = "null" ]; then
-  echo "ERROR: failed to obtain root token. Response: ${TOKEN_JSON}" >&2
-  exit 1
+# ── Mint a short-lived admin PAT via gitlab-rails on the host ──────
+# GitLab 18 removed the resource-owner password grant, so we can't
+# `POST /oauth/token` as root anymore. Instead, ssh to the GitLab EC2
+# host and use `gitlab-rails runner` to mint a 1-day admin PAT, then
+# use it for the applications API. Requires SSH access to the host
+# (the same SSH key the cluster was bootstrapped with — see
+# `aws_key_pair.rhsummit-gitlab`).
+GITLAB_HOST_IP=$(cd "${TF_DIR}" && env -u AWS_ENDPOINT_URL AWS_PROFILE=ocp-deploy-acct \
+  terraform output -raw gitlab_public_ip 2>/dev/null)
+if [ -z "${GITLAB_HOST_IP}" ]; then
+  echo "ERROR: terraform output gitlab_public_ip is empty." >&2; exit 1
 fi
+echo "==> Minting 1-day admin PAT on GitLab host ${GITLAB_HOST_IP}..."
+ROOT_TOKEN=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o UserKnownHostsFile=/dev/null \
+  ec2-user@"${GITLAB_HOST_IP}" 'sudo gitlab-rails runner "
+    u = User.find_by(username: %q(root))
+    t = u.personal_access_tokens.create!(scopes: [:api, :admin_mode], name: %q(coder-oauth-bootstrap), expires_at: 1.day.from_now)
+    puts t.token
+  "' 2>/dev/null | tail -1)
+if [ -z "${ROOT_TOKEN}" ] || [ "${ROOT_TOKEN:0:6}" != "glpat-" ]; then
+  echo "ERROR: failed to mint admin PAT. Got: ${ROOT_TOKEN}" >&2; exit 1
+fi
+echo "    OK"
+
+# GitLab's PRIVATE-TOKEN header accepts a PAT directly; no Bearer
+# wrapping needed.
+AUTH_HEADER="PRIVATE-TOKEN: ${ROOT_TOKEN}"
 
 # ── Idempotent: delete existing app of the same name if present ────
 echo "==> Removing any prior \"${APP_NAME}\" OAuth application..."
-EXISTING_ID=$(curl -sf -H "Authorization: Bearer ${ROOT_TOKEN}" \
+EXISTING_ID=$(curl -sf -H "${AUTH_HEADER}" \
   "${GITLAB_URL}/api/v4/applications" \
   | jq -r ".[] | select(.application_name==\"${APP_NAME}\") | .id" | head -1 || echo "")
 if [ -n "${EXISTING_ID}" ]; then
-  curl -sf -X DELETE -H "Authorization: Bearer ${ROOT_TOKEN}" \
+  curl -sf -X DELETE -H "${AUTH_HEADER}" \
     "${GITLAB_URL}/api/v4/applications/${EXISTING_ID}" >/dev/null
   echo "    Deleted id=${EXISTING_ID}"
 fi
 
 # ── Create the new instance-wide OAuth application ────────────────
 echo "==> Creating OAuth application \"${APP_NAME}\"..."
-CREATE_RESP=$(curl -sf -X POST -H "Authorization: Bearer ${ROOT_TOKEN}" \
+CREATE_RESP=$(curl -sf -X POST -H "${AUTH_HEADER}" \
   "${GITLAB_URL}/api/v4/applications" \
   --data-urlencode "name=${APP_NAME}" \
   --data-urlencode "redirect_uri=${REDIRECT_URI}" \
