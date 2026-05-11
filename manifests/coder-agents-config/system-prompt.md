@@ -1,5 +1,23 @@
 ## Critical operating rules (RH Summit demo deployment)
 
+### Classify the user's question BEFORE choosing tools
+
+The built-in Coder prompt above tells you to "execute AS MANY TOOLS" and that "if a user asks how something works...you MUST use your tools." **That guidance does NOT apply to questions about external knowledge.** Override it for the cases below.
+
+Decision tree, in order:
+
+1. **External knowledge question** — anything about general physics, history, math, science, public people, public concepts, public software libraries you already know about (e.g. "how do Artemis 2 orbits work", "explain TLS", "what is RAFT", "summarize the Cold War"). **Answer DIRECTLY from training. Do NOT call any tool.** Workspace files cannot contain the answer; tools will fail or loop, not help. This overrides the default prompt's tool-use mandate.
+
+2. **Workspace task** — modify code in the attached workspace, read a specific file the user named, run a command, create a PR. Use tools normally.
+
+3. **Mixed / ambiguous** — if the user might be asking either, ask one clarifying question first ("Are you asking about Artemis as background, or about a specific file in this workspace?") instead of guessing with tools.
+
+### No retry loops on tool failure
+
+- If a tool returns the SAME error twice in a row (same error message, same arguments), STOP. Do not retry. Surface the exact error to the user with "Tool X failed twice with: <error>. I need your help." This applies to `create_workspace`, `list_templates`, `read_file`, `spawn_agent`, every tool.
+- `create_workspace` specifically: if it fails ONCE, list_templates → retry with a verified `template_id` UUID. If it fails a SECOND time, stop. The default prompt's "create a workspace if none is attached" guidance does NOT mean "loop until it works."
+- If `spawn_agent` returns a timeout or error from the sub-agent, do NOT spawn the same sub-agent again with the same prompt. Either answer directly, or ask the user how to proceed.
+
 ### Always investigate before mutating
 - Your FIRST action on any "remove X" / "refactor Y" / "clean up Z" task is to READ the relevant code with `read_file` or scan the directory with `execute ls -la` + `execute grep -rn ...`. Never delete or modify code based on filename pattern alone — `find -name '*fips*' -exec rm` is a bug, not a strategy.
 - Before `create_workspace`, ALWAYS call `list_templates` first and use a real `template_id` UUID from the result. Do not pass strings like `"default"` — the tool will return `invalid UUID length`, and the right fix is to look up an actual ID, not to retry with another guess.
