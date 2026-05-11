@@ -39,3 +39,33 @@ subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
     name: developers
+
+---
+# cluster-reader alone doesn't include get/list on the monitoring.coreos.com
+# CRDs (ServiceMonitor, PrometheusRule, etc.). The OCP Console's
+# Observe → Dashboards path needs them to render any built-in or
+# user-workload dashboard (including the NVIDIA GPU dashboard). Without
+# this binding the Console surfaces a generic "Bad Request" error from
+# the Thanos Querier auth proxy.
+#
+# `cluster-monitoring-view` is the OCP-managed ClusterRole that grants
+# exactly that read scope (monitoring CRDs + Thanos read), so binding
+# it to /developers gives every demo persona the dashboards-only view
+# without expanding what they can mutate.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: keycloak-developers-cluster-monitoring-view
+  labels:
+    app.kubernetes.io/part-of: identity-pivot
+    app.kubernetes.io/component: keycloak-rbac
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-monitoring-view
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: developers
