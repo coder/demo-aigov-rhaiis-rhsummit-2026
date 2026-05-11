@@ -1,0 +1,108 @@
+# Second multi-GPU L40S MachineSet — dedicated to FP8 Llama 70B serving.
+#
+# Why a separate node (not just a second Deployment on the existing TP node):
+# Llama 70B FP8-dynamic weights are ~70 GiB (vs INT4's ~35 GiB). At
+# TP=4 across 4× L40S that's 17.5 GiB/GPU for weights + framework
+# overhead, which fully occupies the existing g6e.12xlarge if we want
+# the FP8 deployment to use all 4 GPUs. The current INT4 deployment on
+# `gpu-l40s-tp` reserves 2 of its 4 GPUs — running FP8 in parallel on
+# the same node would oversubscribe.
+#
+# More importantly, this is a hedge for Tuesday's booth demo: the
+# proven-working INT4 path stays on its own hardware. If FP8 init
+# fails / OOMs / has bad tool-calling behavior, the INT4 fallback is
+# one chatd model-config flip away.
+#
+# Quant choice: FP8-dynamic, not FP16. INT4 (production today) eroded
+# Llama's cautious-agent behavior — the model skipped probe-and-omit
+# and emitted training-prior paths (`/home/user/...`, `/workspace/...`,
+# `/project/...`) that didn't exist on Coder workspaces. FP8 preserves
+# more of the original weights' calibration than INT4 while staying
+# inside a single g6e.12xlarge GPU memory budget (FP16 would need ~140
+# GiB and overflow even 4× L40S with KV cache).
+#
+# Hardware: g6e.12xlarge (4× L40S 48 GiB, 192 GiB total GPU memory).
+# Cost: ~$7.45/hr on-demand (matches `gpu-l40s-tp` — same instance type,
+# same AZ). Net booth-burn: +$7.45/hr while both nodes run. Once FP8
+# is validated and we cut over chatd, INT4 MachineSet scales to 0.
+#
+# Backout:
+#   oc scale -n openshift-machine-api machineset/cluster-pqc4z-worker-l40s-tp-fp8-us-east-1a --replicas=0
+#   oc delete -f manifests/machinesets/gpu-l40s-tp-fp8.yaml
+#   (chatd model-config flips back to the INT4 service URL)
+---
+apiVersion: machine.openshift.io/v1beta1
+kind: MachineSet
+metadata:
+  name: cluster-pqc4z-worker-l40s-tp-fp8-us-east-1a
+  namespace: openshift-machine-api
+  labels:
+    machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+  annotations:
+    capacity.cluster-autoscaler.kubernetes.io/labels: kubernetes.io/arch=amd64,gpu-purpose=tensor-parallel-fp8
+    machine.openshift.io/GPU: "4"
+    machine.openshift.io/memoryMb: "393216"
+    machine.openshift.io/vCPU: "48"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+      machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-tp-fp8-us-east-1a
+  template:
+    metadata:
+      labels:
+        machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+        machine.openshift.io/cluster-api-machine-role: worker
+        machine.openshift.io/cluster-api-machine-type: worker
+        machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-tp-fp8-us-east-1a
+    spec:
+      # Custom node label so the FP8 Deployment targets THIS node and
+      # not the existing `gpu-purpose=tensor-parallel` (INT4) node.
+      metadata:
+        labels:
+          gpu-purpose: tensor-parallel-fp8
+      providerSpec:
+        value:
+          ami:
+            id: ami-04018496b0a1da2d2
+          apiVersion: machine.openshift.io/v1beta1
+          blockDevices:
+            - ebs:
+                encrypted: true
+                iops: 0
+                kmsKey:
+                  arn: ""
+                # FP8 70B weights are ~70 GiB on-disk — double INT4's
+                # 35 GiB. 400 GiB root volume gives margin for the HF
+                # cache + container image + image pulls.
+                volumeSize: 400
+                volumeType: gp3
+          credentialsSecret:
+            name: aws-cloud-credentials
+          deviceIndex: 0
+          iamInstanceProfile:
+            id: cluster-pqc4z-worker-profile
+          instanceType: g6e.12xlarge
+          kind: AWSMachineProviderConfig
+          metadata: {}
+          metadataServiceOptions: {}
+          placement:
+            availabilityZone: us-east-1a
+            region: us-east-1
+          securityGroups:
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-node
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-lb
+          subnet:
+            id: subnet-0e22bc2846ce4faaa
+          tags:
+            - name: kubernetes.io/cluster/cluster-pqc4z
+              value: owned
+          userDataSecret:
+            name: worker-user-data
