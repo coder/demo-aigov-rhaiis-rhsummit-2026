@@ -640,6 +640,42 @@ The Qwen 2.5 32B Instruct AWQ on the production `vllm-planner` Service stays as 
 - Need >8K context with Llama 70B → upgrade GPU to A100 80GB or H100 80GB on the experimental MachineSet (replace `g6e.2xlarge` with `p5.48xlarge` slice or similar). FP8 quant becomes viable at 70 GiB on 80 GiB GPU and supports 32K+ context easily.
 - vLLM ≥0.9 ships in a future RHAIIS image → re-test V1 engine; the deadlock may be fixed upstream, giving back better serving performance + larger context.
 
+## 32. Coder external_auth for self-hosted GitLab — the four-landmine working recipe
+
+**Context:** During the identity pivot (decisions §20 was superseded by the dual-IdP shift to Keycloak + the GitLab SCM swap), `CODER_EXTERNAL_AUTH_0_*` was switched from GitHub to a self-hosted GitLab at `gitlab.rhsummit.coderdemo.io`. Took four rounds of debugging before workspace `git push` worked.
+
+**Picked:** the env-var set proven in `lab/k3s-infra/helm-values/coder.yaml`, ported with this repo's hostnames:
+
+```
+CODER_EXTERNAL_AUTH_0_TYPE          = gitlab
+CODER_EXTERNAL_AUTH_0_ID            = gitlab
+CODER_EXTERNAL_AUTH_0_DISPLAY_NAME  = GitLab (Demo)
+CODER_EXTERNAL_AUTH_0_AUTH_URL      = https://gitlab.rhsummit.coderdemo.io/oauth/authorize
+CODER_EXTERNAL_AUTH_0_TOKEN_URL     = https://gitlab.rhsummit.coderdemo.io/oauth/token
+CODER_EXTERNAL_AUTH_0_VALIDATE_URL  = https://gitlab.rhsummit.coderdemo.io/oauth/token/info
+CODER_EXTERNAL_AUTH_0_REVOKE_URL    = https://gitlab.rhsummit.coderdemo.io/oauth/revoke
+CODER_EXTERNAL_AUTH_0_REGEX         = ^https://gitlab\.rhsummit\.coderdemo\.io/.*
+CODER_EXTERNAL_AUTH_0_SCOPES        = api write_repository read_registry write_registry
+```
+
+Plus the OAuth app on the GitLab side registered with **exactly** that scope set (`scopes=["api", "write_repository", "read_registry", "write_registry"]`).
+
+**The four landmines and their fixes (the troubleshooting log):**
+
+1. **VALIDATE_URL=`/api/v4/user` is wrong** — that endpoint requires the token to carry `read_user`. Symptom: Coder UI shows *"Failed to validate oauth access token. Verify the external authentication validation URL is accurately configured."*  **Fix:** use `/oauth/token/info` — the OAuth2 token-info endpoint validates the token itself, no scope context required, future-proof against changing the requested scope list.
+
+2. **SCOPES env var is space-separated, not comma-separated** — Coder forwards the value verbatim into the OAuth `scope=` query parameter. RFC 6749 mandates space-separated. Comma-separated gives *"The requested scope is invalid, unknown, or malformed."* (Confirmed in GitLab's `production_json.log` — the rejected `/oauth/authorize` call had `"scope":"read_user,read_repository,write_repository"`.) **Fix:** space-separate in the YAML env value.
+
+3. **Requested scopes must be a SUBSET of the OAuth app's registered scopes** — adding `read_registry write_registry` to the SCOPES env triggers the *same* "invalid scope" error if those aren't in the OAuth application's `scopes` array on GitLab. GitLab's `applications` API has no PUT/PATCH; widening the scope list requires deleting and recreating the application, which rotates `application_id` AND `secret`. **Fix:** before bumping SCOPES, recreate the OAuth app via `POST /api/v4/applications` with the full target scope set, then re-seal the new credentials into the existing `gitlab-coder-external-auth` SealedSecret.
+
+4. **`envFrom: secretKeyRef` doesn't auto-refresh on Secret change** — after rotating the OAuth app credentials, the Coder pods continue to hold the OLD `application_id`/`secret` in env until restart. Symptom: *"Client authentication failed due to unknown client, no client authentication included, or unsupported authentication method."* **Fix:** `oc -n coder rollout restart deploy/coder` after any underlying-Secret rotation.
+
+**Trigger to revisit:**
+- The `api` scope is the over-scope; trimming to a minimum-privilege set (`read_user write_repository read_registry write_registry`) is worth doing post-event. The trim removes the user's full API surface from the token Coder holds.
+- GitLab CE has no native OIDC-group → instance-admin mapping; demoadm gets promoted manually by `scripts/gitlab-promote-demoadmins.sh` after first login. The proper SAML-style `admin_groups` mapping is a GitLab Premium feature.
+
+**Operational gotcha that bit:** the scoped-down OAuth app's `secret` is only available at `applications.create` response time. The `GET /api/v4/applications` response does **not** include the secret. After recreating an app, capture the secret immediately into the SealedSecret or you'll be running another recreate to recover it.
+
 ---
 
 ## Decisions explicitly deferred to post-event
