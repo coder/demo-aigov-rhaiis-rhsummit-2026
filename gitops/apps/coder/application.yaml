@@ -193,19 +193,19 @@ spec:
             - name: CODER_OIDC_USER_ROLE_MAPPING
               value: '{"developers":["auditor"],"admins":["owner"]}'
 
-            # ── External git auth (GitLab self-hosted) ──────────────────
-            # Workspaces clone/push against the booth's self-hosted
-            # GitLab (gitlab.rhsummit.coderdemo.io). The OAuth app
-            # `coder-workspace-external-auth` was bootstrapped via the
-            # `scripts/gitlab-create-coder-oauth-app.sh` helper; its
-            # client_id + client_secret live in the
-            # `gitlab-coder-external-auth` SealedSecret (created from
-            # /tmp/gitlab-coder-external-auth-plain.yaml).
+            # ── External git auth (TWO providers, both optional) ────────
+            # Workspaces can authenticate to BOTH GitLab and GitHub.
+            # Templates declare both `coder_external_auth` data sources
+            # as `optional = true`, so workspaces boot regardless of
+            # which (or neither) the user has connected. The user sees
+            # two "Authenticate with..." buttons in the workspace
+            # settings UI.
             #
-            # GitHub external_auth is deprecated for the demo flow
-            # (per the identity pivot). GitHub *login* (CODER_OAUTH2_
-            # GITHUB_*) stays as the admin-tier IdP — only the workspace
-            # git push surface moves to GitLab.
+            # Slot 0: self-hosted GitLab — the demo-day primary, hosts
+            # the persona repos that the bridge service creates
+            # workspaces from. OAuth app bootstrapped via
+            # `scripts/gitlab-create-coder-oauth-app.sh`; creds in the
+            # `gitlab-coder-external-auth` SealedSecret.
             - name: CODER_EXTERNAL_AUTH_0_TYPE
               value: "gitlab"
             - name: CODER_EXTERNAL_AUTH_0_ID
@@ -252,6 +252,30 @@ spec:
             #                      is live, which it is)
             - name: CODER_EXTERNAL_AUTH_0_SCOPES
               value: "api write_repository read_registry write_registry"
+
+            # Slot 1: GitHub — kept as an optional secondary so personas
+            # can still clone/push public repos (or the demo's source
+            # repos hosted on github.com/coder) from inside a workspace.
+            # Re-uses the same OAuth app that backs CODER_OAUTH2_GITHUB_*
+            # (login); the GitHub OAuth app's callback URL is configured
+            # to accept both `/api/v2/users/oauth2/github/callback`
+            # (login) and `/external-auth/github/callback` (this).
+            - name: CODER_EXTERNAL_AUTH_1_TYPE
+              value: "github"
+            - name: CODER_EXTERNAL_AUTH_1_ID
+              value: "github"
+            - name: CODER_EXTERNAL_AUTH_1_DISPLAY_NAME
+              value: "GitHub"
+            - name: CODER_EXTERNAL_AUTH_1_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: coder-secrets
+                  key: github-client-id
+            - name: CODER_EXTERNAL_AUTH_1_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: coder-secrets
+                  key: github-client-secret
 
             # ── External provisioner mode ───────────────────────────────
             # Disable in-process provisioners; the coder-provisioner

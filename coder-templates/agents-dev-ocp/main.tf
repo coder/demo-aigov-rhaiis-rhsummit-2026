@@ -68,8 +68,18 @@ data "coder_provisioner" "me" {}
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
+# Both external_auth providers are optional. The Coder deployment
+# wires CODER_EXTERNAL_AUTH_0_* (GitLab) and CODER_EXTERNAL_AUTH_1_*
+# (GitHub) — workspaces show "Authenticate with..." buttons for both
+# in the workspace settings UI. Users can connect to one, both, or
+# neither; templates downstream pull whichever tokens are present.
 data "coder_external_auth" "github" {
   id       = "github"
+  optional = true
+}
+
+data "coder_external_auth" "gitlab" {
+  id       = "gitlab"
   optional = true
 }
 

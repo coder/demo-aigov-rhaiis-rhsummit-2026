@@ -76,8 +76,17 @@ data "coder_provisioner" "me" {}
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
+# Both external_auth providers are optional — workspace boots whether
+# the user has authenticated to one, both, or neither. Templates that
+# inject tokens into env vars below get empty strings for any
+# unauthenticated provider, which the runtime tolerates.
 data "coder_external_auth" "github" {
   id       = "github"
+  optional = true
+}
+
+data "coder_external_auth" "gitlab" {
+  id       = "gitlab"
   optional = true
 }
 
@@ -211,6 +220,9 @@ locals {
       OPENAI_BASE_URL     = local.ai_bridge_openai_url
       GH_TOKEN            = data.coder_external_auth.github.access_token
       GH_USERNAME         = data.coder_workspace_owner.me.name
+      GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
+      GITLAB_USER         = data.coder_workspace_owner.me.name
+      GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"
       GIT_AUTHOR_NAME     = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
       GIT_AUTHOR_EMAIL    = data.coder_workspace_owner.me.email
       GIT_COMMITTER_NAME  = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
