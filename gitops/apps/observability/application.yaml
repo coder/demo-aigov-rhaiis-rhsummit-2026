@@ -200,7 +200,10 @@ spec:
                 auto_login: false
                 client_id: grafana
                 # client_secret comes from env (see envFromSecrets above)
-                scopes: openid profile email groups
+                # `groups` omitted — emitted as a claim via the client's
+                # protocol mapper, not registered as a Keycloak client
+                # scope. Including it triggers "Invalid scopes".
+                scopes: openid profile email
                 auth_url: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo/protocol/openid-connect/auth
                 token_url: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo/protocol/openid-connect/token
                 api_url: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo/protocol/openid-connect/userinfo

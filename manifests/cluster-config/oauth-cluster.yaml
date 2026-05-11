@@ -75,9 +75,8 @@ spec:
           # cluster-admin via OIDC too).
           groups:
             - groups
-        # Scopes Keycloak emits in the access token / userinfo.
-        # `groups` is the custom scope our realm's `coder/gitlab/
-        # openshift/grafana` clients all have configured via the
-        # group-membership protocol mapper.
-        extraScopes:
-          - groups
+        # `extraScopes` intentionally omitted — `groups` is not a
+        # registered Keycloak client scope (only a client-level
+        # protocol mapper), so requesting it would yield an "Invalid
+        # scopes" error. The mapper still emits the `groups` claim
+        # in the userinfo response, which OCP reads above.

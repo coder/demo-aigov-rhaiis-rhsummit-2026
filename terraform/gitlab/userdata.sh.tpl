@@ -85,7 +85,12 @@ gitlab_rails['omniauth_providers'] = [
     label: 'Keycloak',
     args: {
       name: 'openid_connect',
-      scope: ['openid', 'profile', 'email', 'groups'],
+      # NOTE: `groups` intentionally omitted from the requested scope
+      # list — it isn't registered as a Keycloak client scope (only
+      # as a client-level protocol mapper), and OIDC clients that
+      # request unknown scopes get a hard "Invalid scopes" rejection.
+      # The mapper still emits the `groups` claim on every token.
+      scope: ['openid', 'profile', 'email'],
       response_type: 'code',
       issuer: 'https://$${KEYCLOAK_HOSTNAME}/realms/demo',
       discovery: true,

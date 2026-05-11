@@ -168,9 +168,11 @@ spec:
               value: "groups"
             - name: CODER_OIDC_GROUP_AUTO_CREATE
               value: "true"
-            # Scopes: standard + groups for the group claim.
+            # Scopes: standard OIDC only — `groups` is emitted via
+            # client-level protocol mapper, not a registered Keycloak
+            # client scope. Requesting it would trigger "Invalid scopes".
             - name: CODER_OIDC_SCOPES
-              value: "openid,profile,email,groups"
+              value: "openid,profile,email"
 
             # ── Site-level OIDC role sync (Premium-gated) ────────────────
             # Maps Keycloak `groups` claim values to built-in Coder site
