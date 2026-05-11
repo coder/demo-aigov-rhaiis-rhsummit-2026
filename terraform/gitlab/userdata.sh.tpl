@@ -145,8 +145,31 @@ gitlab-ctl reconfigure
 
 # ── 6. Set the initial root password for emergency console access ───────────
 # Demo flow uses Keycloak SSO; root is only for "GitLab broke, I need
-# to log in via /admin to fix something" scenarios.
+# to log in via /admin to fix something" scenarios. With password web
+# auth disabled below, root can only authenticate via `gitlab-rails`
+# from SSH on this host — which is what we want for the booth (no
+# password form to phish, no path that bypasses Keycloak from the
+# internet).
 gitlab-rails runner "user = User.find_by(username: 'root'); user.password = '$${GITLAB_ROOT_PASSWORD}'; user.password_confirmation = '$${GITLAB_ROOT_PASSWORD}'; user.password_automatically_set = false; user.save!"
+
+# ── 6b. Lock the front door: SSO-only login + signup off ────────────────────
+# `password_authentication_enabled_for_web=false` removes the username/
+# password form from /users/sign_in entirely — only the OmniAuth
+# (Keycloak) button remains. `signup_enabled=false` prevents self-
+# registration even from the OAuth side (auto-link to the Keycloak
+# identity still works because omniauth_allow_single_sign_on is on).
+#
+# Both settings live in the application_settings table (Postgres on
+# the EBS data volume), so they survive `gitlab-ctl reconfigure` but
+# get re-applied on every cloud-init run so a fresh EBS comes up
+# locked-down out of the box.
+gitlab-rails runner "
+  s = ApplicationSetting.current
+  s.password_authentication_enabled_for_web = false
+  s.signup_enabled = false
+  s.save!
+  puts \"SSO-only login: password_auth_for_web=#{s.password_authentication_enabled_for_web} signup=#{s.signup_enabled}\"
+"
 
 # ── 7. GitLab Runner on the same VM ──────────────────────────────────────────
 curl -L "https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.rpm.sh" | bash
