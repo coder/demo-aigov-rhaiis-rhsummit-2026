@@ -113,48 +113,6 @@ RUN useradd --uid ${UID} --create-home --shell /bin/bash --user-group ${USER} \
 RUN chgrp -R 0 /home/${USER} \
     && chmod -R g=u /home/${USER}
 
-# Compatibility symlinks for hallucinated workdir / path values from
-# smaller / quantized LLMs (notably Llama 3.3 70B INT4 via RHAIIS
-# chatd). Smaller models skip the `pwd` probe + supply explicit
-# workdir/path args with values pulled from training-data priors.
-# Each Llama session picks a different one — observed so far:
-#   /home/user/...   — Anthropic computer-use sandbox, Modal, etc.
-#   /workspace/...   — Codespaces, Cloud Workstations
-#   /sandbox/...     — older Jupyter / tutor sandboxes
-#   /work/...        — CI examples
-# The Coder agent here runs as `coder` with HOME = /home/coder.
-# Without these symlinks, hallucinated paths fail with
-# `mkdir /<path>: permission denied` (write_file) or
-# ENOENT-disguised-as-shell-error `fork/exec /usr/bin/sh: no
-# such file or directory` (execute, when chdir to nonexistent
-# workdir).
-#
-# Frontier models (Sonnet/Opus) probe with `pwd` first and then
-# OMIT optional args, letting the tool's defaults take over — so
-# they don't care about these symlinks. Pure graceful-degradation
-# for weaker models. See docs/decisions.md §35 + the memory entry
-# llm_tool_args_probe_gap for the full diagnosis.
-RUN mkdir -p /home/${USER}/workspace \
-    && chgrp -R 0 /home/${USER}/workspace \
-    && chmod -R g=u /home/${USER}/workspace \
-    && ln -s /home/${USER} /home/user \
-    && ln -s /home/${USER}/workspace /workspace \
-    && ln -s /home/${USER} /sandbox \
-    && ln -s /home/${USER} /work
-
-# Similar graceful-degradation symlinks for `python` → `python3` and
-# `pip` / `pip3` → `pip3.11`. UBI9 ships python3.11 + python3.11-pip
-# but not the unversioned `python` binary AND not the major-version
-# `pip3` shim. Smaller LLMs (Llama-INT4) emit `python foo.py` /
-# `pip install ...` / `pip3 install ...` from training-data priors
-# and hit "command not found". Same pattern as the workdir symlinks:
-# make wrong guesses work transparently. Sonnet/Opus usually call
-# `python3` + `python3 -m pip` directly, so these are no-ops for
-# them.
-RUN ln -sf /usr/bin/python3 /usr/local/bin/python \
-    && ln -sf /usr/bin/pip3.11 /usr/local/bin/pip3 \
-    && ln -sf /usr/bin/pip3.11 /usr/local/bin/pip
-
 # Make /etc/passwd group-writable so the entrypoint can append a passwd
 # entry for the SCC-injected UID at startup. Same pattern Red Hat uses
 # in their s2i base images.
