@@ -116,15 +116,18 @@ spec:
             temporary: false
         groups:
           - /developers
-      - username: madmin
+      # Admin-tier demo user. Stronger password than the developers
+      # since this account can elevate to OCP cluster-admin and
+      # Coder owner. Booth-grade (rotate post-event).
+      - username: demoadm
         enabled: true
-        email: madmin@demo.rhsummit.coderdemo.io
-        firstName: Mary
+        email: demoadm@demo.rhsummit.coderdemo.io
+        firstName: Demo
         lastName: Admin
         emailVerified: true
         credentials:
           - type: password
-            value: "Demo2026!"
+            value: "Z7U0jeJ1m7SaYQlvGJ!K2026"
             temporary: false
         groups:
           - /developers
