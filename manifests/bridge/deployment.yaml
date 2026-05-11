@@ -1,0 +1,96 @@
+# Bridge service Deployment.
+#
+# Lives in the `coder` namespace because:
+#   - It re-uses the existing `coder-admin-token` SealedSecret for
+#     Coder API calls (no duplicate token to rotate).
+#   - It shares the namespace's network policies + SCC baseline with
+#     the Coder server, so traffic to coder.coder.svc.cluster.local
+#     is a single in-namespace hop.
+#
+# The bridge holds an admin session token and creates workspaces on
+# behalf of the GitLab issue reporter (calls
+# `POST /api/v2/users/{username}/workspaces`). Idempotent — same
+# issue ID always produces the same workspace name; re-trigger is a
+# no-op once the workspace exists.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bridge
+  namespace: coder
+  labels:
+    app.kubernetes.io/name: bridge
+    app.kubernetes.io/part-of: coder-aigov-demo
+    app.kubernetes.io/component: gitlab-coder-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bridge
+        app.kubernetes.io/part-of: coder-aigov-demo
+    spec:
+      # The bridge doesn't need any cluster perms — Coder API auth
+      # is via the admin token mounted from a Secret. Default SA is
+      # fine; no extra RoleBindings.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bridge
+          image: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026/bridge:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: BRIDGE_LISTEN_ADDR
+              value: ":8080"
+            - name: CODER_URL
+              value: "http://coder.coder.svc.cluster.local"
+            # Public-facing URL embedded in the bridge's response JSON
+            # so the workspace_url field is a clickable link, not an
+            # in-cluster Service address. Demo personas land on this
+            # URL after Keycloak login.
+            - name: CODER_PUBLIC_URL
+              value: "https://coder.apps.cluster.rhsummit.coderdemo.io"
+            - name: CODER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: coder-admin-token
+                  key: token
+            - name: BRIDGE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: bridge-webhook-secret
+                  key: token
+            - name: LOG_LEVEL
+              value: "info"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10

@@ -1,0 +1,29 @@
+# OCP Route — public HTTPS endpoint for GitLab webhook delivery.
+#
+# GitLab (on EC2 in the same VPC) reaches the bridge via this Route's
+# wildcard cert and 443 TLS termination at the OCP ingress. The bridge
+# itself only sees plain HTTP from the Route — Service is ClusterIP on
+# port 80, no internal TLS.
+#
+# The webhook URL registered in GitLab will be:
+#   https://bridge.apps.cluster.rhsummit.coderdemo.io/webhook
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: bridge
+  namespace: coder
+  labels:
+    app.kubernetes.io/name: bridge
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  host: bridge.apps.cluster.rhsummit.coderdemo.io
+  to:
+    kind: Service
+    name: bridge
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
