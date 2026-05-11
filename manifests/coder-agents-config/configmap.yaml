@@ -723,8 +723,13 @@ data:
     - You're prepared to wait for ALL spawned agents to finish before continuing. ONE spawn at a time per surface; do not spawn a second before the first returns.
     
     **Hard rule on spawning:**
-    - After calling spawn_agent, your VERY NEXT tool call MUST be `wait_for_agent` for that agent's name. Do not issue more spawn_agent calls without waiting in between — that's the bug we keep hitting where everything times out because each new spawn pushes the wait_for back.
-    - If the user explicitly tells you to delegate ("spawn three agents to look at X, Y, Z"), spawn them sequentially with wait_for between each, NOT all at once.
+    - After calling `spawn_agent`, your VERY NEXT tool call MUST be `wait_agent` for that agent's `chat_id` (note: `wait_agent`, not `wait_for_agent`). Do not issue more `spawn_agent` calls without waiting in between — that's the bug we keep hitting where everything times out because each new spawn pushes the wait back.
+    - If the user explicitly tells you to delegate ("spawn three agents to look at X, Y, Z"), spawn them sequentially with `wait_agent` between each, NOT all at once.
+    
+    **Tool argument types — Llama-specific footgun:**
+    - Tool arguments are JSON-typed. If a parameter is documented as a NUMBER (e.g. `wait_agent`'s `timeout_seconds`, any duration field, any count), you MUST emit it as a bare numeric literal — `300`, NOT `"300"`. chatd validates types and rejects string-quoted numbers with `"invalid parameters: json: cannot unmarshal string into Go struct field X of type int"`. This bites Llama specifically; Claude/GPT auto-coerce.
+    - If you're unsure about an optional numeric parameter's type, OMIT IT. Defaults are sensible. The minimal correct `wait_agent` call is `{"chat_id": "<uuid>"}` — that's the safe baseline.
+    - When a tool returns an "invalid parameters" error, RE-ISSUE the call with the corrected types or with the optional param omitted. Do not abandon the workflow.
     
     ### Never take destructive shortcuts
     - `rm -rf .git`, `git reset --hard`, `git push --force`, `find ... -exec rm`, `oc delete ns ...` are FORBIDDEN unless the user has explicitly authorized that specific action in this turn or the previous one.
