@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,16 +141,14 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Already-created idempotency check.
+	// 2. Workspace idempotency — but DON'T early-return. A coder-hitl
+	// trigger creates the workspace; a later coder-agent trigger on
+	// the same issue needs to find the existing workspace AND still
+	// proceed to chat creation.
+	var workspace *coder.Workspace
 	if existing, err := h.coder.GetWorkspaceByName(ctx, assignee, wsName); err == nil {
-		log.Info("workspace exists, no-op", "workspace_id", existing.ID)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":             true,
-			"action":         "noop",
-			"reason":         "workspace exists",
-			"workspace_name": existing.Name,
-		})
-		return
+		workspace = existing
+		log.Info("workspace already exists, reusing", "workspace_id", existing.ID)
 	} else if !errors.Is(err, coder.ErrNotFound) {
 		h.forwardCoderError(w, log, "lookup workspace", err)
 		return
@@ -157,39 +156,42 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Resolve the template. Default to cfg.DefaultTemplate; project-
 	// level override (GitLab CI variable / .coder file) is a TODO.
-	templates, err := h.coder.ListTemplates(ctx)
-	if err != nil {
-		h.forwardCoderError(w, log, "list templates", err)
-		return
-	}
-	var tmpl *coder.Template
-	for i := range templates {
-		if templates[i].Name == h.cfg.DefaultTemplate {
-			tmpl = &templates[i]
-			break
+	if workspace == nil {
+		templates, err := h.coder.ListTemplates(ctx)
+		if err != nil {
+			h.forwardCoderError(w, log, "list templates", err)
+			return
 		}
-	}
-	if tmpl == nil {
-		log.Warn("default template not found", "template", h.cfg.DefaultTemplate)
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"ok":    false,
-			"error": "default template not found in coder: " + h.cfg.DefaultTemplate,
-		})
-		return
-	}
+		var tmpl *coder.Template
+		for i := range templates {
+			if templates[i].Name == h.cfg.DefaultTemplate {
+				tmpl = &templates[i]
+				break
+			}
+		}
+		if tmpl == nil {
+			log.Warn("default template not found", "template", h.cfg.DefaultTemplate)
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"ok":    false,
+				"error": "default template not found in coder: " + h.cfg.DefaultTemplate,
+			})
+			return
+		}
 
-	// 4. Create the workspace.
-	created, err := h.coder.CreateWorkspace(ctx, assignee, coder.CreateWorkspaceRequest{
-		TemplateID: tmpl.ID,
-		Name:       wsName,
-	})
-	if err != nil {
-		h.forwardCoderError(w, log, "create workspace", err)
-		return
+		// 4. Create the workspace.
+		created, err := h.coder.CreateWorkspace(ctx, assignee, coder.CreateWorkspaceRequest{
+			TemplateID: tmpl.ID,
+			Name:       wsName,
+		})
+		if err != nil {
+			h.forwardCoderError(w, log, "create workspace", err)
+			return
+		}
+		workspace = created
+		log = log.With("workspace_id", created.ID)
+		log.Info("workspace created")
 	}
-	wsURL := h.cfg.CoderPublicURL + "/@" + assignee + "/" + created.Name
-	log = log.With("workspace_id", created.ID)
-	log.Info("workspace created")
+	wsURL := h.cfg.CoderPublicURL + "/@" + assignee + "/" + workspace.Name
 
 	// 5. Compose the issue URL — prefer the payload-provided one, fall
 	// back to constructed.
@@ -200,28 +202,44 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{
 		"ok":             true,
-		"action":         "created",
+		"action":         "ready",
 		"mode":           string(mode),
-		"workspace_name": created.Name,
+		"workspace_name": workspace.Name,
 		"workspace_url":  wsURL,
 	}
 
-	// 6. For coder-agent, resolve the model slug then create a chat
-	// owned by the assignee.
+	// 6. For coder-agent: idempotency-check for an existing chat for
+	// this issue+workspace+user. If not present, resolve the model
+	// slug and create one. Chat dedup uses labels written at creation:
+	//   bridge.source         = "gitlab"
+	//   gitlab.project        = "<group>/<project>"
+	//   gitlab.iid            = "<n>"
 	if mode == webhook.ModeAgent {
-		modelID, slugErr := h.resolveModelSlug(ctx, modelSlug)
-		if slugErr != nil {
-			log.Warn("unknown model slug", "slug", modelSlug, "err", slugErr)
-			resp["chat_error"] = slugErr.Error()
+		issueProject := p.Project.PathWithNamespace
+		issueIID := strconv.Itoa(p.ObjectAttributes.IID)
+
+		existingChat := h.findExistingAgentChat(ctx, user.ID, workspace.ID, issueProject, issueIID, log)
+		if existingChat != nil {
+			resp["chat_url"] = h.cfg.CoderPublicURL + "/agents/chats/" + existingChat.ID
+			resp["chat_reused"] = true
+			log.Info("agent chat already exists, reusing", "chat_id", existingChat.ID)
 		} else {
-			chatURL, chatErr := h.spawnAgentChat(ctx, assignee, created.OrganizationID, created.ID, modelID, issueURL, log)
-			if chatErr != nil {
-				log.Error("chat creation failed", "err", chatErr)
-				resp["chat_error"] = chatErr.Error()
+			modelID, slugErr := h.resolveModelSlug(ctx, modelSlug)
+			if slugErr != nil {
+				log.Warn("unknown model slug", "slug", modelSlug, "err", slugErr)
+				resp["chat_error"] = slugErr.Error()
 			} else {
-				resp["chat_url"] = chatURL
-				if modelID != "" {
-					resp["model_config_id"] = modelID
+				chatURL, chatErr := h.spawnAgentChat(ctx, assignee,
+					workspace.OrganizationID, workspace.ID, modelID,
+					issueURL, issueProject, issueIID, log)
+				if chatErr != nil {
+					log.Error("chat creation failed", "err", chatErr)
+					resp["chat_error"] = chatErr.Error()
+				} else {
+					resp["chat_url"] = chatURL
+					if modelID != "" {
+						resp["model_config_id"] = modelID
+					}
 				}
 			}
 		}
@@ -230,8 +248,32 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// 7. Comment back on the GitLab issue.
 	go h.commentBack(p.Project.ID, p.ObjectAttributes.IID, mode, wsURL, resp["chat_url"], resp["chat_error"], log)
 
-	_ = user // keep the user lookup result for future use (display name in comments, etc.)
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// findExistingAgentChat returns the chat (if any) created by a prior
+// bridge trigger for the same issue. Matches on labels set at creation
+// time, scoped to the assignee + the same workspace.
+func (h *Handler) findExistingAgentChat(ctx context.Context, ownerID, workspaceID, project, iid string, log *slog.Logger) *coder.Chat {
+	chats, err := h.coder.ListChats(ctx)
+	if err != nil {
+		log.Warn("list chats failed; continuing without dedup", "err", err)
+		return nil
+	}
+	for i := range chats {
+		c := &chats[i]
+		if c.OwnerID != ownerID || c.WorkspaceID != workspaceID {
+			continue
+		}
+		if c.Labels["bridge.source"] != "gitlab" {
+			continue
+		}
+		if c.Labels["gitlab.project"] != project || c.Labels["gitlab.iid"] != iid {
+			continue
+		}
+		return c
+	}
+	return nil
 }
 
 // resolveModelSlug maps a label-supplied slug ("llama", "sonnet", ...) to
@@ -266,8 +308,9 @@ func (h *Handler) resolveModelSlug(ctx context.Context, slug string) (string, er
 // spawnAgentChat mints a per-user token for the assignee (admin token can't
 // create chats with a different owner — chatd hardcodes owner_id from the
 // caller), then POSTs the chat with the issue-URL seed prompt. modelID is
-// optional ("" leaves it to chatd's deployment default).
-func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspaceID, modelID, issueURL string, log *slog.Logger) (string, error) {
+// optional ("" leaves it to chatd's deployment default). issueProject + iid
+// are persisted as labels for idempotency on future webhook events.
+func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspaceID, modelID, issueURL, issueProject, iid string, log *slog.Logger) (string, error) {
 	userToken, err := h.coder.MintUserToken(ctx, username, 3600) // 1h plenty for chat create
 	if err != nil {
 		return "", fmt.Errorf("mint user token: %w", err)
@@ -276,6 +319,11 @@ func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspace
 		OrganizationID: orgID,
 		WorkspaceID:    workspaceID,
 		ModelConfigID:  modelID,
+		Labels: map[string]string{
+			"bridge.source":  "gitlab",
+			"gitlab.project": issueProject,
+			"gitlab.iid":     iid,
+		},
 		Content: []coder.ChatInputPart{{
 			Type: "text",
 			Text: "Go work on this GitLab issue: " + issueURL +

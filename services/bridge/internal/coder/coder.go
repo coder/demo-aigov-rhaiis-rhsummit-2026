@@ -65,11 +65,12 @@ type MintTokenResponse struct {
 // CreateChatRequest body for POST /api/experimental/chats.
 // Wire format from codersdk.CreateChatRequest (subagent research).
 type CreateChatRequest struct {
-	OrganizationID string          `json:"organization_id"`
-	WorkspaceID    string          `json:"workspace_id,omitempty"`
-	ModelConfigID  string          `json:"model_config_id,omitempty"`
-	Content        []ChatInputPart `json:"content"`
-	ClientType     string          `json:"client_type,omitempty"`
+	OrganizationID string            `json:"organization_id"`
+	WorkspaceID    string            `json:"workspace_id,omitempty"`
+	ModelConfigID  string            `json:"model_config_id,omitempty"`
+	Content        []ChatInputPart   `json:"content"`
+	ClientType     string            `json:"client_type,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
 }
 
 // ModelConfig is a chatd model entry from /api/experimental/chats/model-configs.
@@ -88,11 +89,22 @@ type ChatInputPart struct {
 }
 
 type Chat struct {
-	ID             string `json:"id"`
-	OrganizationID string `json:"organization_id"`
-	OwnerID        string `json:"owner_id"`
-	WorkspaceID    string `json:"workspace_id"`
-	Title          string `json:"title"`
+	ID             string            `json:"id"`
+	OrganizationID string            `json:"organization_id"`
+	OwnerID        string            `json:"owner_id"`
+	WorkspaceID    string            `json:"workspace_id"`
+	Title          string            `json:"title"`
+	Labels         map[string]string `json:"labels"`
+}
+
+// ListChats returns every chat visible to the admin caller. Bridge filters
+// the result locally by owner + labels for idempotency checks.
+func (c *Client) ListChats(ctx context.Context) ([]Chat, error) {
+	var chats []Chat
+	if err := c.do(ctx, http.MethodGet, "/api/experimental/chats", nil, &chats); err != nil {
+		return nil, err
+	}
+	return chats, nil
 }
 
 type CreateWorkspaceRequest struct {
