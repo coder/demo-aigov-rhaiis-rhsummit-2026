@@ -698,6 +698,29 @@ Plus the OAuth app on the GitLab side registered with **exactly** that scope set
 
 **Why we kept the manifest in git:** so the next operator who wants to re-test V1 just bumps `replicas: 1` + the image tag, and the rest of the recipe (TP-2, gpu_memory_utilization, max-num-seqs) is preserved.
 
+## 34. Revert Coder Agents custom system prompt + plan-mode appendix to default-only
+
+**Context:** Over the day we accumulated ~8 KiB of override rules in `manifests/coder-agents-config/system-prompt.md` and ~1.4 KiB in `plan-mode-instructions.md` trying to guide Llama 70B INT4 through edge cases observed in live chats:
+- Knowledge questions tool-looped → "answer from training" override.
+- spawn_agent fired without wait → "next call MUST be wait_agent" rule.
+- `wait_agent timeout_seconds: "300"` string vs int → "numeric args are bare literals" rule + safe-baseline example.
+- Sub-agent looped on `create_workspace` → "sub-agents can't mutate workspaces; 'Tool not active in this turn' is a permanent palette error" rule.
+
+Each iteration plugged the observed gap. But on the fourth iteration (`da7955b8-...`, Stanley Cup app prompt) the SAME sub-agent palette loop happened again — 50 messages, 25 alternating `create_workspace` / `list_templates` calls all returning the same permanent error. The "Tool not active is permanent" rule landed in the live prompt (verified 8075 bytes with the rule present at chat-creation time); Llama ignored it.
+
+**Picked:** Empty the custom appendix on both system prompt and plan-mode instructions. Run on Coder's built-in `DefaultSystemPrompt` + `PlanningOverlayPrompt` with no overrides. Files at `manifests/coder-agents-config/{system-prompt,plan-mode-instructions}.md` retained as single HTML-comment placeholders pointing at this decision, so the bootstrap Job sees them, the renderer composes a valid ConfigMap, and a future operator who needs targeted overrides can edit the file + re-render without scaffolding.
+
+**Why this is the right call:**
+1. **Llama-INT4 follows positive instructions, ignores negative ones.** The default's "use AS MANY TOOLS" framing wins over our "don't spawn for X" overrides. More rules made the model more confused, not less.
+2. **Sonnet and Opus handle every observed failure mode correctly without any appendix.** The booth's `coder-agent` default model is Sonnet 4.6 (decision §32 + the 2026-05-11 default-flip in chatd model-configs). Sovereign-AI demos opt into Llama via `coder-agent:llama`, with the understanding that its agentic-loop behavior is weaker than Bedrock.
+3. **Tracking Coder's evolving default for free.** When chatd's `DefaultSystemPrompt` improves upstream we inherit it without merging changes into our appendix.
+
+**Cost of the reversal:** the targeted UUID-vs-string hints for `create_workspace`'s `template_id`, the no-retry-loop rule, the classification decision tree — all gone. If a specific failure mode resurfaces on Sonnet/Opus (low probability), we add a small targeted rule back. The pattern is: prove the failure on the better models BEFORE adding overrides — don't tune for INT4 weaknesses.
+
+**Trigger to revisit:**
+- A failure pattern shows up on Sonnet or Opus that the default prompt mishandles. Then add ONE narrow rule, not eight.
+- vLLM ships a Llama variant with structurally better tool-call adherence (e.g., a Llama 3.3 instruct-tuned-for-tools quant). Re-test with full appendix at that point.
+
 ---
 
 ## Decisions explicitly deferred to post-event
