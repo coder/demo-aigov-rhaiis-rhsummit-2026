@@ -50,6 +50,12 @@ spec:
       key: password
   hostname:
     hostname: keycloak.apps.cluster.rhsummit.coderdemo.io
+  # We manage the Route ourselves at manifests/keycloak/route.yaml (edge TLS
+  # via the cluster's wildcard cert). Tell the Keycloak operator NOT to
+  # create its own Route — otherwise it spawns a duplicate Route every
+  # reconcile that gets stuck in HostAlreadyClaimed against ours.
+  ingress:
+    enabled: false
   proxy:
     headers: xforwarded
   # No TLS at the Keycloak pod — the OpenShift Route terminates TLS
