@@ -676,6 +676,28 @@ Plus the OAuth app on the GitLab side registered with **exactly** that scope set
 
 **Operational gotcha that bit:** the scoped-down OAuth app's `secret` is only available at `applications.create` response time. The `GET /api/v4/applications` response does **not** include the secret. After recreating an app, capture the secret immediately into the SealedSecret or you'll be running another recreate to recover it.
 
+## 33. vLLM V1 engine still broken on rhoai-2.22-cuda (next: rhoai-2.23+)
+
+**Context:** §31 documented that V1 engine deadlocks on Llama 70B INT4 + rhoai-2.20-cuda's vLLM 0.8.4. We promoted V0 to production and put Llama in `vllm-planner-tp` (decision §32 codebase change). The standing question was: does the V1 engine work on a newer image with cudagraphs back on?
+
+**Tested:** A parallel deployment `vllm-planner-tp-v1` (manifests/rhaiis/vllm-planner-tp-v1.yaml) running on the OTHER 2 GPUs of the same g6e.12xlarge that hosts PROD, with:
+- Image `quay.io/modh/vllm:rhoai-2.22-cuda` (two RHAIIS minors newer than PROD)
+- V1 engine default (no `VLLM_USE_V1=0`)
+- cudagraphs ON (no `--enforce-eager`)
+- Same TP-2, same 32K context, same `--max-num-seqs 8`
+
+**Result:** **Still NOT viable.** Different upstream bug this time — `ValueError: 'aimv2' is already used by a Transformers config, pick another name.` at `vllm/transformers_utils/configs/ovis.py:76`. The rhoai-2.22 image bundles a vLLM + transformers combination that double-registers the `aimv2` config name when V1's cudagraph-import path executes. PROD (V0 + `--enforce-eager`) doesn't hit the bad import order so it survives on the same image; V1 doesn't.
+
+**Picked:** Scale `vllm-planner-tp-v1` to 0 (manifest deprecation comment + replicas=0). Stay on V0 + eager + the four-flag recipe (§31). Re-test on `rhoai-2.23-cuda` (or any subsequent image with vLLM ≥0.9.x that ships in the RHAIIS channel).
+
+**Cost retired by the verdict:** the 2 GPUs that V1 was hogging on the g6e.12xlarge are released back to the node's free pool. No marginal infrastructure cost ever incurred — the test reused the existing 4-GPU node.
+
+**Trigger to revisit:**
+- New RHAIIS image lands on quay.io/modh/vllm with a tag ≥ rhoai-2.23.
+- Upstream vLLM ≥ 0.9.x ships with the `aimv2` double-register fix (track upstream PR/issue).
+
+**Why we kept the manifest in git:** so the next operator who wants to re-test V1 just bumps `replicas: 1` + the image tag, and the rest of the recipe (TP-2, gpu_memory_utilization, max-num-seqs) is preserved.
+
 ---
 
 ## Decisions explicitly deferred to post-event

@@ -147,16 +147,21 @@ RHAIIS exposes the OpenAI-compatible API:
 | `mistral` | Mistral / Mixtral Instruct |
 | `deepseek` | DeepSeek-V3 / DeepSeek-Coder-V2.5+ |
 
-For the booth demo we use **Granite-3.1-8B-Instruct** with the `granite` parser. See `manifests/rhaiis/vllm-deployment.yaml` for the launch flags.
+For the booth demo we use **Llama 3.3 70B Instruct INT4** (`RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16`) with the `llama3_json` parser, tensor-parallel-2 across 2× L40S on a g6e.12xlarge node, 32K context. See `manifests/rhaiis/vllm-planner-tp.yaml` for the launch flags. Decisions §31 + §32 + §33 capture how we got here:
+- §27 was the initial "Qwen 2.5 32B AWQ on L40S" decision (now scaled to 0 — `manifests/rhaiis/vllm-deployment.yaml` + `manifests/machinesets/gpu-l40s.yaml`, both `coder.com/lifecycle: deprecated`).
+- §30 documented the temporary revert to Qwen after the Llama V1-engine silent hang.
+- §31 found the V0 + `--enforce-eager` + 8K-context recipe that works on single L40S.
+- §32 extended that to tensor-parallel-2 for 32K context on g6e.12xlarge — current production.
+- §33 documented the V1 + cudagraphs retest on rhoai-2.22-cuda (still broken; staying on V0).
 
 **Always validate with `scripts/tool-call-smoke-test.sh` before going live** — wrong parser is a silent failure mode where text returns instead of structured `tool_calls`.
 
 ## Demo-day open items
 
-The following items are tracked in the Red Hat Summit 2026 demo plan and need to be resolved before the booth opens. Status updates will land in this repo as they're closed.
+The following items were tracked in the Red Hat Summit 2026 demo plan. As of 2026-05-11 the booth is live. Status updates land in this repo as they're closed.
 
-1. End-to-end validation of Coder Agents EA against RHAIIS (highest-risk demo element)
-2. Decision on whether to run RHAIIS on a CPU node (Granite-3.1-8B at low concurrency) or a GPU node
-3. Mock sprint trigger UI implementation (GitHub Actions, Tekton, or AAP playbook)
-4. Backup video of the full two-act demo for booth network failure
-5. IdP confirmation (Keycloak vs Okta)
+- ✅ End-to-end validation of Coder Agents against RHAIIS (Llama 70B INT4 TP-2 in chatd)
+- ✅ RHAIIS on g6e.12xlarge (4× L40S, 2 in use by production TP)
+- ✅ Sprint trigger replaced by `bridge` service: GitLab Issues webhook → Coder workspace + chat. Triggers off `coder-hitl` / `coder-agent[:slug]` labels.
+- ⚠ Backup video of the full demo for booth-network failure (still pending — operator action)
+- ✅ IdP — Keycloak (RHBK) for demo personas, dual-IdP alongside GitHub OAuth for admins

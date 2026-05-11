@@ -44,7 +44,20 @@ metadata:
     app.kubernetes.io/part-of: coder-aigov-demo
     coder.com/lifecycle: experiment
 spec:
-  replicas: 1
+  # SCALED TO 0 (2026-05-11 07:00) — V1 engine on rhoai-2.22-cuda
+  # crashes at startup with
+  #   ValueError: 'aimv2' is already used by a Transformers config, pick another name.
+  #     vllm/transformers_utils/configs/ovis.py:76
+  # This is a vLLM + transformers double-registration upstream bug
+  # in the rhoai-2.22 image. PROD (vllm-planner-tp) survives because
+  # `--enforce-eager` short-circuits the import path that triggers
+  # the register; V1 needs cudagraphs which forces the bad import.
+  #
+  # Verdict: V1 still NOT viable as of rhoai-2.22. Decision §33 in
+  # docs/decisions.md captures the result. Manifest stays in git for
+  # the next image bump (rhoai-2.23+); bump replicas back to 1 and
+  # re-test then.
+  replicas: 0
   strategy:
     type: Recreate
   progressDeadlineSeconds: 3600

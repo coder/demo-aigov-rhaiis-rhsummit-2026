@@ -1,429 +1,302 @@
 # demo-aigov-rhaiis-rhsummit-2026
 
-Reference architecture and deployable demo for the **Coder + Red Hat** booth at **Red Hat Summit + AnsibleFest 2026** (Atlanta GWCC, May 11–14).
+Reference architecture + deployable demo for the **Coder + Red Hat** booth at **Red Hat Summit + AnsibleFest 2026** (Atlanta GWCC, May 11–14).
 
 > **Lead with AI Governance. Prove it with Developer Experience.**
 > Coder + Red Hat: safe AI adoption at enterprise scale.
 
+---
+
 ## What this demo proves
 
-1. **AI agents can be governed at enterprise scale** — every model call goes through AI Gateway and every workspace egress goes through Agent Firewalls; both are auditable and policy-controlled.
-2. **You can run the same architecture sovereign or cloud** — RHAIIS (Granite-3.1-8B) and Bedrock (Claude Sonnet) sit behind the same gateway; the workspace doesn't know or care which one answers.
-3. **The whole stack lands on OpenShift with operators and GitOps** — no AWS-only patterns in the cluster; this same shape installs on Azure, vSphere, bare-metal, or air-gap.
+1. **AI agents can be governed at enterprise scale** — every model call goes through Coder's AI Bridge (audited, policy-controlled). Every workspace egress goes through Agent Firewalls.
+2. **You can run the same architecture sovereign or cloud** — RHAIIS (Llama 3.3 70B INT4, tensor-parallel) and AWS Bedrock (Claude Sonnet/Opus) sit behind the same gateway; the workspace neither knows nor cares which one answers.
+3. **The whole stack lands on OpenShift with operators + GitOps** — same shape installs on Azure, vSphere, bare-metal, or air-gap.
+4. **Identity is enterprise-grade** — Keycloak (RHBK) for demo personas, GitHub OAuth for admins, dual-IdP into Coder, OpenShift Console, Grafana, and GitLab.
+5. **The "ticket → workspace → agent" loop is the whole demo** — open a GitLab issue, label it `coder-agent`, the bridge spawns a workspace and a Coder Agents chat that drives Llama (or Claude) to investigate and open an MR. Sub-1-minute from click to working agent.
 
-## What this repo is
+---
 
-End-to-end IaC + GitOps to stand up a governed agentic AI coding demo on **OpenShift 4.21+ (IPI install in your AWS account)** — combining:
+## Stack at a glance
 
-- **Coder Workspaces** — Terraform-defined cloud development environments on OpenShift, pinned to chart **2.33.1** / image **v2.33.1** (Coder Agents promoted to beta in this release; `CODER_EXPERIMENTS=agents` no longer required)
-- **Coder AI Bridge** (also marketed as AI Gateway) — centralized LLM proxy at `/api/v2/aibridge/{anthropic,openai}`. Anthropic traffic forwards to AWS Bedrock via the `cluster-coder-bedrock` IRSA role; OpenAI traffic uses a central `coder-secrets.openai-api-key` with `ALLOW_BYOK=false` for audit-trail integrity
-- **Coder Agents (beta as of v2.33.1)** — self-hosted chatd loop in the control plane. Providers + models registered by the `coder-agents-config` Argo Job (Bedrock-backed Anthropic models + RHAIIS-hosted Qwen 2.5 Coder 32B)
-- **Coder Tasks** — background agent execution interface for Claude Code, Aider, Goose, Amazon Q, and custom agents
-- **Red Hat AI Inference Server (RHAIIS)** — enterprise vLLM serving an OpenAI-compatible endpoint on a single L40S GPU node (`g6e.2xlarge`), running `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` with `--tool-call-parser hermes` for proper agentic tool calling. (RHAIIS can also be deployed as a `ServingRuntime` inside the full Red Hat OpenShift AI [RHOAI] stack; this demo deploys the standalone RHAIIS image directly to keep operator surface area small for the booth.)
-- **CloudNativePG** — in-cluster, multi-AZ Postgres for Coder via the `cloudnative-pg` operator. No RDS — the demo stays on-prem-portable.
-- **Red Hat OpenShift GitOps** (Argo CD) — manages all cluster apps via app-of-apps pattern
-- **cert-manager Operator for Red Hat OpenShift** — wildcard TLS for `*.coder.apps.<fqdn>` via Let's Encrypt + Route 53 DNS-01
-- **OpenShift Container Platform 4.21+** — self-managed via Installer-Provisioned Infrastructure (IPI) on AWS
+| Concern | What's deployed |
+|---|---|
+| **Cluster** | OpenShift 4.21 IPI on AWS, 3× `m6i.4xlarge` converged control-plane+worker, 1× `g6e.12xlarge` GPU node (4× L40S 48 GiB) |
+| **GitOps** | Red Hat OpenShift GitOps (Argo CD), app-of-apps from `gitops/apps/` |
+| **Coder** | Helm chart **2.33.2**, image `v2.33.2` (Coder Agents beta promoted) |
+| **AI Bridge** | Centralized LLM proxy at `/api/v2/aibridge/{anthropic,openai}`. Anthropic → Bedrock via IRSA. OpenAI → central org key (`ALLOW_BYOK=false`) |
+| **RHAIIS (sovereign LLM)** | vLLM 0.8.4 V0 engine on RHAIIS image `rhoai-2.20-cuda`, `RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16`, tensor-parallel-2, **32K context** — `vllm-planner-tp.ocp-ai.svc.cluster.local:8000` |
+| **chatd** (Coder Agents) | Default model: Claude Sonnet 4 (Bedrock). Sovereign opt-in via `coder-agent:llama` label on issues |
+| **Identity** | **Dual IdP**. Keycloak (RHBK) — `demo` realm hosts personas (alice/bob/carol/dave/demoadm). GitHub OAuth — admin tier (gated to `demo-rhsummit-users` org). |
+| **SCM** | **Self-hosted GitLab CE** (`gitlab.rhsummit.coderdemo.io`, EC2 `m7a.2xlarge`, Omnibus + container registry at `registry.gitlab.rhsummit.coderdemo.io`). SSO-only login via Keycloak. GitHub login disabled, GitHub external_auth retained as optional secondary for workspaces. |
+| **Issue → workspace bridge** | Go service in `services/bridge/`. GitLab Issues webhook → matches `coder-hitl` or `coder-agent[:slug]` label → spawns workspace + (optionally) Coder Agents chat. Posts comment back with URLs. |
+| **Postgres** | CloudNativePG (CNPG) `Cluster` CR, 3 instances, multi-AZ. Used by Coder + Keycloak. |
+| **TLS** | cert-manager + Let's Encrypt (DNS-01 via Route 53 IRSA). |
+| **Observability** | coder-observability Helm umbrella: Grafana, Prometheus, Loki, Alertmanager. GPU + vLLM dashboards live in **OCP Console** (decision §29). |
 
-### Operator policy
+Deeper architectural narrative + every decision behind these choices: [`docs/architecture.md`](docs/architecture.md), [`docs/decisions.md`](docs/decisions.md).
 
-This demo uses **only Red-Hat-certified, RH-supported operators** where Red Hat ships one. Coder is a Red Hat partner and pulls all RH-distributed images through the partner pull-secret. Specifically:
-
-| Component | Operator / Image | Source |
-|---|---|---|
-| Argo CD | `openshift-gitops-operator` | Red Hat (NOT upstream Argo CD operator) |
-| cert-manager | `openshift-cert-manager-operator` | Red Hat (NOT upstream jetstack/cert-manager) |
-| RHAIIS | `registry.redhat.io/rhoai/vllm-cuda-rhel9` | Red Hat AI Inference Server, GPU image (lands on the GPU worker via NFD-applied `nvidia.com/gpu.present=true` label) |
-| Node Feature Discovery (NFD) | `nfd` | Red Hat (RH-engineered; labels nodes with PCI/CPU features so the GPU operator knows which nodes need drivers) |
-| NVIDIA GPU Operator | `gpu-operator-certified` (channel: `stable`) | **certified-operators** — *documented exception.* NVIDIA-engineered, Red Hat-certified for OCP. Red Hat doesn't ship a first-party GPU operator; this is the path RH explicitly directs OpenShift customers to for GPU support. |
-| CloudNativePG | `cloudnative-pg` (channel: `stable-v1.24`) | **community-operators** — *documented exception.* Red Hat does not ship a first-party in-cluster Postgres operator; CNPG is the de facto Kubernetes-native Postgres operator (CNCF Sandbox). We pick it over RDS to keep the cluster apps on-prem-portable: the same `Cluster` CR runs on Azure / vSphere / bare-metal / air-gap with no AWS dependency. See [`gitops/operator/cnpg-subscription.yaml`](gitops/operator/cnpg-subscription.yaml) for full reasoning. |
-
-> **Demo simplicity over hardening.** This is a booth demo, not an ATO baseline. STIG/FIPS posture, OCP `restricted-v2` SCC overrides, and air-gap config are intentionally **not** applied — they overcomplicate setup. Production architectures keep them; see [`docs/architecture.md`](docs/architecture.md) for the production narrative arc.
+---
 
 ## Architecture at a glance
 
 ```
-┌─── AWS account (your account, your region) ──────────────────────────────┐
-│                                                                          │
-│  ┌─ Terraform manages ─────────────────────────────────────────────────┐ │
-│  │   VPC + subnets + NAT/IGW                                            │ │
-│  │   IAM users (cert-manager → R53; Coder → Bedrock)                    │ │
-│  │   Route 53 records (you supply hosted zone)                          │ │
-│  │   OpenShift 4.21 IPI install (openshift-install via local-exec)      │ │
-│  │   Operator subscriptions: GitOps + cert-manager + CloudNativePG      │ │
-│  │   Cluster Secrets bootstrap (route53, bedrock, redhat-pull-secret)   │ │
-│  │   Argo CD root Application (app-of-apps bootstrap)                   │ │
-│  └──────────────────────────────────────────────────────────────────────┘ │
-│                                                                          │
-│  ┌─ OpenShift cluster ────────────────────────────────────────────────┐ │
-│  │                                                                     │ │
-│  │  ┌─ Argo CD manages (GitOps from this repo) ─────────────────────┐ │ │
-│  │  │   sealed-secrets/      Bitnami SealedSecret controller         │ │ │
-│  │  │   platform-secrets/    All sealed secrets (coder/grafana/idp/…)│ │ │
-│  │  │   cluster-config/      Scheduler/cluster, OAuth/cluster, GroupSync│ │ │
-│  │  │   group-sync-operator/ redhat-cop GH team→Group sync           │ │ │
-│  │  │   cert-manager/        Let's Encrypt ClusterIssuers (DNS-01/R53)│ │ │
-│  │  │   postgres/            CNPG Cluster CR (3 instances, multi-AZ) │ │ │
-│  │  │                          → auto-generates `coder-app` Secret   │ │ │
-│  │  │   gpu-stack/           NFD + NVIDIA ClusterPolicy              │ │ │
-│  │  │   coder/               Coder Helm chart 2.33.1 + AI Bridge     │ │ │
-│  │  │   coder-provisioner/   External provisioner Deployment         │ │ │
-│  │  │   coder-routing/       OCP Routes + wildcard cert externalRef  │ │ │
-│  │  │   coder-workspaces/    Namespace + cross-ns RBAC + ghcr-pull   │ │ │
-│  │  │   coder-agents-config/ Job: registers chatd providers + models │ │ │
-│  │  │   rhaiis/              vLLM (L40S) — Qwen2.5-Coder-32B-AWQ     │ │ │
-│  │  │   observability/       coder-observability (Grafana/Prom/Loki) │ │ │
-│  │  └────────────────────────────────────────────────────────────────┘ │ │
-│  │                                                                     │ │
-│  │  ┌─ Workspace templates (pushed by GH Actions push-templates.yml) ┐ │ │
-│  │  │   coder-templates/ai-dev-ocp/                                  │ │ │
-│  │  │     - code-server + Kiro/Cursor IDEs + Claude/Codex/Gemini/    │ │ │
-│  │  │       Kiro CLIs; AI Bridge env wired                           │ │ │
-│  │  │   coder-templates/agents-dev-ocp/                              │ │ │
-│  │  │     - code-server only; chatd drives agent loop server-side    │ │ │
-│  │  │   Shared base images at coder-templates/images/:               │ │ │
-│  │  │     ubi9-base-workspace, ubi9-node-workspace, agents-config-tools│ │ │
-│  │  └────────────────────────────────────────────────────────────────┘ │ │
-│  │                                                                     │ │
-│  └─────────────────────────────────────────────────────────────────────┘ │
-│                                                                          │
-└──────────────────────────────────────────────────────────────────────────┘
+┌─── AWS account (your account, your region) ────────────────────────────────────┐
+│                                                                                │
+│  ┌─ Terraform (terraform/) manages ────────────────────────────────────────┐   │
+│  │   VPC + subnets + NAT/IGW                                                │   │
+│  │   IAM roles for IRSA (cert-manager→R53, Coder→Bedrock)                   │   │
+│  │   Route 53 records                                                       │   │
+│  │   OpenShift 4.21 IPI install (openshift-install)                         │   │
+│  │   Operator subscriptions (GitOps, cert-manager, CNPG, NFD, NVIDIA, RHBK) │   │
+│  │   GPU MachineSets (gpu-l40s-tp.yaml → 4× L40S g6e.12xlarge)              │   │
+│  │   GitLab CE on EC2 (terraform/gitlab/ submodule)                         │   │
+│  │   Argo CD root Application                                               │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                │
+│  ┌─ OpenShift cluster ────────────────────────────────────────────────────┐    │
+│  │                                                                        │    │
+│  │  ┌─ Argo CD apps (gitops/apps/) ────────────────────────────────────┐ │    │
+│  │  │   sealed-secrets       Bitnami SealedSecret controller            │ │    │
+│  │  │   platform-secrets     Every sealed secret (coder/gitlab/idp/…)   │ │    │
+│  │  │   cluster-config       OAuth/cluster CR (GitHub + Keycloak IdPs), │ │    │
+│  │  │                        cluster-reader + monitoring-view CRBs for  │ │    │
+│  │  │                        the developers group, GroupSync            │ │    │
+│  │  │   keycloak-operator    RHBK operator subscription                 │ │    │
+│  │  │   keycloak             Keycloak CR + demo realm (5 personas)      │ │    │
+│  │  │   cert-manager         ClusterIssuers (LE + R53 DNS-01)           │ │    │
+│  │  │   postgres             CNPG Cluster (3 instances, multi-AZ)       │ │    │
+│  │  │   gpu-stack            NFD + NVIDIA ClusterPolicy                 │ │    │
+│  │  │   rhaiis               vllm-planner-tp (Llama 70B INT4, TP-2)     │ │    │
+│  │  │   coder                Helm chart 2.33.2 — dual-IdP (GitHub OAuth │ │    │
+│  │  │                        + Keycloak OIDC), dual external_auth       │ │    │
+│  │  │                        (slot 0 gitlab, slot 1 github)             │ │    │
+│  │  │   coder-provisioner    External provisioner Deployment            │ │    │
+│  │  │   coder-routing        OCP Routes + wildcard cert                 │ │    │
+│  │  │   coder-workspaces     Namespace + RBAC + ghcr-pull (sealed)      │ │    │
+│  │  │   coder-agents-config  Job: chatd providers + model-configs +    │ │    │
+│  │  │                        system prompt + plan-mode + custom        │ │    │
+│  │  │                        DemoUser role + OIDC role sync            │ │    │
+│  │  │   bridge               Go service — GitLab webhook → Coder       │ │    │
+│  │  │                        workspace + chat per assignee             │ │    │
+│  │  │   observability        Grafana / Prom / Loki / Alertmanager      │ │    │
+│  │  │                        (auth.github + auth.generic_oauth = both  │ │    │
+│  │  │                        IdPs)                                     │ │    │
+│  │  └──────────────────────────────────────────────────────────────────┘ │    │
+│  │                                                                        │    │
+│  │  Workspace templates pushed by GH Actions (push-templates.yml):       │    │
+│  │   ai-dev-ocp / agents-dev-ocp / demo-ai-gov-firewall-ocp /            │    │
+│  │   demo-ai-gov-no-firewall-ocp   (all four declare both external_auth) │    │
+│  └────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                │
+│  ┌─ External (same VPC, EC2) ─────────────────────────────────────────────┐   │
+│  │   GitLab CE — Omnibus on m7a.2xlarge, terraform/gitlab/ module.        │   │
+│  │     * gitlab.rhsummit.coderdemo.io           (UI + git)                │   │
+│  │     * registry.gitlab.rhsummit.coderdemo.io  (container registry)      │   │
+│  │   SSO via Keycloak realm `demo`; password login disabled.              │   │
+│  └────────────────────────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────────────────┘
 
-       ▲
-       │  GH Actions (.github/workflows/) pushes:
-       │    - build-images.yml: workspace base images → GHCR (uses GITHUB_TOKEN, no AWS creds)
-       │    - push-templates.yml: coder-templates/* → live Coder (on template changes)
-       │
-   ┌───┴────────────────────────────┐
-   │  this repo (single source of   │
-   │  truth — Terraform + GitOps    │
-   │  manifests + templates)        │
-   └────────────────────────────────┘
+   ┌────────────────────────────────┐    ┌────────────────────────────────────┐
+   │  this repo                     │    │  GH Actions                        │
+   │  (Terraform + GitOps mani-     │───▶│  build-images / build-bridge /     │
+   │  fests + templates + bridge    │    │  push-templates                    │
+   │  service + scripts)            │    │  → ghcr.io/coder/demo-aigov-rhaiis │
+   └────────────────────────────────┘    └────────────────────────────────────┘
 ```
+
+---
 
 ## Repository layout
 
 ```
 .
-├── README.md                       # this file
-├── LICENSE                         # Apache-2.0
-├── .gitignore
+├── README.md                            (you are here)
+├── Makefile                             booth ops cheat sheet (reset, status, ...)
+├── LICENSE                              Apache-2.0
 │
-├── terraform/                      # AWS + OCP infra (run this first)
-│   ├── README.md
-│   ├── versions.tf
-│   ├── providers.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   ├── main.tf
-│   ├── install-config.yaml.tftpl
-│   └── terraform.tfvars.example
+├── terraform/                           AWS + OCP infra (run first)
+│   ├── main.tf / network.tf / irsa.tf   VPC, IAM, OCP IPI install
+│   ├── gitlab.tf + gitlab/              EC2 + EBS + Route 53 for GitLab Omnibus
+│   └── prereqs/                         account-level pre-flight (R53 hosted zone, IAM)
 │
-├── gitops/                         # Argo CD app-of-apps (Argo points here)
-│   ├── README.md
-│   ├── operator/                   # Subscriptions applied by TF before Argo CD runs
-│   │   ├── openshift-gitops-subscription.yaml
-│   │   ├── cert-manager-subscription.yaml
-│   │   ├── cnpg-subscription.yaml
-│   │   ├── nfd-subscription.yaml                  # Node Feature Discovery (RH)
-│   │   └── nvidia-gpu-operator-subscription.yaml  # NVIDIA GPU operator (certified)
-│   ├── bootstrap/
-│   │   └── root-app.yaml           # the one Application that fans out to all apps below
-│   └── apps/
-│       ├── postgres/
-│       │   └── application.yaml    # CNPG Cluster CR (auto-generates `coder-app` Secret)
-│       ├── gpu-stack/
-│       │   └── application.yaml    # NFD instance + NVIDIA ClusterPolicy
-│       ├── cert-manager/
-│       │   └── application.yaml
-│       ├── coder/
-│       │   └── application.yaml    # Coder Helm chart (latest RC) with AI Gov Add-On
-│       ├── coder-routing/
-│       │   └── application.yaml
-│       ├── rhaiis/
-│       │   └── application.yaml    # RHAIIS / vLLM (CUDA) Deployment + Service
-│       └── observability/
-│           └── application.yaml    # Grafana + Prom + Loki + Coder dashboards
+├── gitops/
+│   ├── operator/                        operator Subscriptions applied by TF
+│   └── apps/                            Argo CD Applications (one dir per app)
+│       └── application.yaml             auto-discovered by root app
 │
-├── manifests/                      # raw Kubernetes manifests (referenced by Argo CD apps)
-│   ├── postgres/
-│   │   ├── namespace.yaml
-│   │   └── cluster.yaml            # CNPG Cluster CR (3 instances, multi-AZ)
-│   ├── gpu-stack/
-│   │   ├── nodefeaturediscovery.yaml   # NFD CR
-│   │   └── clusterpolicy.yaml          # NVIDIA GPU operator ClusterPolicy
-│   ├── cert-manager/
-│   │   └── cluster-issuer.yaml
-│   ├── coder/
-│   │   ├── certificate.yaml
-│   │   ├── ingress-wildcard-policy.yaml
-│   │   └── route.yaml
-│   ├── rhaiis/
-│   │   ├── namespace.yaml
-│   │   └── vllm-deployment.yaml    # CUDA image, nvidia.com/gpu: 1 request
-│   └── observability/
-│       ├── certificate.yaml             # Grafana TLS cert
-│       ├── route.yaml                   # OCP Route for Grafana
-│       ├── agent-boundaries-dashboard-configmap.yaml
-│       ├── aibridge-dashboard-configmap.yaml
-│       └── infinity-datasource-configmap.yaml
+├── manifests/                           raw YAML referenced by Argo apps
+│   ├── bridge/                          bridge Deployment + Service + Route
+│   ├── cluster-config/                  OAuth CR (dual IdP), RBAC bindings, GroupSync
+│   ├── coder-agents-config/             chatd config Job + ConfigMap + prompts
+│   ├── keycloak/                        Keycloak CR + KeycloakRealmImport (demo realm)
+│   ├── machinesets/                     GPU MachineSet definitions (TP + deprecated)
+│   ├── rhaiis/                          vLLM Deployments (TP prod, deprecated singles)
+│   ├── secrets/                         every SealedSecret (gitops-tracked, encrypted)
+│   └── observability/  cert-manager/  postgres/  gpu-stack/  ...
 │
-├── coder-templates/                # demo workspace templates pushed by GH Actions
-│   ├── README.md
-│   ├── ai-dev-ocp/                 # code-server + Kiro/Cursor IDEs + LLM CLIs (AI Bridge)
-│   │   ├── main.tf
-│   │   ├── README.md
-│   │   └── metadata.json
-│   ├── agents-dev-ocp/             # code-server only; chatd drives the agent loop server-side
-│   │   ├── main.tf
-│   │   ├── README.md
-│   │   └── metadata.json
-│   └── images/                     # SHARED base images (one tree, not per-template)
-│       ├── ubi9-base-workspace/    # UBI 9.7 + EPEL + uid_entrypoint
-│       ├── ubi9-node-workspace/    # FROM ubi9-base + Node 22 + corepack
-│       └── agents-config-tools/    # UBI9-minimal + aws + jq + curl (used by Argo Job)
+├── services/
+│   └── bridge/                          Go HTTP service — GitLab webhook → Coder
+│       ├── cmd/bridge/main.go
+│       ├── internal/{config,webhook,coder,gitlab,handler}/
+│       └── Dockerfile                   distroless static, multi-stage Go build
 │
-├── scripts/
-│   ├── configure-manifests.sh         # patch manifests with cluster-specific values + apply root app
-│   ├── tool-call-smoke-test.sh        # validate RHAIIS tool-call parser end-to-end
-│   ├── bootstrap-r53-delegation.sh    # cross-account R53 subdomain delegation
-│   ├── aws-quota-bootstrap.sh         # compute / request / track AWS quotas
-│   └── setup-demo-labels.sh           # GH labels for the sprint-ticket flow
+├── coder-templates/                     workspace templates pushed by push-templates.yml
+│   ├── ai-dev-ocp/                      Claude/Codex/Gemini/Kiro CLIs + AI Bridge env
+│   ├── agents-dev-ocp/                  Coder Agents driving server-side chatd
+│   ├── demo-ai-gov-firewall-ocp/        with Boundary egress firewall
+│   ├── demo-ai-gov-no-firewall-ocp/     open egress (the ungoverned story)
+│   └── images/                          shared UBI9 base images + agents-config-tools
 │
-└── .github/
-    └── workflows/
-        ├── build-images.yml        # build + push workspace base images to GHCR
-        └── push-templates.yml      # `coder templates push` against the live cluster
+├── scripts/                             booth-ops helpers
+│   ├── reset-demo.sh                    wipe per-event demo state (used by `make reset`)
+│   ├── gitlab-create-coder-oauth-app.sh setup: Coder external_auth OAuth app in GitLab
+│   ├── gitlab-register-bridge-webhook.sh setup: register bridge webhook per project
+│   ├── gitlab-promote-demoadmins.sh     idempotent: promote Keycloak admins to GL admin
+│   ├── render-coder-agents-configmap.sh regenerate the chatd config ConfigMap
+│   └── coder-agents-provider-model-config.sh   the Job's bootstrap script (sourced)
+│
+├── docs/                                deeper docs (not strictly necessary to bootstrap)
+│   ├── architecture.md
+│   ├── decisions.md                     §1–§33 architectural decision log
+│   ├── identity-architecture.md
+│   ├── demo-flow-persona-setup.md       what alice runs at the booth
+│   ├── maas-and-self-hosted-options.md  MaaS comparison reference reading
+│   ├── aws-setup.md  /  aws-creds.md  /  secrets.md  /  team-onboarding.md
+│
+└── .github/workflows/                   GH Actions
+    ├── build-images.yml                 UBI9 workspace base images → GHCR
+    ├── build-bridge.yml                 bridge Go service → GHCR (distroless)
+    └── push-templates.yml               coder templates push (all four -ocp templates)
 ```
 
-## Sizing, cost, and startup time
+---
 
-### Locked cluster shape: 3-node converged + 1 GPU (always)
+## The booth demo flow
 
-The shipped architecture is a **compact 3-node OpenShift cluster** with a **dedicated GPU worker that's always present whenever the cluster is up**:
+1. **PM (or anyone)** opens a GitLab issue in a demo project (e.g. `alice/artemis-sim`).
+2. **PM assigns** the issue to a Keycloak persona (alice, bob, carol, dave).
+3. **PM labels** the issue with one of:
+   - `coder-hitl` → bridge spawns a workspace owned by the assignee. They open it and work manually.
+   - `coder-agent` → bridge spawns a workspace AND creates a Coder Agents chat owned by the assignee, pre-seeded with the issue title + description and instructions to push a branch + open an MR.
+   - `coder-agent:llama` / `:sonnet` / `:opus` → as above, but pinning the chat to that model (latest matching version wins).
+4. **Bridge** sees the webhook, validates both conditions (label AND assignee), fetches issue body via its admin PAT, embeds it in the chat seed prompt, mints a per-user Coder token, creates the chat as the assignee, comments back on the issue with the workspace + chat URLs.
+5. **Booth audience watches** the workspace + agent appear in the Coder UI in real time. Agent investigates, edits, pushes a branch, opens an MR.
 
-- 3 × `m6i.4xlarge` — control-plane AND workers (`compute.replicas: 0` in `install-config.yaml`). Multi-AZ via `topology.kubernetes.io/zone`. ~13 vCPU / 52 GiB usable per node after kube-control-plane + OS overhead → ~39 vCPU / 156 GiB across the cluster for everything except RHAIIS.
-- 1 × `g5.2xlarge` — GPU pool (1× A10G, 24 GiB VRAM, 8 vCPU, 32 GiB RAM). Dedicated to RHAIIS (`vllm-cuda-rhel9`). Provisioned by `openshift-install` at cluster-create time as a second compute pool — not a post-install MachineSet.
-- NVIDIA GPU operator (`certified-operators` source, NVIDIA-engineered + RH-certified) + Node Feature Discovery (RH-engineered) handle drivers, container-toolkit, device-plugin, and the `nvidia.com/gpu.present=true` label that RHAIIS's `nodeSelector` keys off.
+Full walkthrough including alice's first-login steps: [`docs/demo-flow-persona-setup.md`](docs/demo-flow-persona-setup.md).
+Troubleshooting matrix (the four bridge no-op reasons + their fixes): same doc.
 
-There is **no CPU fallback path for RHAIIS** — when the cluster is up, the GPU node is up. If you want a "demo without GPU" mode for cost-sensitive testing, set `gpu_count = 0` in tfvars/env and edit `manifests/rhaiis/vllm-deployment.yaml` to use `vllm-cpu-rhel9` (not currently shipped — explicitly out of scope per the locked design).
-
-| Concern | Decision |
-|---|---|
-| Multi-AZ HA story | ✓ — 3 CP across us-east-1 a/b/c; CNPG `instances: 3` topology-spread; lose 1 node → 2/3 etcd quorum holds |
-| Dedicated worker pool | None — converged. Less moving parts, +30% cost savings vs the old 3 CP + 3 worker shape |
-| GPU node placement | Single AZ (`gpu_zone_index = 0` → `us-east-1a` by default) — g5 capacity is uneven across AZs; predictable launch beats AZ resilience here |
-| RHAIIS image | `registry.redhat.io/rhoai/vllm-cuda-rhel9:latest` |
-| Operator policy | RH-engineered where RH ships (NFD); NVIDIA-certified where they don't (GPU operator). Documented exception alongside CNPG |
-
-### Cost (us-east-1, on-demand, GPU always on)
-
-| Component | Hourly | Daily (24/7) |
-|---|---|---|
-| 3× m6i.4xlarge (converged) | $2.304 | $55 |
-| 1× g5.2xlarge (GPU, A10G) | $1.21 | $29 |
-| NAT gateways (3, one per AZ) | $0.135 | $3.24 |
-| EBS gp3 (~1 TiB total across nodes) | ~$0.10 | ~$2 |
-| **Total** | **~$3.65/hr** | **~$87/day** |
-
-For a 5-week prep+booth window:
-- 50 hr/wk schedule (Mon–Fri 9–5 with destroy/rebuild lifecycle): **~$912 total**
-- Always-up: ~$3,045 total
-
-> **GPU vCPU is a separate AWS quota.** New accounts often start at 0 in `Running On-Demand G and VT instances vCPU` (quota code `L-DB2E81BA`). File the increase request at least a week before booth — case-based approval, not auto. `scripts/aws-quota-bootstrap.sh` files and tracks it for you. (Note: in our existing ocp-deploy account this quota was already 768 vCPU, no request needed.)
-
-### Lifecycle: declarative tear-down / rebuild, never `ec2 stop`
-
-OCP doesn't tolerate `ec2 stop/start` cleanly (etcd quorum, kubelet TLS rot, IPI-managed ELBs). The right pattern for "off-hours" is `terraform destroy` + `terraform apply` on a schedule. Because nothing in `gitops/`, `manifests/`, or `coder-templates/` is account-state-dependent, every rebuild lands in the same place — Bedrock model access, R53 delegation, and GHCR images all survive a destroy.
-
-Practical cadence for booth-prep weeks:
-- **Up** — Monday morning, `terraform apply` (~60 min cold start, see table below)
-- **Down** — Friday EOD, `terraform destroy` (~10 min)
-- ~50 hr/week uptime on compact-3 ≈ **$65/week**, vs ~$215/week if left running 24/7.
-
-A future commit can wrap this in `make cluster-up` / `make cluster-down` plus a GHA cron — call it out when you want it.
-
-### Startup time (cold start to first usable workspace)
-
-| Phase | Tool | Approx time | Notes |
-|---|---|---|---|
-| Quota requests (one-time, run a week ahead) | `scripts/aws-quota-bootstrap.sh request` | minutes – days | Standard vCPU often auto-approves; GPU vCPU is case-based |
-| R53 cross-account delegation (one-time) | `scripts/bootstrap-r53-delegation.sh` | ~2 min total + propagation | <60s for resolver pickup once parent applies |
-| Account-level prereqs (one-time per account) | `terraform/prereqs apply` | ~3–5 min | IAM users + (optional) hosted-zone create |
-| Cluster install — VPC + IAM | `terraform/main.tf` (early stages) | ~3 min | BYO-VPC, NAT gateways per AZ |
-| Cluster install — `openshift-install create cluster` | `terraform/main.tf` (local-exec) | **~30–45 min** | The single biggest line item; AWS image pull + bootstrap + CP nodes |
-| Operator subscriptions + CRD wait | `terraform/main.tf` (gitops_bootstrap) | ~3–5 min | OpenShift GitOps + cert-manager + CNPG + NFD + NVIDIA GPU |
-| Cluster Secrets + IRSA bootstrap | same step | ~30 sec | SA annotations, pull secrets, NS delegation |
-| Configure manifests + activate GitOps | `scripts/configure-manifests.sh` | ~1 min | Patches domains/zone IDs, applies root app, commit+push |
-| Argo CD app-of-apps sync (postgres + gpu-stack in parallel, then coder, then rhaiis) | Argo (autonomous) | ~5–10 min | gpu-stack waits for the NVIDIA driver DaemonSet (~3–5 min on first boot); RHAIIS pod schedules once `nvidia.com/gpu` is allocatable |
-| TLS cert issuance (Let's Encrypt DNS-01) | cert-manager | ~2–5 min | After Routes exist; uses cluster zone for ACME challenges |
-| First Coder admin login + GH Actions secrets | manual + `gh secret set` | ~2 min | `CODER_URL`, `CODER_SESSION_TOKEN` |
-| First template push | `.github/workflows/push-templates.yml` | ~2 min | Triggered by any `coder-templates/**` change |
-| Prebuilt-Workspace warm pool ready | Coder | ~3–5 min | One-time per template |
-| **First usable workspace from a fresh AWS account** | end-to-end | **~70–85 min** | OCP installer (45 min) + GPU operator driver compile (5 min) + everything downstream |
-
-Subsequent booth-week rebuilds skip the one-time rows and land in **~50–60 min** end-to-end.
-
-## Quickstart
-
-### 0. Prereqs (one-time)
-
-- An AWS account with admin perms (or scoped enough for OCP IPI)
-- `awscli` configured with your account / profile
-- A Red Hat **partner pull secret** → grab from <https://console.redhat.com/openshift/install/pull-secret>
-- An **SSH public key** for OpenShift node access (`~/.ssh/id_ed25519.pub` or similar)
-- The **`openshift-install`** binary (4.21+) on your `PATH` — download from <https://mirror.openshift.com/pub/openshift-v4/clients/ocp/>
-- The **`oc`** binary on your `PATH` (same mirror)
-- `terraform` ≥ 1.7 or `tofu` ≥ 1.7
-- `gh` CLI authenticated (you've already done this)
-
-### 1. Provision account-level prereqs (run once per AWS account)
-
-```bash
-cd terraform/prereqs/
-cp terraform.tfvars.example terraform.tfvars
-# edit: base_domain, owner_email, cluster_name, instance types
-terraform init
-terraform apply
-```
-
-This will:
-- Validate AWS service quotas (EC2 vCPU, EIPs, VPCs, IGWs, hosted zones); **hard-fail if any is below the computed need**
-- Optionally file quota-increase requests via the Service Quotas API (`request_quota_increases = true`)
-- Create the public Route 53 hosted zone for `base_domain` (or import an existing one)
-- Create a dedicated IAM user `ocp-installer-<cluster_name>` with admin perms + access keys (or skip and use your own creds)
-
-If you created a new hosted zone, **delegate the printed NS records at your registrar** before continuing. Verify with `dig +short NS <base_domain>`.
-
-### 2. Provision the cluster
-
-```bash
-cd terraform/   # not prereqs/ — the parent root
-cp terraform.tfvars.example terraform.tfvars
-# edit terraform.tfvars: aws_region, cluster_name, base_domain, pull_secret_path, ssh_pubkey_path
-terraform init
-terraform plan
-terraform apply
-```
-
-This will:
-1. Create the BYO-VPC + IAM roles (cert-manager → Route 53; Coder → Bedrock via IRSA)
-2. Generate `install-config.yaml` from the template
-3. Run `ccoctl aws create-all` (OIDC provider + platform IAM roles for STS)
-4. Run `openshift-install create cluster` (~30–45 min)
-5. Apply operator subscriptions (OpenShift GitOps + cert-manager + CloudNativePG + NFD + NVIDIA GPU)
-6. Wait for all operator CRDs
-7. Bootstrap cluster Secrets + IRSA ServiceAccount annotations
-8. Create NS delegation for the cluster zone in the parent Route 53 zone
-
-After `apply` finishes you'll have:
-- A live OCP 4.21 cluster (STS/IRSA mode) with all operators installed
-- Argo CD running but **idle** (no root app applied yet — avoids race conditions)
-
-### 2b. Configure manifests and activate GitOps
-
-```bash
-cd ..   # back to repo root
-./scripts/configure-manifests.sh --terraform-dir ./terraform
-```
-
-This script:
-1. Reads `cluster_fqdn` and `cluster_zone_id` from terraform outputs
-2. Patches all manifests and gitops files with the correct domain names and zone IDs
-3. Applies the Argo CD root Application (app-of-apps) — GitOps is now active
-
-Then commit and push so Argo CD syncs from the repo:
-
-```bash
-git add -A
-git commit -m "chore: configure manifests for $(terraform -chdir=terraform output -raw cluster_fqdn)"
-git push origin main
-```
-
-After this you'll have:
-- Argo CD syncing all apps: postgres, cert-manager, coder, rhaiis, gpu-stack, coder-routing, observability
-- Wildcard TLS certs in flight for `*.apps.<fqdn>`, `*.coder.apps.<fqdn>`, and `api.<fqdn>` (Let's Encrypt prod, DNS-01)
-- Coder reachable at `https://coder.apps.<cluster-domain>`
-- RHAIIS reachable cluster-internally at `http://vllm.ocp-ai.svc:8000`
-
-### 3. Configure Coder providers (one-time)
-
-Once Coder is up, log in as the first admin user, grab a session token, then:
-
-```bash
-gh secret set CODER_URL --body "https://coder.<your-cluster-domain>"
-gh secret set CODER_SESSION_TOKEN --body "<session-token>"
-```
-
-The GH Actions workflow will use these to push template updates.
-
-### 3. Push your first workspace template
-
-```bash
-git add coder-templates/ai-dev-ocp/ coder-templates/agents-dev-ocp/
-git commit -m "feat(templates): initial -ocp templates"
-git push origin main
-```
-
-The `push-templates.yml` workflow runs the `coder templates push` matrix against your cluster — both `ai-dev-ocp` and `agents-dev-ocp` are pushed on every change to `coder-templates/**`.
-
-### 4. Set up the booth-demo sprint-ticket flow
-
-Run once per repo to create the demo labels (`sprint-ticket`, `demo`, `rhsummit-2026`):
-
-```bash
-./scripts/setup-demo-labels.sh
-```
-
-The booth demo flow becomes:
-
-1. Open a new GitHub Issue and pick the **🏃 Sprint Ticket (booth demo)** template
-2. Fill in the summary (e.g., *"Add input validation to checkout endpoint"*) and submit
-3. The `sprint-ticket` label is auto-applied → `.github/workflows/sprint-ticket.yml` fires
-4. The workflow calls `coder create sprint-<issue-number> --template ai-dev-ocp`
-5. The Prebuilt Workspace claim from the warm pool returns in <60s
-6. The workflow comments back on the issue with the workspace URL
-
-Stand at the booth, click **New Issue → Sprint Ticket → Submit**, and the audience watches the workspace appear in the Coder UI in real time.
-
-### 5. Validate end-to-end
-
-```bash
-./scripts/tool-call-smoke-test.sh \
-  https://vllm.<your-cluster-domain>/v1 \
-  Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
-```
-
-Expected: `✅ PASS: tool_calls returned ...`
-
-### 6. Tear down
-
-```bash
-cd terraform/
-terraform destroy
-```
-
-This will run `openshift-install destroy cluster` first, then the AWS infra.
-
-## Recommended model lineup
-
-| Slot | Model | Why |
-|---|---|---|
-| Cloud (Bedrock via AI Bridge) | `us.anthropic.claude-sonnet-4-20250514-v1:0` (default) + 6 other Sonnet/Opus inference profiles | Strongest tool-use; account-wide subscribed (see `bedrock-model-sub.md`) |
-| Sovereign (RHAIIS, L40S GPU) | `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` | Purpose-built for agentic coding (SWE-Bench Pro ~44%); AWQ 4-bit fits L40S 48 GiB; `--tool-call-parser hermes` (decision §27) |
-
-Backup sovereign model: `meta-llama/Llama-3.3-70B-Instruct` (FP8/INT4 from RedHatAI/neuralmagic, `llama3_json` parser) — documented swap if Qwen origins come into question. License is Llama 3.3 Community License (>700M MAU clause; not OSI-OSS but fine for ~all enterprises). See `docs/decisions.md` §27.
+---
 
 ## Identity
 
-- **Coder login** — GitHub OAuth scoped to the `demo-rhsummit-users` org (decision §20). Coder Owner role NOT auto-synced; granted manually post-login.
-- **OpenShift login** — same GitHub org filter (decision §21). The `admin` team in that org maps to OpenShift `cluster-admin` via redhat-cop/group-sync-operator.
-- **Grafana** at `https://graf-coder.apps.<fqdn>` — same GitHub org; `admin` team → Grafana Admin via `role_attribute_path`.
+**Dual IdP** — Keycloak for demo personas, GitHub OAuth for admins. Both wired into every surface that needs auth.
+
+| Surface | Keycloak path | GitHub path |
+|---|---|---|
+| Coder login | "Sign in with Keycloak" → demo realm | "Sign in with GitHub" → `demo-rhsummit-users` org |
+| OpenShift Console | OAuth IdP `keycloak` (OpenID) | OAuth IdP `github` (org-filtered) |
+| Grafana | `auth.generic_oauth` block | `auth.github` block |
+| GitLab login | "Sign in with Keycloak" (only option — password form disabled) | n/a |
+| Coder external_auth (workspace git push) | slot 0 `gitlab` (primary, demo path) | slot 1 `github` (optional secondary) |
+
+Demo personas (`/tmp/demo-creds.md` — never in git):
+- `alice / bob / carol / dave` — group `/developers` — password `Demo2026!`
+- `demoadm` — groups `/developers + /admins` — password `Z7U0jeJ1m7SaYQlvGJ!K2026`
+
+**RBAC scoping for the `developers` group:**
+- **OpenShift**: `cluster-reader` + `cluster-monitoring-view` ClusterRoleBindings — see all dashboards (Observe → Dashboards including GPU + vLLM), all workloads, all events; no mutations.
+- **Coder**: site-level OIDC mapping to built-in `auditor` role + per-org custom role `developers-auditor-plus` adding `workspace.create/start/stop/ssh/app_connect` + `chat.*`. (Premium-gated; both `custom_roles` and `user_role_management` license features required.)
+- **Grafana**: `role_attribute_path` evaluates Keycloak `groups` claim — `admins` → Admin, anything else → Viewer.
+- **GitLab**: instance admin promoted via `scripts/gitlab-promote-demoadmins.sh` (idempotent; CE has no native OIDC-group-to-admin mapping).
+
+Full design: [`docs/identity-architecture.md`](docs/identity-architecture.md).
+
+---
+
+## Ops cheat sheet (`make help` for full list)
+
+```
+make reset             # interactive: list what'd be deleted, prompt y/N, then delete
+make reset-plan        # dry run only
+make status            # Argo apps + vLLM pods + bridge + chatd default model
+make tail-bridge       # follow the bridge logs
+make promote-demoadmins  # idempotent — re-promote Keycloak admins to GitLab admin
+make register-webhook    # register bridge webhook on a GitLab project (DEMO_PROJECTS env)
+```
+
+`make reset` (the canonical between-visitors action):
+- Deletes every Coder workspace + chat owned by the demo personas (`DEMO_PERSONAS` env, default `alice,bob,carol,dave,demoadm`).
+- Deletes every GitLab issue in `DEMO_PROJECTS` env (default `alice/artemis-sim`) so the iid counter starts fresh.
+- Idempotently re-promotes Keycloak admins to GitLab admin.
+- Does NOT touch: Keycloak users (they live in the realm YAML), GitLab projects/repos, IaC, templates, vLLM, bridge, chatd config.
+
+---
+
+## Sizing + cost
+
+| Component | Instance | Hourly | Monthly | Note |
+|---|---|---|---|---|
+| 3× converged control-plane + worker | m6i.4xlarge | $2.30 | $1,680 | multi-AZ |
+| GPU production | g6e.12xlarge (4× L40S) | $7.45 | $5,440 | hosts Llama 70B TP-2 |
+| GitLab self-hosted | m7a.2xlarge | $0.40 | $290 | Omnibus + registry + runner |
+| NAT gateways (3) | — | $0.14 | $98 | one per AZ |
+| EBS gp3 (~1 TiB across nodes) | — | ~$0.10 | ~$73 | |
+| **Total (always-on)** | | **~$10.40/hr** | **~$7,600/mo** | |
+
+Per-event tear-down + rebuild cadence costs ~$870/wk (50 hrs Mon–Fri uptime).
+
+Retired (kept in git for fast-revert, scaled to 0): two single-L40S MachineSets (Qwen 32B planner + Llama experiment), `vllm-executor` (Qwen 7B on A10G). Reactivation = bump `replicas: 1` in the deprecated manifests + their MachineSets.
+
+---
+
+## Quickstart (fresh AWS account → live demo)
+
+```bash
+# 0. Prereqs (per AWS account, one-time)
+cd terraform/prereqs/ && terraform init && terraform apply
+
+# 1. Cluster + GitLab
+cd ../ && terraform init && terraform apply         # ~45 min (OCP install + ~10 min GitLab Omnibus)
+
+# 2. GitOps activation (after Argo CD operator is up)
+./scripts/configure-manifests.sh --terraform-dir ./terraform
+git commit -am "chore: configure for ${CLUSTER_FQDN}" && git push
+
+# 3. Identity setup (after Keycloak + GitLab are healthy)
+./scripts/gitlab-create-coder-oauth-app.sh             # OAuth app + sealed creds for Coder external_auth
+./scripts/gitlab-promote-demoadmins.sh                 # promote demoadm to GitLab instance admin
+./scripts/gitlab-register-bridge-webhook.sh            # bridge webhook on demo project(s)
+
+# 4. Validate
+make status                                            # Argo + vLLM + chatd default model
+```
+
+End-to-end from fresh AWS account: **~70–85 min** (OCP install is the long pole).
+Subsequent booth-week rebuilds: ~50–60 min.
+
+---
+
+## Where to read next
+
+- [`docs/decisions.md`](docs/decisions.md) — §1–§33, the architectural decision log. Start here for the "why" behind any specific choice.
+- [`docs/architecture.md`](docs/architecture.md) — narrative arc of the deployed stack.
+- [`docs/identity-architecture.md`](docs/identity-architecture.md) — the dual-IdP design (Keycloak + GitHub) and the demo persona role bindings.
+- [`docs/demo-flow-persona-setup.md`](docs/demo-flow-persona-setup.md) — what alice (or any persona) runs end-to-end. Includes the bridge no-op matrix.
+- [`docs/maas-and-self-hosted-options.md`](docs/maas-and-self-hosted-options.md) — customer-facing reading on Red Hat's MaaS path + OSS alternatives + air-gap considerations.
+- [`services/bridge/README.md`](services/bridge/README.md) — bridge service reference (env vars, smoke tests, build).
+
+---
 
 ## Status
 
-Cluster live (3-node converged + 1× L40S g6e.2xlarge GPU node). Sealed Secrets in place. Bedrock Marketplace subscriptions resolved 2026-05-09 (`bedrock-model-sub.md`). RHAIIS serving Qwen 2.5 Coder 32B on L40S (decisions §26, §27). Booth-ready ahead of Red Hat Summit 2026 (May 11).
+**Booth-ready** ahead of Red Hat Summit 2026 (May 11). Live cluster running:
+- Coder 2.33.2, 3× replicas, dual-IdP login (Keycloak + GitHub), dual external_auth (GitLab + GitHub).
+- Llama 3.3 70B INT4 tensor-parallel-2 on the production `vllm-planner-tp` Deployment (32K context, 2× L40S).
+- chatd default = Claude Sonnet 4 (Bedrock). Sovereign opt-in via `coder-agent:llama` label.
+- Bridge service end-to-end functional: GitLab Issues webhook → Coder workspace + chat creation under the assignee's name.
+- Identity-1 through Identity-8 complete. `make reset` flow committed.
 
 ## License
 
-Licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE).
