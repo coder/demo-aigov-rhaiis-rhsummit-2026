@@ -38,8 +38,10 @@ echo "UUID=$${UUID} /var/opt/gitlab xfs defaults 0 0" >> /etc/fstab
 mount /var/opt/gitlab
 
 # ── 2. AL2023 base updates + dependencies ────────────────────────────────────
-dnf update -y
-dnf install -y curl postfix policycoreutils openssh-server perl docker
+# Skip `dnf update` — saves 60s; AMI is already current. Use
+# `--allowerasing` so `curl` replaces the preinstalled `curl-minimal`
+# (Omnibus's gitlab-ctl reconfigure wants the full curl).
+dnf install -y --allowerasing curl postfix policycoreutils openssh-server perl docker
 
 # Docker for GitLab Runner — runs on the same VM, executes pipelines
 # in containers without competing with GitLab for kernel resources.
