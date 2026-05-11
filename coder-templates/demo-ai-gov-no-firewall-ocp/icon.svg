@@ -1,0 +1,55 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+>
+  <!-- Broken / absent shield — deliberately incomplete to signal "no firewall". -->
+  <path
+    d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+    fill="none"
+    stroke="#dc2626"
+    stroke-width="1.25"
+    stroke-linejoin="round"
+    stroke-dasharray="2 2"
+    opacity="0.5"
+  />
+  <!-- AI processor / chip — same as the firewalled template, but
+       rendered in neutral gray to make clear it's unprotected. -->
+  <rect
+    x="9"
+    y="9"
+    width="6"
+    height="6"
+    rx="1"
+    fill="#6b7280"
+    stroke="#374151"
+    stroke-width="0.5"
+  />
+  <!-- Chip I/O pins on all four sides — traffic NOT being filtered. -->
+  <g
+    stroke="#6b7280"
+    stroke-width="1.25"
+    stroke-linecap="round"
+  >
+    <line x1="10.5" y1="7" x2="10.5" y2="9" />
+    <line x1="13.5" y1="7" x2="13.5" y2="9" />
+    <line x1="10.5" y1="15" x2="10.5" y2="17" />
+    <line x1="13.5" y1="15" x2="13.5" y2="17" />
+    <line x1="7" y1="10.5" x2="9" y2="10.5" />
+    <line x1="7" y1="13.5" x2="9" y2="13.5" />
+    <line x1="15" y1="10.5" x2="17" y2="10.5" />
+    <line x1="15" y1="13.5" x2="17" y2="13.5" />
+  </g>
+  <!-- Red slash / "prohibited" across the chip to emphasize no governance. -->
+  <line
+    x1="6.5"
+    y1="17.5"
+    x2="17.5"
+    y2="6.5"
+    stroke="#dc2626"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    opacity="0.85"
+  />
+</svg>

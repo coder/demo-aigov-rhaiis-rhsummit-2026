@@ -31,6 +31,8 @@ on:
           - all
           - ai-dev-ocp
           - agents-dev-ocp
+          - demo-ai-gov-firewall-ocp
+          - demo-ai-gov-no-firewall-ocp
 
 permissions:
   contents: read
@@ -53,7 +55,7 @@ jobs:
       # `env.X` can't be referenced inside `strategy.matrix` per GH docs,
       # so the JSON array is inlined.
       matrix:
-        template: ${{ fromJSON((github.event_name == 'push' || inputs.template == 'all') && '["ai-dev-ocp","agents-dev-ocp"]' || format('["{0}"]', inputs.template)) }}
+        template: ${{ fromJSON((github.event_name == 'push' || inputs.template == 'all') && '["ai-dev-ocp","agents-dev-ocp","demo-ai-gov-firewall-ocp","demo-ai-gov-no-firewall-ocp"]' || format('["{0}"]', inputs.template)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
