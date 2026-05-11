@@ -95,14 +95,21 @@ spec:
             # AI Gateway when it lands) — chatd's schema only allows
             # one openai-compat provider at a time. See the script's
             # header comment for the full reasoning.
+            # Production model: Llama 3.3 70B INT4 (RedHatAI w4a16) on
+            # the tensor-parallel deployment (vllm-planner-tp) using
+            # 2× L40S for 32K context. The combo of the agents-config
+            # system prompt + plan-mode instructions is what makes
+            # this model viable as the demo backend; without those
+            # guardrails it falls back to brute-force destructive
+            # shortcuts (rm -rf .git, etc.). See decisions §31.
             - name: RHAIIS_BASE_URL
-              value: "http://vllm-planner.ocp-ai.svc.cluster.local:8000/v1"
+              value: "http://vllm-planner-tp.ocp-ai.svc.cluster.local:8000/v1"
             - name: RHAIIS_MODEL_ID
-              value: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+              value: "RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16"
             - name: RHAIIS_DISPLAY_NAME
-              value: "Qwen 2.5 32B Instruct AWQ (RHAIIS sovereign)"
+              value: "Llama 3.3 70B Instruct INT4 (RHAIIS sovereign)"
             - name: RHAIIS_PROVIDER_DISPLAY
-              value: "RHAIIS (Sovereign Qwen 2.5 32B Instruct)"
+              value: "RHAIIS (Sovereign Llama 3.3 70B Instruct INT4)"
             - name: BEDROCK_PROVIDER_MODE
               value: "native"     # set to "aibridge" if chatd's `bedrock` provider type doesn't work
             - name: HOME
