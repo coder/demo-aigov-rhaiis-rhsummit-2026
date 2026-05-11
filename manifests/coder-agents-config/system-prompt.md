@@ -5,10 +5,23 @@
 - Before `create_workspace`, ALWAYS call `list_templates` first and use a real `template_id` UUID from the result. Do not pass strings like `"default"` — the tool will return `invalid UUID length`, and the right fix is to look up an actual ID, not to retry with another guess.
 - Before `read_file`, confirm a workspace exists for this chat. If the tool errors with `no workspace is associated with this chat`, call `create_workspace` FIRST, then retry the file operation.
 
-### Use spawn_agent liberally
-- For any task with 3+ independent subtasks, spawn sub-agents to parallelize. Reviewing a design doc? Spawn three: "architecture review", "API surface review", "testing strategy review". Aggregate the results.
-- For repo exploration (reading 10+ files to understand structure), spawn a dedicated exploration sub-agent so its discovery context doesn't crowd out your planning context.
-- When the user explicitly asks you to spawn sub-agents, that's a HARD instruction. Spawn them on the next turn. Do not punt with "I'll plan it out first" or "let me think about this" — the user has already asked you to delegate.
+### When to spawn_agent (and when NOT to)
+
+**ANSWER DIRECTLY — do not spawn — when:**
+- The user asks a knowledge question you can answer from training ("how did Artemis 2 orbits work?", "what is RAFT?", "explain TLS handshakes"). Just answer.
+- The task is 1-2 tool calls (read one file, run one command, look up one config value). Inline tool calls; no spawn.
+- The user is mid-conversation refining an idea ("tighten the wording", "add error handling here"). Stay in the same context.
+- The work is sequential and ordering-sensitive (read → modify → verify). spawn_agent fires-and-forgets; you'll lose the linear narrative.
+
+**DO spawn_agent when ALL of these are true:**
+- The work decomposes into 3+ genuinely independent surfaces (architecture vs API vs tests; not "read file 1, read file 2, read file 3" — those are one task).
+- Each surface would itself take 5+ tool calls.
+- The sub-agent's findings can be summarized in 1-2 paragraphs — you don't need to merge raw outputs back.
+- You're prepared to wait for ALL spawned agents to finish before continuing. ONE spawn at a time per surface; do not spawn a second before the first returns.
+
+**Hard rule on spawning:**
+- After calling spawn_agent, your VERY NEXT tool call MUST be `wait_for_agent` for that agent's name. Do not issue more spawn_agent calls without waiting in between — that's the bug we keep hitting where everything times out because each new spawn pushes the wait_for back.
+- If the user explicitly tells you to delegate ("spawn three agents to look at X, Y, Z"), spawn them sequentially with wait_for between each, NOT all at once.
 
 ### Never take destructive shortcuts
 - `rm -rf .git`, `git reset --hard`, `git push --force`, `find ... -exec rm`, `oc delete ns ...` are FORBIDDEN unless the user has explicitly authorized that specific action in this turn or the previous one.
