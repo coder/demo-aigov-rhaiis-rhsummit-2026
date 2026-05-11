@@ -223,29 +223,35 @@ spec:
                   name: gitlab-coder-external-auth
                   key: client-secret
             # Self-hosted GitLab — Coder's built-in defaults point at
-            # gitlab.com; override.
+            # gitlab.com; override. Endpoints match the proven config
+            # at lab/k3s-infra/helm-values/coder.yaml.
             - name: CODER_EXTERNAL_AUTH_0_AUTH_URL
               value: "https://gitlab.rhsummit.coderdemo.io/oauth/authorize"
             - name: CODER_EXTERNAL_AUTH_0_TOKEN_URL
               value: "https://gitlab.rhsummit.coderdemo.io/oauth/token"
+            # `/oauth/token/info` is the OAuth2 token-info endpoint —
+            # validates the access token itself with no scope requirement.
+            # `/api/v4/user` requires read_user and was producing
+            # 403s on validate.
             - name: CODER_EXTERNAL_AUTH_0_VALIDATE_URL
-              value: "https://gitlab.rhsummit.coderdemo.io/api/v4/user"
+              value: "https://gitlab.rhsummit.coderdemo.io/oauth/token/info"
+            # Lets users disconnect cleanly + revoke the issued token.
+            - name: CODER_EXTERNAL_AUTH_0_REVOKE_URL
+              value: "https://gitlab.rhsummit.coderdemo.io/oauth/revoke"
             # Match any HTTPS clone of a GitLab project on this host.
             - name: CODER_EXTERNAL_AUTH_0_REGEX
               value: "^https://gitlab\\.rhsummit\\.coderdemo\\.io/.*"
             # Scopes Coder requests when initiating the OAuth flow.
-            # `read_user` is critical — Coder's validate-token call hits
-            # /api/v4/user, which 403s without read_user. The default
-            # Coder behavior is to request only `write_repository`,
-            # which is why explicit configuration is required here.
-            #
-            # IMPORTANT: separator is a SPACE, not a comma. Coder
-            # forwards this value verbatim into the OAuth `scope=`
-            # parameter and RFC 6749 mandates space-separated scopes.
-            # Comma-separated values produce GitLab's
-            # "requested scope is invalid, unknown, or malformed".
+            # SPACE-separated per RFC 6749 (commas produce GitLab's
+            # "requested scope is invalid, unknown, or malformed").
+            # - `api`            : full API surface (covers read_user)
+            # - `write_repository`: git push
+            # - `read_registry`  : pull from GitLab container registry
+            # - `write_registry` : push to GitLab container registry
+            #                      (relevant once registry.gitlab.<dom>
+            #                      is live, which it is)
             - name: CODER_EXTERNAL_AUTH_0_SCOPES
-              value: "read_user read_repository write_repository"
+              value: "api write_repository read_registry write_registry"
 
             # ── External provisioner mode ───────────────────────────────
             # Disable in-process provisioners; the coder-provisioner
