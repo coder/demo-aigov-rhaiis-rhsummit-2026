@@ -142,6 +142,15 @@ RUN mkdir -p /home/${USER}/workspace \
     && ln -s /home/${USER} /sandbox \
     && ln -s /home/${USER} /work
 
+# Similar graceful-degradation symlink for `python` → `python3`. The
+# UBI9 base ships python3 + python3.11 but not the unversioned
+# `python` binary; smaller LLMs (Llama-INT4) emit `python foo.py`
+# from training-data priors and hit "python: command not found".
+# Same pattern as the workdir symlinks: make wrong guesses work
+# transparently. Sonnet/Opus usually call `python3` directly, so
+# this is a no-op for them.
+RUN ln -sf /usr/bin/python3 /usr/local/bin/python
+
 # Make /etc/passwd group-writable so the entrypoint can append a passwd
 # entry for the SCC-injected UID at startup. Same pattern Red Hat uses
 # in their s2i base images.
