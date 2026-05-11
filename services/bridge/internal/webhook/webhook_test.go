@@ -4,23 +4,28 @@ import "testing"
 
 func TestExtractMode(t *testing.T) {
 	tests := []struct {
-		name   string
-		labels []Label
-		want   Mode
+		name      string
+		labels    []Label
+		wantMode  Mode
+		wantSlug  string
 	}{
-		{"no labels", nil, ModeNone},
-		{"unrelated", []Label{{Title: "bug"}, {Title: "priority:high"}}, ModeNone},
-		{"hitl only", []Label{{Title: "coder-hitl"}}, ModeHITL},
-		{"agent only", []Label{{Title: "coder-agent"}}, ModeAgent},
-		{"both → agent wins", []Label{{Title: "coder-hitl"}, {Title: "coder-agent"}}, ModeAgent},
-		{"trims whitespace", []Label{{Title: "  coder-agent  "}}, ModeAgent},
-		{"prefix-only doesn't match", []Label{{Title: "coder-hitl-x"}}, ModeNone},
+		{"no labels", nil, ModeNone, ""},
+		{"unrelated", []Label{{Title: "bug"}, {Title: "priority:high"}}, ModeNone, ""},
+		{"hitl only", []Label{{Title: "coder-hitl"}}, ModeHITL, ""},
+		{"agent no slug", []Label{{Title: "coder-agent"}}, ModeAgent, ""},
+		{"agent llama slug", []Label{{Title: "coder-agent:llama"}}, ModeAgent, "llama"},
+		{"agent sonnet slug", []Label{{Title: "coder-agent:sonnet"}}, ModeAgent, "sonnet"},
+		{"slug lowercased", []Label{{Title: "coder-agent:Llama"}}, ModeAgent, "llama"},
+		{"both → agent wins", []Label{{Title: "coder-hitl"}, {Title: "coder-agent:opus"}}, ModeAgent, "opus"},
+		{"trims whitespace", []Label{{Title: "  coder-agent  "}}, ModeAgent, ""},
+		{"prefix-only doesn't match", []Label{{Title: "coder-hitl-x"}}, ModeNone, ""},
+		{"agent with invalid suffix char doesn't match agent", []Label{{Title: "coder-agent:foo bar"}}, ModeNone, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ExtractMode(tc.labels)
-			if got != tc.want {
-				t.Errorf("got %q want %q", got, tc.want)
+			mode, slug := ExtractMode(tc.labels)
+			if mode != tc.wantMode || slug != tc.wantSlug {
+				t.Errorf("got (%q,%q) want (%q,%q)", mode, slug, tc.wantMode, tc.wantSlug)
 			}
 		})
 	}

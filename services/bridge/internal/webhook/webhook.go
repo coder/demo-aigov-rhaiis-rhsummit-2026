@@ -56,23 +56,32 @@ const (
 	ModeAgent Mode = "coder-agent" // create workspace + autonomous chat
 )
 
-// ExtractMode scans labels for `coder-hitl` or `coder-agent`. If both are
-// present, agent wins (more capable). Returns ModeNone if neither is set.
-func ExtractMode(labels []Label) Mode {
+// agentLabelRE matches the `coder-agent` label with an optional `:<slug>`
+// suffix selecting which model the bridge should pin the chat to.
+//   coder-agent              → ("coder-agent", "")
+//   coder-agent:llama        → ("coder-agent", "llama")
+//   coder-agent:sonnet       → ("coder-agent", "sonnet")
+// Unknown slugs are surfaced by the handler at chat-creation time.
+var agentLabelRE = regexp.MustCompile(`^coder-agent(?::([a-z0-9._-]+))?$`)
+
+// ExtractMode scans labels for coder-hitl or coder-agent(:slug). If both
+// modes are present, agent wins. Returns the mode and an optional model
+// slug (empty when no slug was supplied or in HITL mode).
+func ExtractMode(labels []Label) (Mode, string) {
 	var hitl bool
 	for _, l := range labels {
 		t := strings.TrimSpace(l.Title)
-		switch t {
-		case string(ModeAgent):
-			return ModeAgent
-		case string(ModeHITL):
+		if m := agentLabelRE.FindStringSubmatch(t); m != nil {
+			return ModeAgent, strings.ToLower(strings.TrimSpace(m[1]))
+		}
+		if t == string(ModeHITL) {
 			hitl = true
 		}
 	}
 	if hitl {
-		return ModeHITL
+		return ModeHITL, ""
 	}
-	return ModeNone
+	return ModeNone, ""
 }
 
 // FirstAssignee returns the username of the first assignee, or "" if none.

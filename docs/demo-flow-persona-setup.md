@@ -93,13 +93,20 @@ matter.
    do the work.)
 3. **Apply one label**:
    - `coder-hitl` → "human in the loop". Bridge spawns a workspace
-     for the assignee; assignee opens it and works manually.
+     for the assignee; assignee opens it and works manually. Model
+     selection is up to the assignee inside the workspace UI.
    - `coder-agent` → "agent". Bridge spawns a workspace AND creates
      a Coder Agents chat owned by the assignee, pre-seeded with
      *"Go work on this GitLab issue: <url>. When done, push a branch
-     and open a Merge Request."* Llama 70B then drives the chat
-     autonomously inside the workspace.
-   - Both labels? `coder-agent` wins.
+     and open a Merge Request."* The chat runs on chatd's current
+     default model.
+   - `coder-agent:<slug>` → same as `coder-agent`, but pins the chat
+     to a specific model. The slug is a case-insensitive substring
+     of a chatd model's display name. Useful slugs in this deployment:
+     - `coder-agent:llama` → Llama 3.3 70B Instruct INT4 (RHAIIS, sovereign)
+     - `coder-agent:sonnet` → Claude Sonnet 4 via Bedrock
+     - `coder-agent:opus` → Claude Opus via Bedrock (latest)
+   - Both `coder-hitl` and `coder-agent` labels? `coder-agent` wins.
 4. Bridge posts a comment back on the issue with the workspace URL
    (always) and chat URL (coder-agent only).
 5. Workspace name format: `{assignee}-gl{issue-iid}` (deterministic,
@@ -122,5 +129,6 @@ GitLab CI variable or `.coder` file is a future enhancement.
 | `422 {"error":"coder user not found"}` | Assignee hasn't signed in to Coder yet | Persona needs to log in once via Keycloak |
 | `422 {"error":"default template not found"}` | DEFAULT_TEMPLATE env points at a non-existent template | Check `oc -n coder logs deploy/bridge` for the name being looked up; either push the template via `coder templates push` or update the env |
 | `401 {"error":"unauthorized"}` | Webhook secret mismatch | Re-run `./scripts/gitlab-register-bridge-webhook.sh` |
+| `chat_error: unknown model slug "<x>"` in response | Label was `coder-agent:<x>` but no chatd model has `<x>` in its display name | Use a valid slug (`llama`, `sonnet`, `opus`) or drop the suffix to fall back to chatd's default |
 | `chat_error` in response, workspace_url still present | Coder chat creation failed (likely vLLM unreachable or chat API change) | Workspace is usable; check `bridge` logs for the chat_error detail |
 | Workspace boots but `git push` fails | GitLab external_auth not connected | Click "Authenticate with GitLab (Demo)" inside the workspace |

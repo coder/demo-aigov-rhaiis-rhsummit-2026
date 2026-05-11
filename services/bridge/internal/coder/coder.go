@@ -67,8 +67,19 @@ type MintTokenResponse struct {
 type CreateChatRequest struct {
 	OrganizationID string          `json:"organization_id"`
 	WorkspaceID    string          `json:"workspace_id,omitempty"`
+	ModelConfigID  string          `json:"model_config_id,omitempty"`
 	Content        []ChatInputPart `json:"content"`
 	ClientType     string          `json:"client_type,omitempty"`
+}
+
+// ModelConfig is a chatd model entry from /api/experimental/chats/model-configs.
+type ModelConfig struct {
+	ID          string `json:"id"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	DisplayName string `json:"display_name"`
+	Enabled     bool   `json:"enabled"`
+	IsDefault   bool   `json:"is_default"`
 }
 
 type ChatInputPart struct {
@@ -182,6 +193,17 @@ func (c *Client) CreateWorkspace(ctx context.Context, username string, req Creat
 		return nil, err
 	}
 	return &w, nil
+}
+
+// ListModelConfigs returns the enabled model configurations registered in
+// chatd. Used by the bridge to resolve a label-supplied slug ("llama",
+// "sonnet") to a concrete model_config_id.
+func (c *Client) ListModelConfigs(ctx context.Context) ([]ModelConfig, error) {
+	var mcs []ModelConfig
+	if err := c.do(ctx, http.MethodGet, "/api/experimental/chats/model-configs", nil, &mcs); err != nil {
+		return nil, err
+	}
+	return mcs, nil
 }
 
 // MintUserToken creates a short-lived API token for {username} on behalf of

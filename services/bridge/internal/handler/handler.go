@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/coder/demo-aigov-rhaiis-rhsummit-2026/services/bridge/internal/coder"
@@ -98,7 +99,7 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// assignee. Either alone is a noop — order doesn't matter, whichever
 	// webhook event satisfies both conditions triggers the spawn. Repeat
 	// events after that hit the workspace-exists idempotency check below.
-	mode := webhook.ExtractMode(p.Labels)
+	mode, modelSlug := webhook.ExtractMode(p.Labels)
 	if mode == webhook.ModeNone {
 		log.Info("noop: no coder-{hitl,agent} label")
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -116,7 +117,7 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	log = log.With("mode", string(mode), "assignee", assignee)
+	log = log.With("mode", string(mode), "assignee", assignee, "model_slug", modelSlug)
 
 	wsName := webhook.WorkspaceName(assignee, p.ObjectAttributes.IID)
 	log = log.With("workspace", wsName)
@@ -205,17 +206,24 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		"workspace_url":  wsURL,
 	}
 
-	// 6. For coder-agent, create a chat owned by the assignee.
+	// 6. For coder-agent, resolve the model slug then create a chat
+	// owned by the assignee.
 	if mode == webhook.ModeAgent {
-		chatURL, chatErr := h.spawnAgentChat(ctx, assignee, created.OrganizationID, created.ID, issueURL, log)
-		if chatErr != nil {
-			// Workspace created but chat failed — surface in the response
-			// so the operator can see what happened. Don't fail the request
-			// since the workspace is usable.
-			log.Error("chat creation failed", "err", chatErr)
-			resp["chat_error"] = chatErr.Error()
+		modelID, slugErr := h.resolveModelSlug(ctx, modelSlug)
+		if slugErr != nil {
+			log.Warn("unknown model slug", "slug", modelSlug, "err", slugErr)
+			resp["chat_error"] = slugErr.Error()
 		} else {
-			resp["chat_url"] = chatURL
+			chatURL, chatErr := h.spawnAgentChat(ctx, assignee, created.OrganizationID, created.ID, modelID, issueURL, log)
+			if chatErr != nil {
+				log.Error("chat creation failed", "err", chatErr)
+				resp["chat_error"] = chatErr.Error()
+			} else {
+				resp["chat_url"] = chatURL
+				if modelID != "" {
+					resp["model_config_id"] = modelID
+				}
+			}
 		}
 	}
 
@@ -226,10 +234,40 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// resolveModelSlug maps a label-supplied slug ("llama", "sonnet", ...) to
+// the UUID of a chatd model config. Empty slug → empty UUID, which makes
+// chatd use the deployment default. Unknown slug → error so the handler
+// can surface it to the operator without spawning a chat on the wrong
+// model.
+func (h *Handler) resolveModelSlug(ctx context.Context, slug string) (string, error) {
+	if slug == "" {
+		return "", nil
+	}
+	mcs, err := h.coder.ListModelConfigs(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list model configs: %w", err)
+	}
+	// Case-insensitive substring match against display_name. First
+	// matching enabled config wins. Allows aliases like "llama" to
+	// hit "Llama 3.3 70B Instruct INT4 (RHAIIS sovereign)" without
+	// requiring an exact mapping table.
+	needle := strings.ToLower(slug)
+	for _, m := range mcs {
+		if !m.Enabled {
+			continue
+		}
+		if strings.Contains(strings.ToLower(m.DisplayName), needle) {
+			return m.ID, nil
+		}
+	}
+	return "", fmt.Errorf("unknown model slug %q (no enabled chatd model has %q in its display name)", slug, slug)
+}
+
 // spawnAgentChat mints a per-user token for the assignee (admin token can't
 // create chats with a different owner — chatd hardcodes owner_id from the
-// caller), then POSTs the chat with the issue-URL seed prompt.
-func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspaceID, issueURL string, log *slog.Logger) (string, error) {
+// caller), then POSTs the chat with the issue-URL seed prompt. modelID is
+// optional ("" leaves it to chatd's deployment default).
+func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspaceID, modelID, issueURL string, log *slog.Logger) (string, error) {
 	userToken, err := h.coder.MintUserToken(ctx, username, 3600) // 1h plenty for chat create
 	if err != nil {
 		return "", fmt.Errorf("mint user token: %w", err)
@@ -237,6 +275,7 @@ func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspace
 	chat, err := h.coder.CreateChat(ctx, userToken, coder.CreateChatRequest{
 		OrganizationID: orgID,
 		WorkspaceID:    workspaceID,
+		ModelConfigID:  modelID,
 		Content: []coder.ChatInputPart{{
 			Type: "text",
 			Text: "Go work on this GitLab issue: " + issueURL +
