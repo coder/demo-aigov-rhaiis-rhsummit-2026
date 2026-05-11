@@ -108,6 +108,14 @@ spec:
             enabled: true
             persistence:
               enabled: true
+              # `statefulset` renders storage as a volumeClaimTemplate
+              # under the StatefulSet (PVC named storage-grafana-0).
+              # Default (`pvc`) renders a *standalone* `grafana` PVC
+              # plus a Deployment — which collides with the chart's
+              # StatefulSet path and leaves the standalone PVC stuck
+              # WaitForFirstConsumer indefinitely, hanging every
+              # subsequent Argo sync.
+              type: statefulset
               size: 5Gi
               # storageClass omitted → uses OCP default (gp3-csi on AWS IPI)
 
