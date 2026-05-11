@@ -1,7 +1,25 @@
-# Second L40S MachineSet — isolated experimental GPU for Llama 70B
-# debugging. Booth-tonight Qwen 2.5 32B Instruct AWQ planner runs on
-# the original L40S MachineSet (cluster-pqc4z-worker-l40s-us-east-1a)
-# and stays untouched as a known-good fallback.
+# Second L40S MachineSet — DEPRECATED 2026-05-11.
+#
+# STATUS: scaled to 0 replicas. This was the single-GPU Llama 70B
+# debugging environment used while tracking down the vLLM V1 engine
+# IPC deadlock (see decisions §30). The working config that came out
+# of that investigation now runs in production on
+# worker-l40s-tp-us-east-1a (tensor-parallel over 2× L40S, 32K
+# context). The single-GPU experiment is no longer needed.
+#
+# Cost: $1.86/hr (g6e.2xlarge) → $0 at replicas=0.
+#
+# Kept in git for archival reference of what config knobs we explored
+# (see commentary below). Delete entirely once the booth event is
+# over and decisions.md §30 has the full write-up.
+#
+# ──────────────────────────────────────────────────────────────────
+# Original commentary:
+#
+# Isolated experimental GPU for Llama 70B debugging. Booth-tonight
+# Qwen 2.5 32B Instruct AWQ planner runs on the original L40S
+# MachineSet (cluster-pqc4z-worker-l40s-us-east-1a) and stays
+# untouched as a known-good fallback.
 #
 # This experimental node lets us iterate on Llama 3.3 70B INT4 +
 # vLLM args / quants / images without affecting the booth demo.
@@ -45,7 +63,9 @@ metadata:
     machine.openshift.io/memoryMb: "65536"
     machine.openshift.io/vCPU: "8"
 spec:
-  replicas: 1
+  # DEPRECATED — scaled to 0 (single-GPU Llama experiment retired;
+  # TP-2 Llama on worker-l40s-tp-us-east-1a is the production path).
+  replicas: 0
   selector:
     matchLabels:
       machine.openshift.io/cluster-api-cluster: cluster-pqc4z

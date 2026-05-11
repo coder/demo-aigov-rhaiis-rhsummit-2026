@@ -63,7 +63,12 @@
 # kubernetes.io/dockerconfigjson exists in this namespace, sourced from
 # your Red Hat partner subscription.
 ---
-# ─── PLANNER ─────────────────────────────────────────────────────────
+# ─── PLANNER (DEPRECATED 2026-05-11) ─────────────────────────────────
+# Qwen 32B AWQ on single L40S. Retired when production moved to Llama
+# 70B INT4 tensor-parallel on worker-l40s-tp-us-east-1a. Scaled to 0;
+# manifest stays in git for fast-revert if the TP-2 deployment needs
+# a single-GPU Qwen fallback. The hosting MachineSet
+# (worker-l40s-us-east-1a) is also scaled to 0.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -73,8 +78,11 @@ metadata:
     app.kubernetes.io/name: vllm
     app.kubernetes.io/component: planner
     app.kubernetes.io/part-of: coder-aigov-demo
+    coder.com/lifecycle: deprecated
 spec:
-  replicas: 1
+  # DEPRECATED — set to 0. Bump back to 1 + scale the L40S MachineSet
+  # to 1 if a Qwen fallback is needed.
+  replicas: 0
   strategy:
     type: Recreate
   # 60-min progress deadline so K8s doesn't mark the Deployment as
@@ -221,7 +229,14 @@ spec:
       port: 8000
       targetPort: http
 ---
-# ─── EXECUTOR ────────────────────────────────────────────────────────
+# ─── EXECUTOR (DEPRECATED 2026-05-11) ────────────────────────────────
+# Qwen 2.5 7B on A10G. Was never registered in chatd (kept idle waiting
+# for a router — LiteLLM / llm-d / Coder AI Gateway — that would let
+# us multiplex multiple openai-compat models behind a single chatd
+# provider entry; see decisions §28 for the schema constraint). With
+# the model lineup converging on Llama 70B TP-2, this executor is
+# pure dead weight. Scaled to 0; A10G GPU is freed for whatever else
+# lands on the g5.2xlarge general worker.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -231,8 +246,11 @@ metadata:
     app.kubernetes.io/name: vllm
     app.kubernetes.io/component: executor
     app.kubernetes.io/part-of: coder-aigov-demo
+    coder.com/lifecycle: deprecated
 spec:
-  replicas: 1
+  # DEPRECATED — scaled to 0 (no router to dispatch to yet; see
+  # decisions §28). Bump to 1 once LiteLLM / AI Gateway lands.
+  replicas: 0
   strategy:
     type: Recreate
   selector:

@@ -1,5 +1,20 @@
-# L40S GPU MachineSet — added 2026-05-10 to host the upgraded RHAIIS
-# vLLM serving Qwen2.5-Coder-32B-Instruct-AWQ for the booth demo.
+# L40S GPU MachineSet — DEPRECATED 2026-05-11.
+#
+# STATUS: scaled to 0 replicas. The Qwen 32B AWQ vLLM Deployment this
+# machineset originally hosted was retired when the production booth
+# model flipped to Llama 3.3 70B INT4 running tensor-parallel on the
+# `worker-l40s-tp-us-east-1a` MachineSet (gpu-l40s-tp.yaml). Keeping
+# this manifest in git for fast-revert in case the TP-2 deployment
+# ever has to fall back to a single-GPU Qwen instance (just flip
+# replicas back to 1 and ensure vllm-deployment.yaml is reconciled).
+#
+# Cost: $1.86/hr (g6e.2xlarge) → $0 at replicas=0.
+#
+# ──────────────────────────────────────────────────────────────────
+# Original commentary (kept for context):
+#
+# Added 2026-05-10 to host the upgraded RHAIIS vLLM serving
+# Qwen2.5-Coder-32B-Instruct-AWQ for the booth demo.
 #
 # Why a SECOND MachineSet instead of mutating the original A10G one:
 #   The original `cluster-<id>-worker-us-east-1a` MachineSet (g5.2xlarge,
@@ -38,7 +53,10 @@ metadata:
     machine.openshift.io/memoryMb: "65536"
     machine.openshift.io/vCPU: "8"
 spec:
-  replicas: 1
+  # DEPRECATED — scaled to 0 (Qwen 32B fallback retired in favor of
+  # Llama 70B TP-2 on worker-l40s-tp-us-east-1a). Bump back to 1
+  # only if Llama TP needs a single-GPU Qwen fallback.
+  replicas: 0
   selector:
     matchLabels:
       machine.openshift.io/cluster-api-cluster: cluster-pqc4z

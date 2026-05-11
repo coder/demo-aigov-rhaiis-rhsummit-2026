@@ -45,14 +45,14 @@ spec:
   source:
     repoURL: https://helm.coder.com/v2
     chart: coder
-    targetRevision: 2.33.1            # latest stable (Coder Agents beta — no longer behind an experiment flag)
+    targetRevision: 2.33.2            # latest stable (Coder Agents beta — no longer behind an experiment flag)
     helm:
       releaseName: coder
       values: |
         coder:
           image:
             repo: ghcr.io/coder/coder
-            tag: v2.33.1               # match chart targetRevision
+            tag: v2.33.2               # match chart targetRevision (latest stable as of 2026-05-11)
             pullPolicy: IfNotPresent
 
           # Prometheus scrape annotations on every pod
@@ -313,7 +313,7 @@ spec:
               value: "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
             # ── Coder Agents (beta) ─────────────────────────────────────
-            # The CODER_EXPERIMENTS=agents flag was removed in v2.33.1
+            # The CODER_EXPERIMENTS=agents flag was removed in v2.33.2
             # (PR #24432). Agents are on by default in beta — no env
             # var required.
 

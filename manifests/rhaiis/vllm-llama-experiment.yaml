@@ -53,6 +53,11 @@
 # Backout: just `oc delete -f this-file.yaml`. The experimental
 # MachineSet stays put for reuse.
 ---
+# DEPRECATED 2026-05-11.
+# Single-GPU Llama 70B debug deployment. Replaced by the TP-2 (2× L40S)
+# deployment at vllm-planner-tp on worker-l40s-tp-us-east-1a. Scaled
+# to 0; hosting MachineSet (worker-l40s-experiment-us-east-1a) also
+# scaled to 0. Kept in git for archival of the V0-engine recipe.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,8 +67,12 @@ metadata:
     app.kubernetes.io/name: vllm-experiment
     app.kubernetes.io/component: llama-debug
     app.kubernetes.io/part-of: coder-aigov-demo
+    coder.com/lifecycle: deprecated
 spec:
-  replicas: 1
+  # DEPRECATED — scaled to 0 (TP-2 Llama on vllm-planner-tp is the
+  # production path). Bump back to 1 only if reviving the single-GPU
+  # config for testing.
+  replicas: 0
   strategy:
     type: Recreate
   progressDeadlineSeconds: 3600
