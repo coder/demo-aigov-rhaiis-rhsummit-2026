@@ -233,6 +233,13 @@ spec:
             # Match any HTTPS clone of a GitLab project on this host.
             - name: CODER_EXTERNAL_AUTH_0_REGEX
               value: "^https://gitlab\\.rhsummit\\.coderdemo\\.io/.*"
+            # Scopes Coder requests when initiating the OAuth flow.
+            # `read_user` is critical — Coder's validate-token call hits
+            # /api/v4/user, which 403s without read_user. The default
+            # Coder behavior is to request only `write_repository`,
+            # which is why explicit configuration is required here.
+            - name: CODER_EXTERNAL_AUTH_0_SCOPES
+              value: "read_user,read_repository,write_repository"
 
             # ── External provisioner mode ───────────────────────────────
             # Disable in-process provisioners; the coder-provisioner
