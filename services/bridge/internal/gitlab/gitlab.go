@@ -34,6 +34,45 @@ type noteRequest struct {
 	Body string `json:"body"`
 }
 
+// Issue is the subset of the GitLab Issue payload the bridge uses to
+// compose the seed prompt for the Coder Agents chat.
+type Issue struct {
+	IID         int    `json:"iid"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	State       string `json:"state"`
+	WebURL      string `json:"web_url"`
+}
+
+// GetIssue fetches an issue by project ID + iid using the bridge's admin
+// PAT. Returns *Issue with title + description, or an error including
+// the upstream status code so the handler can decide whether to embed
+// the body in the chat seed or fall back to URL-only.
+func (c *Client) GetIssue(ctx context.Context, projectID, issueIID int) (*Issue, error) {
+	path := fmt.Sprintf("/projects/%d/issues/%d", projectID, issueIID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("PRIVATE-TOKEN", c.pat)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gitlab issue GET status %d: %s", resp.StatusCode, string(body))
+	}
+	var issue Issue
+	if err := json.NewDecoder(resp.Body).Decode(&issue); err != nil {
+		return nil, fmt.Errorf("decode issue: %w", err)
+	}
+	return &issue, nil
+}
+
 // PostIssueComment posts a comment ("note") on the given issue. Returns the
 // note URL on success.
 func (c *Client) PostIssueComment(ctx context.Context, projectID, issueIID int, body string) error {

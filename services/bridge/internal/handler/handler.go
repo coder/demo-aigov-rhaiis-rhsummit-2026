@@ -231,9 +231,19 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 				log.Warn("unknown model slug", "slug", modelSlug, "err", slugErr)
 				resp["chat_error"] = slugErr.Error()
 			} else {
+				// Fetch issue title + body via the bridge's admin PAT so
+				// the seed prompt can carry them. Without this the agent
+				// would have to call GitLab's API itself to read the
+				// issue — and that auth path is fragile (OAuth tokens
+				// need `Authorization: Bearer`, PATs need
+				// `PRIVATE-TOKEN`, models often guess wrong).
+				issue, issueErr := h.gitlab.GetIssue(ctx, p.Project.ID, p.ObjectAttributes.IID)
+				if issueErr != nil {
+					log.Warn("gitlab GetIssue failed; falling back to URL-only seed prompt", "err", issueErr)
+				}
 				chatURL, chatErr := h.spawnAgentChat(ctx, assignee,
 					workspace.OrganizationID, workspace.ID, modelID,
-					issueURL, issueProject, issueIID, log)
+					issueURL, issueProject, issueIID, issue, log)
 				if chatErr != nil {
 					log.Error("chat creation failed", "err", chatErr)
 					resp["chat_error"] = chatErr.Error()
@@ -351,7 +361,9 @@ func parseModelVersion(displayName string) (int, int) {
 // caller), then POSTs the chat with the issue-URL seed prompt. modelID is
 // optional ("" leaves it to chatd's deployment default). issueProject + iid
 // are persisted as labels for idempotency on future webhook events.
-func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspaceID, modelID, issueURL, issueProject, iid string, log *slog.Logger) (string, error) {
+// If `issue` is non-nil, its title + description are embedded in the seed
+// prompt so the agent doesn't need to fetch the issue from GitLab itself.
+func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspaceID, modelID, issueURL, issueProject, iid string, issue *gitlab.Issue, log *slog.Logger) (string, error) {
 	userToken, err := h.coder.MintUserToken(ctx, username, 3600) // 1h plenty for chat create
 	if err != nil {
 		return "", fmt.Errorf("mint user token: %w", err)
@@ -367,9 +379,7 @@ func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspace
 		},
 		Content: []coder.ChatInputPart{{
 			Type: "text",
-			Text: "Go work on this GitLab issue: " + issueURL +
-				". Investigate the request, make the needed changes in the workspace's repo, " +
-				"and when you're done push a branch and open a Merge Request.",
+			Text: buildAgentSeedPrompt(issueURL, issueProject, iid, issue),
 		}},
 	})
 	if err != nil {
@@ -377,6 +387,33 @@ func (h *Handler) spawnAgentChat(ctx context.Context, username, orgID, workspace
 	}
 	log.Info("chat created", "chat_id", chat.ID)
 	return h.cfg.CoderPublicURL + "/agents/chats/" + chat.ID, nil
+}
+
+// buildAgentSeedPrompt composes the first user message for a coder-agent
+// chat. When the bridge has fetched the issue body it bakes title +
+// description in so the agent can skip the GitLab API entirely. When the
+// fetch failed (e.g. PAT scope, transient 5xx), falls back to URL-only.
+func buildAgentSeedPrompt(issueURL, issueProject, iid string, issue *gitlab.Issue) string {
+	var b strings.Builder
+	if issue != nil && issue.Title != "" {
+		fmt.Fprintf(&b, "You have been assigned the following GitLab issue in the `%s` repo (issue #%s).\n\n",
+			issueProject, iid)
+		fmt.Fprintf(&b, "**Title:** %s\n\n", issue.Title)
+		if strings.TrimSpace(issue.Description) != "" {
+			fmt.Fprintf(&b, "**Description:**\n\n%s\n\n", issue.Description)
+		}
+		fmt.Fprintf(&b, "Source: %s\n\n", issueURL)
+		b.WriteString(
+			"The workspace's repo is the one above. Investigate the request, " +
+				"make the needed changes, and when you're done push a branch and " +
+				"open a Merge Request. Reference the issue id (`Closes #" + iid + "`) " +
+				"in the MR description so it auto-closes on merge.")
+		return b.String()
+	}
+	// Fallback: no body available.
+	return "Go work on this GitLab issue: " + issueURL +
+		". Investigate the request, make the needed changes in the workspace's repo, " +
+		"and when you're done push a branch and open a Merge Request."
 }
 
 // commentBack posts a comment back on the GitLab issue. Best-effort, fires
