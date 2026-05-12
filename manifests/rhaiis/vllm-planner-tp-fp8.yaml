@@ -38,6 +38,15 @@ spec:
       labels:
         app.kubernetes.io/name: vllm
         app.kubernetes.io/component: planner-tp-fp8
+      annotations:
+        # Grafana Agent's pod-discovery scrape config has a strict
+        # `keep` rule on prometheus.io/scrape=true (see chart's
+        # config.river relabel rules). Without these annotations the
+        # vllm:* metrics never reach Prometheus and the vLLM Grafana
+        # dashboards show "No data".
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
     spec:
       imagePullSecrets:
         - name: redhat-pull-secret

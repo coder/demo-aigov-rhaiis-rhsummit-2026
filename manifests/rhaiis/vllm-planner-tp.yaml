@@ -57,6 +57,12 @@ spec:
       labels:
         app.kubernetes.io/name: vllm
         app.kubernetes.io/component: planner-tp
+      annotations:
+        # Grafana Agent's pod-discovery scrape config requires this annotation
+        # to scrape the pod. See the FP8 variant for the full explanation.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
     spec:
       imagePullSecrets:
         - name: redhat-pull-secret
