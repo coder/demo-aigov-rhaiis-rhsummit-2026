@@ -333,8 +333,15 @@ resource "coder_agent" "main" {
     echo "Installing Agent Firewall (boundary)..."
     curl -fsSL https://raw.githubusercontent.com/coder/boundary/main/install.sh | bash || echo "Warning: boundary install failed"
 
-    # Write boundary config — loaded automatically by `boundary` from
-    # ~/.config/coder_boundary/config.yaml
+    # Write boundary config to ~/.config/coder_boundary/config.yaml.
+    # IMPORTANT: as of boundary v0.9.0 this is NOT auto-discovered —
+    # the binary requires `--config <path>` or `BOUNDARY_CONFIG` env
+    # to actually load the allowlist. Without that, every call falls
+    # back to the implicit default-deny and traffic is fully blocked
+    # (the warning surfaces as: "No allow rules specified; all network
+    # traffic will be denied by default"). We set BOUNDARY_CONFIG in
+    # the shell profiles below AND pass --config explicitly in the
+    # wrappers so direct invocations and wrapped ones both work.
     echo "Configuring Agent Firewall..."
     mkdir -p ~/.config/coder_boundary
     echo '${base64encode(local.boundary_config_yaml)}' | base64 -d > ~/.config/coder_boundary/config.yaml
@@ -433,7 +440,9 @@ resource "coder_agent" "main" {
         claude) DEFAULT_ARGS="--dangerously-skip-permissions --model haiku" ;;
         codex)  DEFAULT_ARGS="--dangerously-bypass-approvals-and-sandbox --model gpt-5.1-codex-mini" ;;
       esac
-      printf '#!/usr/bin/env bash\nexec boundary -- %q %s "$@"\n' "$REAL_BIN" "$DEFAULT_ARGS" > "$WRAPPERS_DIR/$tool"
+      # --config must be passed explicitly; boundary v0.9.0 has no
+      # auto-discovery for ~/.config/coder_boundary/config.yaml.
+      printf '#!/usr/bin/env bash\nexec boundary --config "$HOME/.config/coder_boundary/config.yaml" -- %q %s "$@"\n' "$REAL_BIN" "$DEFAULT_ARGS" > "$WRAPPERS_DIR/$tool"
       chmod +x "$WRAPPERS_DIR/$tool"
       echo "  $tool → boundary -- $REAL_BIN $DEFAULT_ARGS"
     done
@@ -446,6 +455,11 @@ resource "coder_agent" "main" {
       touch "$RC"
       grep -qF 'boundary-wrappers' "$RC" || \
         echo 'export PATH="$HOME/.local/bin/boundary-wrappers:$PATH"' >> "$RC"
+      # boundary v0.9.0 requires explicit config path; export it
+      # globally so direct `boundary -- foo` calls (i.e. not through
+      # a wrapper) also load the allowlist.
+      grep -qF 'BOUNDARY_CONFIG' "$RC" || \
+        echo 'export BOUNDARY_CONFIG="$HOME/.config/coder_boundary/config.yaml"' >> "$RC"
     done
 
     # Pre-stage demo scripts so they're ready for a live Agent-Firewall
