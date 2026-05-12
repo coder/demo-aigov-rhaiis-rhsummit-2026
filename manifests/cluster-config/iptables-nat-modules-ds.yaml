@@ -108,7 +108,8 @@ spec:
         kubernetes.io/os: linux
       containers:
         - name: modprobe
-          image: registry.access.redhat.com/ubi9/ubi-minimal:9.7
+          # Full ubi9, not ubi-minimal — needs util-linux for `nsenter`.
+          image: registry.access.redhat.com/ubi9/ubi:9.7
           imagePullPolicy: IfNotPresent
           # `nsenter` into the host's mount + uts + ipc namespaces so
           # modprobe loads modules into the HOST kernel, not the
