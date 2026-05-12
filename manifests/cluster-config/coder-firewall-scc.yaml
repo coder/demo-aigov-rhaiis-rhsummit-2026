@@ -32,7 +32,14 @@ allowHostIPC: false
 allowHostNetwork: false
 allowHostPID: false
 allowHostPorts: false
-allowPrivilegeEscalation: false
+# Boundary's nsjail backend calls setuid via the sandbox harness to
+# enter the per-process net namespace. With allowPrivilegeEscalation=false
+# (restricted-v2's default), the kernel rejects setuid even when
+# CAP_SETUID is in the bounding set, surfacing as the SCC admission
+# rejection: `.containers[0].allowPrivilegeEscalation: Invalid value: true`.
+# Allowed here for the boundary pod ONLY; UID/SELinux/seccomp constraints
+# stay restricted, so this is a narrow escape hatch.
+allowPrivilegeEscalation: true
 allowPrivilegedContainer: false
 # Capability set: NET_BIND_SERVICE is the restricted-v2 baseline;
 # NET_ADMIN + SYS_ADMIN are the two boundary/nsjail needs.
@@ -52,7 +59,10 @@ requiredDropCapabilities:
 - SETGID
 fsGroup:
   type: MustRunAs
-priority: null
+# Higher priority than restricted-v2 (null = 0) so OCP admission picks
+# this SCC for pods using the coder-firewall-runner SA even before
+# alphabetic sort. Keeps the firewall workspace path deterministic.
+priority: 10
 readOnlyRootFilesystem: false
 runAsUser:
   type: MustRunAsRange
