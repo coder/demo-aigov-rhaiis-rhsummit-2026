@@ -27,7 +27,7 @@ Reference architecture + deployable demo for the **Coder + Red Hat** booth at **
 | **AI Bridge** | Centralized LLM proxy at `/api/v2/aibridge/{anthropic,openai}`. Anthropic → Bedrock via IRSA. OpenAI → central org key (`ALLOW_BYOK=false`) |
 | **RHAIIS (sovereign LLM)** | vLLM 0.8.4 V0 engine on RHAIIS image `rhoai-2.20-cuda`, `RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16`, tensor-parallel-2, **32K context** — `vllm-planner-tp.ocp-ai.svc.cluster.local:8000` |
 | **chatd** (Coder Agents) | Default model: Claude Sonnet 4 (Bedrock). Sovereign opt-in via `coder-agent:llama` label on issues |
-| **Identity** | **Dual IdP**. Keycloak (RHBK) — `demo` realm hosts personas (alice/bob/carol/dave/demoadm). GitHub OAuth — admin tier (gated to `demo-rhsummit-users` org). |
+| **Identity** | **Dual IdP**. Keycloak (RHBK) — `demo` realm, 3 personas one per role tier: `alice` (developer/`/developers`), `bob` (PM/auditor/`/auditors`), `demoadm` (admin/`/admins`). GitHub OAuth — admin tier (gated to `demo-rhsummit-users` org). |
 | **SCM** | **Self-hosted GitLab CE** (`gitlab.rhsummit.coderdemo.io`, EC2 `m7a.2xlarge`, Omnibus + container registry at `registry.gitlab.rhsummit.coderdemo.io`). SSO-only login via Keycloak. GitHub login disabled, GitHub external_auth retained as optional secondary for workspaces. |
 | **Issue → workspace bridge** | Go service in `services/bridge/`. GitLab Issues webhook → matches `coder-hitl` or `coder-agent[:slug]` label → spawns workspace + (optionally) Coder Agents chat. Posts comment back with URLs. |
 | **Postgres** | CloudNativePG (CNPG) `Cluster` CR, 3 instances, multi-AZ. Used by Coder + Keycloak. |
@@ -60,10 +60,10 @@ Deeper architectural narrative + every decision behind these choices: [`docs/arc
 │  │  │   sealed-secrets       Bitnami SealedSecret controller            │ │    │
 │  │  │   platform-secrets     Every sealed secret (coder/gitlab/idp/…)   │ │    │
 │  │  │   cluster-config       OAuth/cluster CR (GitHub + Keycloak IdPs), │ │    │
-│  │  │                        cluster-reader + monitoring-view CRBs for  │ │    │
-│  │  │                        the developers group, GroupSync            │ │    │
+│  │  │                        cluster-admin CRB for the Keycloak admins  │ │    │
+│  │  │                        group, GroupSync                           │ │    │
 │  │  │   keycloak-operator    RHBK operator subscription                 │ │    │
-│  │  │   keycloak             Keycloak CR + demo realm (5 personas)      │ │    │
+│  │  │   keycloak             Keycloak CR + demo realm (3 personas)      │ │    │
 │  │  │   cert-manager         ClusterIssuers (LE + R53 DNS-01)           │ │    │
 │  │  │   postgres             CNPG Cluster (3 instances, multi-AZ)       │ │    │
 │  │  │   gpu-stack            NFD + NVIDIA ClusterPolicy                 │ │    │
@@ -175,7 +175,7 @@ Deeper architectural narrative + every decision behind these choices: [`docs/arc
 ## The booth demo flow
 
 1. **PM (or anyone)** opens a GitLab issue in a demo project (e.g. `alice/artemis-sim`).
-2. **PM assigns** the issue to a Keycloak persona (alice, bob, carol, dave).
+2. **PM assigns** the issue to alice (developer) or bob (project manager).
 3. **PM labels** the issue with one of:
    - `coder-hitl` → bridge spawns a workspace owned by the assignee. They open it and work manually.
    - `coder-agent` → bridge spawns a workspace AND creates a Coder Agents chat owned by the assignee, pre-seeded with the issue title + description and instructions to push a branch + open an MR.
@@ -201,14 +201,19 @@ Troubleshooting matrix (the four bridge no-op reasons + their fixes): same doc.
 | Coder external_auth (workspace git push) | slot 0 `gitlab` (primary, demo path) | slot 1 `github` (optional secondary) |
 
 Demo personas (`/tmp/demo-creds.md` — never in git):
-- `alice / bob / carol / dave` — group `/developers` — password `Demo2026!`
-- `demoadm` — groups `/developers + /admins` — password `Z7U0jeJ1m7SaYQlvGJ!K2026`
+- `alice` — group `/developers` — password `Demo2026!`
+- `bob` — group `/auditors` — password `Demo2026!`
+- `demoadm` — group `/admins` — password `Z7U0jeJ1m7SaYQlvGJ!K2026`
 
-**RBAC scoping for the `developers` group:**
-- **OpenShift**: `cluster-reader` + `cluster-monitoring-view` ClusterRoleBindings — see all dashboards (Observe → Dashboards including GPU + vLLM), all workloads, all events; no mutations.
-- **Coder**: site-level OIDC mapping to built-in `auditor` role + per-org custom role `developers-auditor-plus` adding `workspace.create/start/stop/ssh/app_connect` + `chat.*`. (Premium-gated; both `custom_roles` and `user_role_management` license features required.)
-- **Grafana**: `role_attribute_path` evaluates Keycloak `groups` claim — `admins` → Admin, anything else → Viewer.
-- **GitLab**: instance admin promoted via `scripts/gitlab-promote-demoadmins.sh` (idempotent; CE has no native OIDC-group-to-admin mapping).
+**Group → role matrix** (each Keycloak group maps to exactly one tier across the stack — see [`docs/identity-architecture.md`](docs/identity-architecture.md) for the full table + rationale in [decision §37](docs/decisions.md)):
+
+| Surface | `/developers` (alice) | `/auditors` (bob) | `/admins` (demoadm) |
+|---|---|---|---|
+| Coder | Member + custom org role `developers-chat` (workspace.* + chat.*) | site role `auditor` (read-only deployment-wide) | site role `owner` |
+| OpenShift | no access | no access | cluster-admin (via `keycloak-admins-cluster-admin` CRB) |
+| Argo CD | no access | no access | inherited via OCP RBAC |
+| Grafana | denied at OAuth (`allowed_groups: admins`) | denied at OAuth | Admin |
+| GitLab | regular user (auto-created on Keycloak SSO) | regular user | instance admin (via `gitlab-promote-demoadmins.sh`) |
 
 Full design: [`docs/identity-architecture.md`](docs/identity-architecture.md).
 
@@ -226,7 +231,7 @@ make register-webhook    # register bridge webhook on a GitLab project (DEMO_PRO
 ```
 
 `make reset` (the canonical between-visitors action):
-- Deletes every Coder workspace + chat owned by the demo personas (`DEMO_PERSONAS` env, default `alice,bob,carol,dave,demoadm`).
+- Deletes every Coder workspace + chat owned by the demo personas (`DEMO_PERSONAS` env, default `alice,bob,demoadm`).
 - Deletes every GitLab issue in `DEMO_PROJECTS` env (default `alice/artemis-sim`) so the iid counter starts fresh.
 - Idempotently re-promotes Keycloak admins to GitLab admin.
 - Does NOT touch: Keycloak users (they live in the realm YAML), GitLab projects/repos, IaC, templates, vLLM, bridge, chatd config.

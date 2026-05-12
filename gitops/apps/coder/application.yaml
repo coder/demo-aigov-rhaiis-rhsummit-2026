@@ -107,12 +107,12 @@ spec:
             #     admin-tier (Coder team, SE presenters using their
             #     personal GH account in that org). Original IdP.
             #   - Keycloak OIDC: realm `demo` on the in-cluster RHBK
-            #     instance; demo-user personas (alice/bob/carol/dave/madmin).
-            #     Added 2026-05-10 per docs/identity-architecture.md.
+            #     instance; demo-user personas (alice, bob, demoadm). See
+            #     docs/identity-architecture.md for the 3-persona group→role
+            #     matrix; docs/decisions.md §37 for the simplification rationale.
             #
             # Both run simultaneously — the Coder login page shows two
-            # "Sign in with..." buttons. See docs/decisions.md §33
-            # (forthcoming) for the dual-IdP rationale.
+            # "Sign in with..." buttons.
             - name: CODER_DISABLE_PASSWORD_AUTH
               value: "true"
 
@@ -145,9 +145,13 @@ spec:
             - name: CODER_OIDC_CLIENT_SECRET
               value: "coder-client-secret-demo-2026"
             - name: CODER_OIDC_SIGN_IN_TEXT
-              value: "Sign in with Keycloak (demo users)"
+              value: "Keycloak"
+            # Icon: served by our own Keycloak instance under the master
+            # realm's resources path. Avoids the hotlink/CORS issues that
+            # made `www.keycloak.org/resources/images/keycloak_icon_512px.svg`
+            # render as a broken image in the Coder login page.
             - name: CODER_OIDC_ICON_URL
-              value: "https://www.keycloak.org/resources/images/keycloak_icon_512px.svg"
+              value: "https://cdn.simpleicons.org/keycloak/26ABE8"
             # Auto-create Coder user records on first OIDC login.
             - name: CODER_OIDC_ALLOW_SIGNUPS
               value: "true"
@@ -176,22 +180,21 @@ spec:
 
             # ── Site-level OIDC role sync (Premium-gated) ────────────────
             # Maps Keycloak `groups` claim values to built-in Coder site
-            # roles on every login. `developers` -> `auditor` gives demo
-            # personas site-wide READ across deployment_config, audit_log,
-            # aibridge_interception, etc. `admins` -> `owner` gives madmin
-            # full control.
-            #
-            # The custom org-scoped role `developers-auditor-plus` (which
-            # adds workspace.create + chat.*) is bootstrapped by the
-            # coder-agents-config Job — site sync ignores custom role
-            # names, so the org-scoped sync is configured via PATCH on
-            # /organizations/{id}/settings/idpsync/roles. Together they
-            # give the persona the full "read everything + create my
-            # own workspace+chat" surface.
+            # roles on every login:
+            #   - admins   -> owner    (demoadm: full control)
+            #   - auditors -> auditor  (bob: read-only site-wide audit visibility)
+            # developers is intentionally NOT mapped here — alice gets only
+            # Coder Member at site level. Her chat + workspace permissions
+            # come from the custom org-scoped role `developers-chat`
+            # (bootstrapped by the coder-agents-config Job; assigned to
+            # the developers Coder group via the org's idpsync/roles
+            # endpoint). Keeping developers without a site role means
+            # alice can't see audit logs, which is what we want for the
+            # 3-persona narrative (audit visibility = bob's job, not alice's).
             - name: CODER_OIDC_USER_ROLE_FIELD
               value: "groups"
             - name: CODER_OIDC_USER_ROLE_MAPPING
-              value: '{"developers":["auditor"],"admins":["owner"]}'
+              value: '{"admins":["owner"],"auditors":["auditor"]}'
 
             # ── External git auth (TWO providers, both optional) ────────
             # Workspaces can authenticate to BOTH GitLab and GitHub.

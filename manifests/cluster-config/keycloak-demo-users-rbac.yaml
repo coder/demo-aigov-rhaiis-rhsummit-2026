@@ -1,71 +1,40 @@
-# Keycloak demo-users RBAC.
+# Keycloak demo-users RBAC (3-persona model, see docs/decisions.md §37).
 #
-# Binds the OIDC `developers` group (from the Keycloak `demo` realm)
-# to the built-in cluster-reader ClusterRole. Demo personas can SEE
-# everything (dashboards, workloads, configmaps, events, audit log,
-# cluster CRs) but cannot mutate the cluster.
+# Binds the Keycloak `/admins` group to cluster-admin. This is the
+# Keycloak-path equivalent of the GitHub `admin` team binding in
+# `cluster-admin-binding.yaml` — demoadm gets cluster-admin whether he
+# logs in via GitHub OAuth (admin team membership) or via Keycloak
+# (admins group membership).
+#
+# /developers (alice) and /auditors (bob) are intentionally NOT bound
+# to any cluster role. The 3-persona narrative is that platform-level
+# access (OCP, Argo, Grafana) belongs to demoadm only; alice and bob
+# operate through the app layer (Coder, GitLab).
 #
 # How group resolution works:
 #   The OAuth/cluster CR's `openID.claims.groups: [groups]` mapping
 #   surfaces the user's Keycloak `groups` claim as the user's
 #   OpenShift identity-time group membership. At authz time, OCP's
-#   RBAC evaluator matches `subjects[].name: developers` against
-#   that claim directly — no separate `Group` resource needed in
-#   `user.openshift.io/v1` (those are only required if you manage
-#   group membership manually).
-#
-# Admin-tier elevation for the Keycloak `admins` group is handled
-# separately by manifests/cluster-config/cluster-admin-binding.yaml
-# (which already gives cluster-admin to the GitHub `admin` team and
-# can be extended to the OIDC `admins` group if/when we want
-# Keycloak-only admins).
+#   RBAC evaluator matches `subjects[].name: admins` against that
+#   claim directly — no separate `Group` resource needed in
+#   `user.openshift.io/v1`.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: keycloak-developers-cluster-reader
+  name: keycloak-admins-cluster-admin
   labels:
     app.kubernetes.io/part-of: identity-pivot
     app.kubernetes.io/component: keycloak-rbac
   annotations:
     # Pin sync order so this binding lands AFTER the OAuth CR change
-    # (otherwise the `developers` group reference is meaningless).
+    # (otherwise the `admins` group reference is meaningless).
     argocd.argoproj.io/sync-wave: "10"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-reader
+  name: cluster-admin
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
-    name: developers
-
----
-# cluster-reader alone doesn't include get/list on the monitoring.coreos.com
-# CRDs (ServiceMonitor, PrometheusRule, etc.). The OCP Console's
-# Observe → Dashboards path needs them to render any built-in or
-# user-workload dashboard (including the NVIDIA GPU dashboard). Without
-# this binding the Console surfaces a generic "Bad Request" error from
-# the Thanos Querier auth proxy.
-#
-# `cluster-monitoring-view` is the OCP-managed ClusterRole that grants
-# exactly that read scope (monitoring CRDs + Thanos read), so binding
-# it to /developers gives every demo persona the dashboards-only view
-# without expanding what they can mutate.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: keycloak-developers-cluster-monitoring-view
-  labels:
-    app.kubernetes.io/part-of: identity-pivot
-    app.kubernetes.io/component: keycloak-rbac
-  annotations:
-    argocd.argoproj.io/sync-wave: "10"
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-monitoring-view
-subjects:
-  - apiGroup: rbac.authorization.k8s.io
-    kind: Group
-    name: developers
+    name: admins

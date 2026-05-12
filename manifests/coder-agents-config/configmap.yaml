@@ -576,19 +576,20 @@ data:
     # RBAC: custom org role + OIDC group->role sync for Keycloak demo users
     # ---------------------------------------------------------------------------
     #
-    # Goal: demo personas (alice/bob/carol/dave — all in Keycloak `developers`
-    # group) get site-level `auditor` (read everything across the deployment)
-    # PLUS an organization-scoped custom role that gives them workspace.create
-    # + chat.*. The admins group (madmin) gets site `owner`.
+    # 3-persona model (docs/decisions.md §37):
+    #   /admins   (demoadm) -> site role `owner` (via CODER_OIDC_USER_ROLE_MAPPING)
+    #   /auditors (bob)     -> site role `auditor` (via CODER_OIDC_USER_ROLE_MAPPING)
+    #   /developers (alice) -> NO site role; gets the custom org role
+    #                          `developers-chat` (workspace.* + chat.*)
+    #                          assigned below via org idpsync/roles PATCH.
     #
     # Why split site + org sync:
     #   - Site-level CODER_OIDC_USER_ROLE_MAPPING only accepts built-in role
     #     names. We use it for `auditor`/`owner`.
     #   - Custom roles are organization-scoped and configured per-org. The
-    #     extra workspace+chat verbs need a custom org role + per-org OIDC
-    #     role-sync settings PATCH.
-    #   - Together: site auditor gives the read surface; org custom role
-    #     adds the "create my own stuff" verbs.
+    #     workspace.create + chat.* verbs alice needs (without granting
+    #     site-wide audit visibility, which is bob's job) need a custom
+    #     org role + per-org OIDC role-sync settings PATCH.
     #
     # License requirement: OIDC role sync needs the Premium
     # `user_role_management` license entitlement. If the cluster's Coder
@@ -598,8 +599,8 @@ data:
     # need to apply.
     
     CODER_API="${CODER_URL%/}/api/v2"
-    ROLE_NAME="developers-auditor-plus"
-    ROLE_DISPLAY="Developers (Auditor + Create)"
+    ROLE_NAME="developers-chat"
+    ROLE_DISPLAY="Developer (Workspace + Chat)"
     
     echo ""
     echo "==> Fetching default organization ID..."
@@ -610,6 +611,11 @@ data:
     else
       echo "    Default org: $ORG_ID"
     
+      # Note: audit_log + connection_log are deliberately OMITTED here.
+      # In the 3-persona model, audit visibility belongs to bob (Auditor
+      # site role); alice (developer) gets workspace + chat scope only.
+      # Template read + group/org metadata stay so alice can browse the
+      # workspace picker and see her org context.
       ROLE_PAYLOAD=$(jq -n \
         --arg name "$ROLE_NAME" \
         --arg display "$ROLE_DISPLAY" \
@@ -622,8 +628,6 @@ data:
           user_permissions: [],
           organization_member_permissions: [],
           organization_permissions: [
-            {negate:false,resource_type:"audit_log",action:"read"},
-            {negate:false,resource_type:"connection_log",action:"read"},
             {negate:false,resource_type:"template",action:"read"},
             {negate:false,resource_type:"template",action:"view_insights"},
             {negate:false,resource_type:"group",action:"read"},

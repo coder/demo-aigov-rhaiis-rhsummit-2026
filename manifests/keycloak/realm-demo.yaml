@@ -1,10 +1,29 @@
 # Demo realm — declarative source of truth for booth identities.
 #
-# Realm `demo` with:
-#   - 4 user personas (alice, bob, carol, dave) in the `developers` group
-#   - 1 admin user (madmin) in the `admins` group (for Grafana Admin role)
-#   - 4 confidential OIDC clients (coder, gitlab, openshift, grafana)
-#   - Group claim `groups` mapped into ID + access tokens
+# Realm `demo` with 3 personas, one per Keycloak group — each group
+# drives a distinct cross-platform role (see docs/identity-architecture.md
+# for the full group→role matrix):
+#
+#   /developers (alice)  — regular developer
+#                          Coder: Member + org role `developers-chat` (workspace.* + chat.*)
+#                          OCP:   no access (binding removed in §37 simplification)
+#                          Argo:  no access
+#                          Grafana: denied at OAuth (allowed_groups=admins)
+#                          GitLab: regular user, default access
+#
+#   /auditors (bob)      — project manager / audit-only
+#                          Coder: site role `auditor` (read-only across the deployment)
+#                          everything else: same as developer (no extra access)
+#
+#   /admins (demoadm)    — super-admin / owner
+#                          Coder: site role `owner`
+#                          OCP:   cluster-admin (Keycloak path)
+#                          Argo:  cluster-admin RBAC (no Keycloak SSO path; uses kube auth)
+#                          Grafana: Admin
+#                          GitLab: instance admin (promoted via gitlab-promote-demoadmins.sh)
+#
+# Plus 4 confidential OIDC clients (coder, gitlab, openshift, grafana)
+# with the `groups` claim mapped into ID + access tokens.
 #
 # Reset story: this CR is the ONLY source of demo-user state. `oc apply
 # -f realm-demo.yaml` re-establishes everything. For the surgical
@@ -13,12 +32,9 @@
 # per-user KeycloakUser CRs and re-apply.
 #
 # Shared demo password: `Demo2026!` (NOT a security boundary; documented
-# in 1Password under "RH Summit booth - demo persona logins"). Every
-# demo user has the same password. Booth presenters tell visitors the
-# password verbally; visitors log in as alice/bob/etc to drive the
-# scenario. The admin user has the same password — admin-tier in this
-# realm is ONLY for Grafana Admin role, not for any production-tier
-# access.
+# in 1Password under "RH Summit booth - demo persona logins"). alice and
+# bob both use this; demoadm has a stronger booth-grade password (see
+# below) since that account can elevate to cluster-admin.
 #
 # OIDC client secrets are intentionally simple, hardcoded, and visible
 # in git. They are demo realm secrets — if leaked they only let someone
@@ -62,9 +78,12 @@ spec:
     ssoSessionMaxLifespan: 36000
 
     # ─── Groups ──────────────────────────────────────────────────────
+    # One group per role tier — gives Coder/OCP/Grafana clean group→role
+    # mappings without needing to encode role logic in each consumer.
     groups:
-      - name: developers
-      - name: admins
+      - name: developers   # alice — Coder Member + chat/workspace org role
+      - name: auditors     # bob   — Coder Auditor (read-only site-wide)
+      - name: admins       # demoadm — Coder Owner + cluster-admin everywhere
 
     # ─── Demo users ──────────────────────────────────────────────────
     users:
@@ -80,6 +99,8 @@ spec:
             temporary: false
         groups:
           - /developers
+      # Project-manager persona — Coder Auditor role (read-only audit log
+      # + workspaces). Cannot start/stop workspaces or create chats.
       - username: bob
         enabled: true
         email: bob@demo.rhsummit.coderdemo.io
@@ -91,34 +112,12 @@ spec:
             value: "Demo2026!"
             temporary: false
         groups:
-          - /developers
-      - username: carol
-        enabled: true
-        email: carol@demo.rhsummit.coderdemo.io
-        firstName: Carol
-        lastName: Chen
-        emailVerified: true
-        credentials:
-          - type: password
-            value: "Demo2026!"
-            temporary: false
-        groups:
-          - /developers
-      - username: dave
-        enabled: true
-        email: dave@demo.rhsummit.coderdemo.io
-        firstName: Dave
-        lastName: Davis
-        emailVerified: true
-        credentials:
-          - type: password
-            value: "Demo2026!"
-            temporary: false
-        groups:
-          - /developers
+          - /auditors
       # Admin-tier demo user. Stronger password than the developers
-      # since this account can elevate to OCP cluster-admin and
-      # Coder owner. Booth-grade (rotate post-event).
+      # since this account elevates to OCP cluster-admin and Coder
+      # owner. Booth-grade (rotate post-event). Note: demoadm is NOT
+      # in /developers — the owner role at Coder + cluster-admin at
+      # OCP supersede everything /developers would grant.
       - username: demoadm
         enabled: true
         email: demoadm@demo.rhsummit.coderdemo.io
@@ -130,7 +129,6 @@ spec:
             value: "Z7U0jeJ1m7SaYQlvGJ!K2026"
             temporary: false
         groups:
-          - /developers
           - /admins
 
     # ─── OIDC clients ────────────────────────────────────────────────

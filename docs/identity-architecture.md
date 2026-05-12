@@ -50,8 +50,11 @@ All four web UIs (GitLab, Coder, Grafana, OpenShift Console) federate to Keycloa
 - Deploy via the Keycloak Operator on OpenShift.
 - Realm name: `rhsummit` (or similar — pick once and use consistently).
 - Declared via `KeycloakRealmImport` CR so the realm config lives in git as YAML.
-- Users: 3–5 demo personas (`alice`, `bob`, `carol`, …), all with a known shared password (booth context, not a security boundary).
-- Groups: `developers` (default for all demo users), `admins` (subset, for Grafana admin role).
+- Users: 3 demo personas — `alice` (developer), `bob` (project manager / auditor), `demoadm` (super-admin). All three share `Demo2026!` for alice/bob; demoadm has a stronger booth-grade password since that account elevates to cluster-admin.
+- Groups (one per role tier — each group drives one tier's cross-platform RBAC):
+  - `developers` — alice. Coder Member + custom org role `developers-chat` (workspace.* + chat.*). No access to OCP/Argo/Grafana.
+  - `auditors` — bob. Coder site role `auditor` (read-only across the deployment). No access elsewhere.
+  - `admins` — demoadm. Coder site role `owner`, OCP cluster-admin (via `keycloak-admins-cluster-admin` ClusterRoleBinding), Grafana Admin, GitLab instance admin (promoted via `gitlab-promote-demoadmins.sh`).
 - Pre-declared OIDC clients:
   - `coder` — confidential, redirect URI = Coder's callback
   - `gitlab` — confidential, redirect URI = GitLab's `/users/auth/openid_connect/callback`
@@ -90,7 +93,7 @@ Backup: EBS snapshot daily. Reset = `glab issue/project` API calls (or Terraform
 - OIDC against Keycloak using the `coder` client.
 - Template: parameterized to accept a GitLab issue ID and project path. Workspace startup script clones the GitLab repo, checks out a branch named for the issue, opens the relevant files.
 - The template should pull container images from a registry the cluster can reach (likely the same GitLab's container registry, which keeps everything in one stateful service).
-- Group sync: Keycloak `developers` → Coder organization member role.
+- Group sync: Keycloak `groups` claim drives both Coder site roles (`admins`→`owner`, `auditors`→`auditor`; `developers` intentionally unmapped at site level) and the custom org role `developers-chat` (assigned to the developers group via the org's `idpsync/roles` endpoint by the `coder-agents-config` Job).
 
 ### 4. Issue → Workspace bridge
 
@@ -190,4 +193,4 @@ Concrete edits to `coder/demo-aigov-rhaiis-rhsummit-2026`:
 - Which Keycloak: upstream Keycloak Operator, or specifically Red Hat Build of Keycloak Operator (RHBK)? RHBK is the on-narrative choice for an RH event; functionally equivalent for our needs.
 - GitLab CE or EE? Resource budget is similar. EE has nicer issue/board features for the demo visuals but requires a trial license. CE is fine.
 - Bridge language: Go (single static binary, fits in a tiny container) vs Python (faster to iterate, slightly larger image). Recommend Go unless you already have Python bridge code lying around.
-- Demo user count: 3 personas enough for the booth flow, or do you want 5+ to show role-based variation?
+- ~~Demo user count: 3 personas enough for the booth flow, or do you want 5+ to show role-based variation?~~ — **resolved 2026-05-12**: 3 personas, one per role tier. carol/dave dropped (they had no role differentiation from alice; they were filler). See decisions §37.

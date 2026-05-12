@@ -778,6 +778,47 @@ Cost: one Dockerfile line + a `build-images.yml` GHA run (~5 min to rebuild + pu
 
 ---
 
+## 37. Three-persona identity model — one Keycloak group per role tier
+
+**Context:** The pre-existing realm had 5 personas — `alice`, `bob`, `carol`, `dave` all in `/developers`, plus `demoadm` in both `/developers` and `/admins`. carol and dave had zero role differentiation from alice; they existed only to make the persona dropdown feel populated. Worse, every developer-tier user got the Coder `auditor` site role (via `CODER_OIDC_USER_ROLE_MAPPING`), which gave alice cross-deployment audit visibility she had no business having — and gave bob (the supposed "project manager" persona) nothing distinct from alice.
+
+The booth narrative for the 3-persona reframe is:
+- **alice** is a developer — she creates workspaces, talks to AI, pushes code.
+- **bob** is a project manager — he watches what gets done and reads the audit trail.
+- **demoadm** runs the place — every platform, full control.
+
+Each persona should map cleanly to ONE permissions tier that's enforced by group membership in Keycloak, not by application-specific configuration drift. The original "everyone gets auditor + a custom role to add create perms" mapping was a workaround for not having multiple groups; with multiple groups the design simplifies.
+
+**Picked (group → role matrix):**
+
+| Keycloak group | Members | Coder site | Coder org-role | OCP | Argo | Grafana | GitLab |
+|---|---|---|---|---|---|---|---|
+| `/admins` | demoadm | `owner` | (inherited via owner) | cluster-admin (new CRB `keycloak-admins-cluster-admin`) | inherited via OCP | Admin | instance admin (via `gitlab-promote-demoadmins.sh`) |
+| `/developers` | alice | (none — Member) | `developers-chat` (workspace.* + chat.*, NO audit_log/connection_log) | none | none | denied at OAuth callback (`allowed_groups: admins`) | regular user |
+| `/auditors` | bob | `auditor` (read-only deployment-wide) | (none) | none | none | denied at OAuth callback | regular user |
+
+**Concrete changes (commit `<this PR>`):**
+1. `manifests/keycloak/realm-demo.yaml` — drop carol/dave; add `/auditors` group; move bob into it; demoadm now in `/admins` only (was `/developers + /admins`).
+2. `gitops/apps/coder/application.yaml` — `CODER_OIDC_USER_ROLE_MAPPING` is now `{"admins":["owner"],"auditors":["auditor"]}` (developers intentionally not mapped at site level; their permissions come from the org-scoped custom role).
+3. `scripts/coder-agents-provider-model-config.sh` — custom org role renamed `developers-auditor-plus` → `developers-chat`. `audit_log:read` and `connection_log:read` permissions removed (those belong to bob's site-level auditor role now). OIDC role-sync mapping `{developers: [developers-chat]}` unchanged in shape (only the role name changed).
+4. `manifests/cluster-config/keycloak-demo-users-rbac.yaml` — replaced. The old `developers → cluster-reader + cluster-monitoring-view` bindings are gone (alice has no business in OCP); a new `admins → cluster-admin` binding gives demoadm a Keycloak path to cluster-admin (previously only the GitHub `admin` team had that).
+5. `gitops/apps/observability/application.yaml` — Grafana's `auth.generic_oauth` block gains `allowed_groups: admins`, locking the Keycloak login to demoadm only.
+6. `scripts/reset-demo.sh` — `DEMO_PERSONAS` default reduced from `alice,bob,carol,dave,demoadm` to `alice,bob,demoadm`.
+7. `docs/identity-architecture.md` + `README.md` — updated persona list + group→role matrix.
+
+**Why not:**
+- **Add a `/project-managers` group instead of `/auditors`** — semantically nicer name, but Coder's site role is literally called `auditor`. Naming the Keycloak group `auditors` keeps the mental model consistent across the OIDC → role hop.
+- **Keep developers mapped to `auditor` at site level** — that's what gave alice cross-deployment audit visibility she didn't need. The 3-persona narrative breaks down if alice can see bob's audit view by default.
+- **Map developers → custom role at site level via `CODER_OIDC_USER_ROLE_MAPPING`** — Coder's site-level mapping accepts only BUILT-IN role names. The custom role has to be assigned at the org level via the `idpsync/roles` endpoint, which the agents-config Job already does idempotently.
+
+**Trigger to revisit:**
+- We add a fourth persona tier (e.g. "security auditor" with cross-org visibility) — add a fourth Keycloak group rather than overloading an existing one.
+- Coder adds first-class custom site roles (no longer org-scoped) — collapse the developers-chat custom role into `CODER_OIDC_USER_ROLE_MAPPING` directly.
+
+**Related decisions:** §32 (GitLab external_auth recipe — separate but identity-adjacent).
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":

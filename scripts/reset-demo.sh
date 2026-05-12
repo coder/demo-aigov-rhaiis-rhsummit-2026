@@ -36,7 +36,7 @@
 #   ./scripts/reset-demo.sh --confirm    # non-interactive — deletes everything immediately
 #
 # Env vars (with defaults):
-#   DEMO_PERSONAS=alice,bob,carol,dave,demoadm
+#   DEMO_PERSONAS=alice,bob,demoadm
 #   DEMO_PROJECTS=alice/artemis-sim
 #   CODER_URL=https://coder.apps.cluster.rhsummit.coderdemo.io
 #   GITLAB_API=https://gitlab.rhsummit.coderdemo.io/api/v4
@@ -50,7 +50,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_DIR="${REPO_ROOT}/terraform"
 
-DEMO_PERSONAS="${DEMO_PERSONAS:-alice,bob,carol,dave,demoadm}"
+DEMO_PERSONAS="${DEMO_PERSONAS:-alice,bob,demoadm}"
 DEMO_PROJECTS="${DEMO_PROJECTS:-alice/artemis-sim}"
 CODER_URL="${CODER_URL:-https://coder.apps.cluster.rhsummit.coderdemo.io}"
 GITLAB_API="${GITLAB_API:-https://gitlab.rhsummit.coderdemo.io/api/v4}"

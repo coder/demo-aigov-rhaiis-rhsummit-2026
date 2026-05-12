@@ -185,7 +185,7 @@ spec:
                 role_attribute_path: "contains(groups[*], '@demo-rhsummit-users/admin') && 'Admin' || 'Viewer'"
                 skip_org_role_sync: true
 
-              # ── Keycloak OIDC (demo personas, added 2026-05-10) ──
+              # ── Keycloak OIDC (demo personas) ──
               # Second auth provider alongside auth.github. Grafana
               # supports up to one generic_oauth block + the
               # vendor-specific ones (github, google, etc.) — they
@@ -193,9 +193,16 @@ spec:
               # CLIENT_SECRET comes from the env var
               # GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET injected via the
               # keycloak-grafana-oidc-secret SealedSecret.
+              #
+              # 3-persona model (docs/decisions.md §37): only `/admins`
+              # (demoadm) can log into Grafana via Keycloak. alice
+              # (/developers) and bob (/auditors) are denied at OAuth
+              # callback via `allowed_groups: admins` — Grafana returns
+              # "User is not a member of one of the required groups"
+              # and never creates the org-user record.
               auth.generic_oauth:
                 enabled: true
-                name: Keycloak (demo users)
+                name: Keycloak
                 allow_sign_up: true
                 auto_login: false
                 client_id: grafana
@@ -207,10 +214,14 @@ spec:
                 auth_url: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo/protocol/openid-connect/auth
                 token_url: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo/protocol/openid-connect/token
                 api_url: https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo/protocol/openid-connect/userinfo
+                # Only members of the Keycloak `admins` group can sign in.
+                # Without this, non-admins land as Viewer (the role_attribute_path
+                # fallback below); 3-persona model wants them blocked entirely.
+                allowed_groups: admins
                 # Map the Keycloak `admins` group → Grafana Admin role.
-                # Members of /developers (and no other admin tier) → Viewer.
-                # Same logic as the GitHub path; Grafana applies the role
-                # from whichever IdP the user signed in with.
+                # The fallback Viewer arm is unreachable now that
+                # `allowed_groups: admins` blocks every other group at
+                # OAuth callback — kept for defense-in-depth.
                 role_attribute_path: "contains(groups[*], 'admins') && 'Admin' || 'Viewer'"
                 skip_org_role_sync: true
                 # Use preferred_username as Grafana's login attribute
