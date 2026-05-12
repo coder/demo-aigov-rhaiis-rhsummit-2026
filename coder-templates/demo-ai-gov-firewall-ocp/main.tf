@@ -44,13 +44,22 @@
 #   env var for the Claude Code CLI specifically.
 #
 # Agent Firewall:
-#   The `boundary` binary is installed to /usr/local/bin and preconfigured
-#   via ~/.config/coder_boundary/config.yaml. The allowlist lives in
-#   ./boundary.config.yaml.tftpl (rendered with templatefile() at plan
-#   time) — edit that file to add/remove domains, NOT this one.
+#   The `boundary` binary is installed to /usr/local/bin and configured
+#   via the allowlist in ./boundary.config.yaml.tftpl (rendered with
+#   templatefile() at plan time) — edit that file to add/remove domains,
+#   NOT this one.
 #   Wrappers at ~/.local/bin/boundary-wrappers/<tool> force every AI CLI
-#   invocation (claude, codex) through boundary by default. nsjail (the
-#   default backend) escalates privileges via sudo.
+#   invocation (claude, codex) through boundary by default.
+#
+#   Backend: landjail (Linux Landlock LSM). nsjail (boundary's default)
+#   does NOT work on OCP 4.21 with OVN-Kubernetes — the pod's
+#   ip_forward sysctl is 0, so nsjail's MASQUERADE NAT rule has nowhere
+#   to forward packets to ("No route to host"). landjail bypasses the
+#   network-namespace / iptables / MASQUERADE path entirely; runs as
+#   the workspace's normal UID under restricted-v2 SCC. The
+#   coder-firewall-scc + privileged kernel-modules DaemonSet remain
+#   deployed (from when we tried nsjail first) — they're harmless
+#   leftovers; landjail doesn't need either.
 # =============================================================================
 
 terraform {
@@ -440,9 +449,14 @@ resource "coder_agent" "main" {
         claude) DEFAULT_ARGS="--dangerously-skip-permissions --model haiku" ;;
         codex)  DEFAULT_ARGS="--dangerously-bypass-approvals-and-sandbox --model gpt-5.1-codex-mini" ;;
       esac
-      # --config must be passed explicitly; boundary v0.9.0 has no
-      # auto-discovery for ~/.config/coder_boundary/config.yaml.
-      printf '#!/usr/bin/env bash\nexec boundary --config "$HOME/.config/coder_boundary/config.yaml" -- %q %s "$@"\n' "$REAL_BIN" "$DEFAULT_ARGS" > "$WRAPPERS_DIR/$tool"
+      # --config + --jail-type must both be passed explicitly to boundary v0.9.0:
+      #   --config: boundary doesn't auto-discover ~/.config/coder_boundary/config.yaml
+      #   --jail-type landjail: nsjail (the default) doesn't work on OVN-Kubernetes
+      #     because pod's ip_forward sysctl is 0 → nsjail's MASQUERADE has nowhere
+      #     to forward NAT'd packets ("No route to host"). landjail uses Linux's
+      #     Landlock LSM — no network namespace, no iptables, no privileged setup
+      #     needed. Verified working 2026-05-12 on OCP 4.21 / OVN-Kubernetes.
+      printf '#!/usr/bin/env bash\nexec boundary --config "$HOME/.config/coder_boundary/config.yaml" --jail-type landjail -- %q %s "$@"\n' "$REAL_BIN" "$DEFAULT_ARGS" > "$WRAPPERS_DIR/$tool"
       chmod +x "$WRAPPERS_DIR/$tool"
       echo "  $tool → boundary -- $REAL_BIN $DEFAULT_ARGS"
     done
@@ -460,6 +474,10 @@ resource "coder_agent" "main" {
       # a wrapper) also load the allowlist.
       grep -qF 'BOUNDARY_CONFIG' "$RC" || \
         echo 'export BOUNDARY_CONFIG="$HOME/.config/coder_boundary/config.yaml"' >> "$RC"
+      # See wrapper comment above re: --jail-type landjail. Export it
+      # globally so `boundary -- foo` (direct) also avoids nsjail.
+      grep -qF 'BOUNDARY_JAIL_TYPE' "$RC" || \
+        echo 'export BOUNDARY_JAIL_TYPE=landjail' >> "$RC"
     done
 
     # Pre-stage demo scripts so they're ready for a live Agent-Firewall
