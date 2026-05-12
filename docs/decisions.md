@@ -754,6 +754,30 @@ Cost: one Dockerfile line + a `build-images.yml` GHA run (~5 min to rebuild + pu
 
 ---
 
+## 36. FP8 Llama 3.3 70B attempt aborted — AWS capacity blocker + INT4 is good enough for the booth
+
+**Context:** §35 documented the workspace-image symlink workaround for Llama-INT4's hallucinated workdir paths (`/home/user/...`, `/workspace/...`, `/project/...`). On 2026-05-11 we ran out of training-prior paths Llama-INT4 could land on while debugging at the venue (4 symlinks landed; the 5th request picked `/project/`), and pulled out the structural fix: **the quantization is the root cause** — INT4 erodes the cautious-agent patterns (`pwd && ls` probe, omit-by-default for optional args) that Sonnet/Opus exhibit reliably. A higher-precision quant would retain those patterns.
+
+**Plan:** Stand up `RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic` on a parallel `g6e.12xlarge` MachineSet (4× L40S, TP-4, 32K context) so the proven-working INT4 path stayed as a fallback. New manifests committed at `ba45f41` (`manifests/machinesets/gpu-l40s-tp-fp8.yaml` + `manifests/rhaiis/vllm-planner-tp-fp8.yaml`).
+
+**Blocker:** AWS returned `InsufficientInstanceCapacity` for every `g6e.12xlarge` request in `us-east-1a` — over 1,000 retries in 60 minutes, all the same error. AWS explicitly suggested `us-east-1b/1c/1d` in the error body. The cluster *does* have private subnets in those AZs (master-1 in 1b, master-2 in 1c), but they're configured as master-only — verifying that those subnets' route tables would pass NAT-egress for a worker (so image pulls succeed) couldn't be done with `oc` alone, and gambling on it 12 hours before the booth had asymmetric downside.
+
+**Picked:** Abort FP8. Revert `ba45f41`, scale the failed MachineSet to 0, delete it. Ship the booth on INT4 with the symlink-removed workspace image (also reverted per `3e93e91`) and the narrative framing of "first-gen Llama-3 INT4 doesn't probe its environment, here's how a 5x bigger frontier model handles it" — that's actually a *stronger* demo story than "look, all models work great."
+
+**Why not:**
+- **Swap to us-east-1b** — viable but unverified subnet/route-table compatibility, and there'd be no time to roll back if it failed. Bad risk profile for a one-shot demo.
+- **FP16 on the same hardware** — 140 GiB weights at TP-4 leaves only ~13 GiB/GPU for KV cache; 32K context with concurrency would OOM. Not actionable without bigger GPUs.
+- **Stay on INT4 but keep adding symlinks** — `/project/` was the 5th path; there is no enumerable set. Already covered in §35.
+
+**Trigger to revisit:**
+- AWS releases additional `g6e` capacity in `us-east-1a` (visible via `aws ec2 describe-instance-type-offerings`) — re-apply the FP8 manifests post-event.
+- Cluster gets re-installed with worker subnets in multiple AZs — FP8 becomes a single-MachineSet change.
+- Upstream chatd lands the `workdir` fallback fix mentioned in §35 — INT4 stops needing the structural workaround at all, and quant choice becomes about quality alone.
+
+**Related decision:** §35 (the symlink workaround that didn't scale).
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":
