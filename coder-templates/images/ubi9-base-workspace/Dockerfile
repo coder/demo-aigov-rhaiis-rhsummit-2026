@@ -60,6 +60,7 @@ RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
         gcc \
         git \
         gnupg2 \
+        iptables-nft \
         jq \
         less \
         make \
@@ -79,6 +80,16 @@ RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
         zsh \
     && dnf clean all \
     && rm -rf /var/cache/dnf
+
+# iptables-nft (added 2026-05-12) — the firewall workspace template runs
+# HashiCorp Boundary's nsjail backend, which uses iptables to set NAT
+# rules on the per-process network namespace. UBI9 doesn't include it
+# by default. The pod still needs CAP_NET_ADMIN (granted by
+# coder-firewall-scc) for the binary's syscalls to actually take effect;
+# this just makes the binary present. iptables-nft uses the nftables
+# kernel backend (modern RHEL 9 default), backwards-compatible iptables
+# CLI surface — boundary's `iptables -t nat -A POSTROUTING ...` calls
+# work unchanged.
 
 # 3) tmux — not in any UBI9 repo. UBI9 stripped tmux from the
 #    redistributable subset. EPEL 9 doesn't ship it either (only
