@@ -1,0 +1,6 @@
+{
+  "display_name": "Artemis Sim Dev Environment (OCP)",
+  "description": "OCP-native C++/Node dev workspace for the Artemis-2 simulator. No AI tools — traditional SWE workflow, clones the assigned repo via the configured GitLab external_auth, ready for sim runtime + visualization development.",
+  "icon": "https://raw.githubusercontent.com/coder/demo-aigov-rhaiis-rhsummit-2026/main/coder-templates/artemis-sim-dev-ocp/icon.svg",
+  "slug": "artemis-sim-dev-ocp"
+}

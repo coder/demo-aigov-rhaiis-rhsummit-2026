@@ -819,6 +819,36 @@ Each persona should map cleanly to ONE permissions tier that's enforced by group
 
 ---
 
+## 38. New template `artemis-sim-dev-ocp` — the non-AI half of the booth story
+
+**Context:** The existing OCP templates (`ai-dev-ocp`, `agents-dev-ocp`, the two `demo-ai-gov-*-ocp` variants) all lead with AI tooling — Claude Code / Codex / Gemini CLIs, AI Bridge env vars, Coder Agents chat integration. That covers the "AI governance" half of the booth pitch well, but it makes for an unbalanced demo: every Coder workspace looks like an AI workstation. The Red Hat audience also has a large contingent of traditional enterprise developers — embedded, simulation, control-systems folks — who want to see Coder as a generic dev-platform story, not just an AI-tools story.
+
+`artemis-sim-dev-ocp` is the contrast piece. It's a "regular SWE on OCP" template: C++ backend + Node/TS frontend, no AI tooling, clones a real-feeling Artemis-2 simulator repo. The booth narrative flips between this template and the AI templates to show "Coder is the platform; the toolchain is your choice."
+
+**Picked (template shape):**
+- **Persona**: one persona — a *simulator engineer* who builds the sim. The simulator itself serves 4 downstream user types (Flight SW, GNC, Payload, Mission Control) but those are CONSUMERS of the simulator binary, not workspace users. The engineer writing the C++ runtime + Node visualization is one role, hence one preset/parameter shape.
+- **Stack**: C++ (gcc + clang + cmake + gdb + clangd) for the digital-sim backend, Node.js 22 LTS + TypeScript for the visualization frontend. Both layers pre-installed in the `ubi9-node-workspace` base image so workspace cold starts don't hit `sudo dnf install` (which restricted-v2 SCC blocks via CAP_SETUID drop).
+- **Repo URL is dynamic** (decision recorded here per user ask):
+  - Template defines `git_repo` as a Coder parameter with default `https://gitlab.rhsummit.coderdemo.io/alice/artemis-sim` and `mutable = false`.
+  - The default is what UI-driven workspace creation gets (the natural form for booth visitors who click "Create Workspace" from the Coder dashboard).
+  - The bridge service ALSO populates `git_repo` via `RichParameterValues` on every webhook-triggered workspace creation, pulling the value from the GitLab webhook payload's `Project.WebURL` field. So when a PM labels a GitLab issue in some-other-project with `coder-workspace:artemis-sim-dev-ocp`, the workspace clones that other project, not the default.
+  - This keeps the template generic (works for any GitLab project that has the right shape) without baking a per-project hardcode into the template.
+- **Modules**: `code-server` (browser VSCode), `git-clone` (handles the dynamic clone via `GITLAB_TOKEN` from external_auth), `dotfiles` (user-level zsh/tmux/neovim config). NO Kiro, NO Cursor — those are AI-tool surfaces that don't belong here.
+- **No AI plumbing**: no `claude_settings` / `claude_config` locals, no `ai_bridge_*` URLs, no `coder_env` resources for `CLAUDE_API_KEY` / `OPENAI_API_KEY`, no Anthropic/OpenAI env vars on the agent.
+
+**Why not:**
+- **One template per simulator-consumer persona (Flight SW / GNC / Payload / Mission Control)** — initially considered. Rejected after clarification: those personas use the simulator's RUNTIME, not the dev workspace. They're not Coder users. One template per consumer would be 4× maintenance for no narrative payoff.
+- **Hardcoded repo URL in the template's `startup_script`** — simpler at first but doesn't carry the bridge → workspace plumbing story. The dynamic param via `RichParameterValues` lets us demo "GitLab webhook describes the work, Coder reads the description, the workspace clones the right repo automatically" as one connected flow.
+- **Install C++ tooling at workspace startup via `dnf` in the agent script** — fails under restricted-v2 (CAP_SETUID dropped, sudo can't elevate). Build-time install in `ubi9-node-workspace` is the canonical pattern (see decisions §35 for the related symlink workaround — same root cause of "we can't install at runtime").
+
+**Trigger to revisit:**
+- A specific persona (e.g. Flight SW) gets a workspace-shape requirement the simulator engineer one doesn't cover — at that point, fork to `artemis-flightsw-dev-ocp` rather than overload artemis-sim-dev-ocp.
+- The bridge starts supporting `.coder/template.yaml`-style per-project template overrides (handler.go has a TODO for this) — then the artemis-sim-dev-ocp default could be removed and replaced with project-driven selection.
+
+**Related decisions:** §35 (workspace SCC pattern / why we install at build time), §37 (the 3-persona identity model — alice is the developer who uses this template).
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":

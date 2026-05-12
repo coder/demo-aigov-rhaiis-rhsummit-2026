@@ -35,6 +35,32 @@ RUN npm install --global --no-fund --no-audit \
         typescript \
     && rm -rf /root/.npm
 
+# C++ build tooling — pre-installed here so the artemis-sim-dev-ocp template
+# (and any other C++-flavored workspace consumers) doesn't have to `dnf
+# install` these at workspace startup. That matters because:
+#   1. Faster cold starts: ~50MB of RPMs avoided on every workspace boot.
+#   2. SCC compliance: at startup the pod runs under restricted-v2 with a
+#      random non-root UID and CAP_SETUID dropped, so `sudo dnf install`
+#      from the agent's startup script fails. Installing at build time
+#      (here, as root, before any SCC applies) sidesteps that entirely.
+#
+# Package notes:
+#   - `gcc` + `make` are already in ubi9-base-workspace; we add `clang` as
+#     an alternate compiler and `gdb` for debugging.
+#   - `clang-tools-extra` provides `clangd` — the LSP server VSCode /
+#     code-server uses for C++ IntelliSense.
+#   - `pkg-config` on UBI9 is packaged as `pkgconf-pkg-config` (the
+#     pkgconf reimplementation provides the `pkg-config` binary via a
+#     compat shim). Plain `pkg-config` is NOT a valid package name on UBI9.
+RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
+        cmake \
+        gdb \
+        clang \
+        clang-tools-extra \
+        pkgconf-pkg-config \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
 # Re-apply OCP-friendly home perms after the root-owned installs above
 # (corepack writes shims to /usr/lib/node_modules, but anything that
 # touched /home/coder needs to stay group-writable).
