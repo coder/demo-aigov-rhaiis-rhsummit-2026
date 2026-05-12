@@ -51,12 +51,21 @@ defaultAddCapabilities: null
 # Drop the dangerous-but-not-needed-by-nsjail capabilities. We can't use
 # `requiredDropCapabilities: [ALL]` like restricted-v2 does because that
 # would override allowedCapabilities and re-drop NET_ADMIN/SYS_ADMIN.
-# Enumerate the ones we definitely don't want instead.
+#
+# SETUID and SETGID stay in the bounding set (i.e. NOT dropped here) so
+# `sudo` works at workspace runtime. The firewall template's startup
+# script installs HashiCorp Boundary via `curl | sudo bash` and the
+# boundary binary itself does setuid into the per-process net namespace
+# at run time — without these caps, sudo fails with
+# `setresuid(): Operation not permitted` and the install + every
+# wrapped tool invocation falls back silently to no-firewall mode.
+#
+# KILL and MKNOD are the only "drop" capabilities here — both unused
+# by sudo and by boundary, and dropping them keeps the SCC visibly
+# narrower than the cluster's restricted-v2 minus-everything baseline.
 requiredDropCapabilities:
 - KILL
 - MKNOD
-- SETUID
-- SETGID
 fsGroup:
   type: MustRunAs
 # Higher priority than restricted-v2 (null = 0) so OCP admission picks
