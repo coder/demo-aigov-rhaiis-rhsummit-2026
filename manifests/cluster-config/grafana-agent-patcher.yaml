@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana-agent-patcher
+  namespace: coder-observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: grafana-agent-patcher
+  namespace: coder-observability
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: ["grafana-agent"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: grafana-agent-patcher
+  namespace: coder-observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: grafana-agent-patcher
+subjects:
+  - kind: ServiceAccount
+    name: grafana-agent-patcher
+    namespace: coder-observability
+---
+# CronJob runs every minute; idempotent patch. If Argo reverts the
+# DS securityContext, this restores it within ~60s. Cleanup is a
+# one-line `oc delete cronjob` post-event.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: grafana-agent-patcher
+  namespace: coder-observability
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: grafana-agent-patcher
+          restartPolicy: OnFailure
+          containers:
+            - name: patch
+              image: registry.access.redhat.com/openshift4/ose-cli:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  # Read current securityContext; if privileged != true, patch it.
+                  CUR=$(oc get ds grafana-agent -n coder-observability -o jsonpath='{.spec.template.spec.containers[?(@.name=="grafana-agent")].securityContext.privileged}' 2>/dev/null)
+                  if [ "$CUR" != "true" ]; then
+                    echo "DS privileged != true (was: $CUR), patching..."
+                    oc patch daemonset grafana-agent -n coder-observability --type=strategic -p '{"spec":{"template":{"spec":{"containers":[{"name":"grafana-agent","securityContext":{"privileged":true,"runAsUser":0}}]}}}}'
+                  else
+                    echo "DS already privileged=true (no-op)"
+                  fi
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits:   { cpu: 100m, memory: 64Mi }
