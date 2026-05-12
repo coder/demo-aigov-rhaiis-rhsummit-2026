@@ -82,6 +82,12 @@ variable "namespace" {
   default     = "coder-workspaces"
 }
 
+variable "image_registry" {
+  description = "Container registry that hosts the workspace base images. Defaults to this repo's GHCR namespace; override at template-push time if you fork."
+  type        = string
+  default     = "ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026"
+}
+
 provider "kubernetes" {
   config_path = var.use_kubeconfig ? "~/.kube/config" : null
 }
@@ -303,21 +309,6 @@ resource "coder_agent" "main" {
       grep -qF "$P" ~/.profile 2>/dev/null || echo "export PATH=\"$P:\$PATH\"" >> ~/.profile
     done
 
-    # Remove stale Yarn apt repo (expired GPG key causes apt-get update warnings)
-    sudo rm -f /etc/apt/sources.list.d/yarn.list 2>/dev/null || true
-
-    # Disable the docker-clean apt hook that ships with many base images
-    # (codercom/enterprise-node:ubuntu included). The hook runs
-    # `rm -f /var/cache/apt/archives/*.deb` after every apt/dpkg
-    # operation, which races with concurrent apt installs — a second
-    # install that's downloaded but not yet unpacked gets its .deb
-    # deleted out from under it and fails with "cannot access archive".
-    # This specifically breaks the dotfiles module's install.sh when it
-    # tries to `apt install zsh` roughly concurrently with our own zsh
-    # install below. Removing the hook makes apt leave downloaded .debs
-    # in place for the duration of the install.
-    sudo rm -f /etc/apt/apt.conf.d/docker-clean
-
     # Install Claude Code CLI — pinned to a known-good stable release.
     # Bump the version here when validating a newer Anthropic release.
     # `stable` would auto-track, but explicit pinning is reproducible.
@@ -325,12 +316,18 @@ resource "coder_agent" "main" {
     echo "Installing Claude Code CLI v2.1.116..."
     curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.116 || echo "Warning: Claude Code install failed"
 
+    # Point npm globals at the user's HOME so `npm install -g` doesn't
+    # need sudo. Without this they default to /usr and fail under
+    # restricted-v2 (CAP_SETUID dropped → sudo can't elevate).
+    npm config set prefix "$HOME/.local" >/dev/null
+    export PATH="$HOME/.local/bin:$PATH"
+
     # Install Codex CLI — pinned explicitly. The npm @latest dist-tag
     # currently points at 0.122.0 (OpenAI publishes prereleases to
     # separate tags: @alpha, @beta), but pinning gives a reproducible
     # build. Bump here after testing a newer release.
     echo "Installing Codex CLI v0.122.0..."
-    sudo npm install -g @openai/codex@0.122.0 || echo "Warning: Codex install failed"
+    npm install --global --no-fund --no-audit @openai/codex@0.122.0 || echo "Warning: Codex install failed"
 
     # Install Coder Agent Firewall (boundary) — nsjail-based process isolator
     echo "Installing Agent Firewall (boundary)..."
@@ -704,19 +701,23 @@ resource "kubernetes_pod_v1" "workspace" {
   }
 
   spec {
-    security_context {
-      run_as_user = 1000
-      fs_group    = 1000
-    }
+    # Pod runs under the coder-firewall-runner ServiceAccount, which is
+    # bound to the custom `coder-firewall-scc` SCC (see
+    # manifests/cluster-config/coder-firewall-scc.yaml). That SCC mirrors
+    # restricted-v2 but allows the NET_ADMIN + SYS_ADMIN capabilities
+    # that boundary's nsjail backend needs. UID/SELinux/seccomp are still
+    # injected by the SCC at admission time.
+    service_account_name = "coder-firewall-runner"
 
     container {
       name              = "dev"
-      image             = "codercom/enterprise-node:ubuntu"
+      image             = "${var.image_registry}/ubi9-node-workspace:latest"
       image_pull_policy = "Always"
-      command           = ["sh", "-c", coder_agent.main.init_script]
+      command           = ["/usr/local/bin/uid_entrypoint", "sh", "-c", coder_agent.main.init_script]
 
+      # Only the capabilities stay in the container security_context —
+      # everything else (UID, SELinux, seccomp) comes from the SCC.
       security_context {
-        run_as_user = 1000
         capabilities {
           add = ["NET_ADMIN", "SYS_ADMIN"]
         }

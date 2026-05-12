@@ -58,6 +58,12 @@ variable "namespace" {
   default     = "coder-workspaces"
 }
 
+variable "image_registry" {
+  description = "Container registry that hosts the workspace base images. Defaults to this repo's GHCR namespace; override at template-push time if you fork."
+  type        = string
+  default     = "ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026"
+}
+
 provider "kubernetes" {
   config_path = var.use_kubeconfig ? "~/.kube/config" : null
 }
@@ -268,16 +274,19 @@ resource "coder_agent" "main" {
       grep -qF "$P" ~/.profile 2>/dev/null || echo "export PATH=\"$P:\$PATH\"" >> ~/.profile
     done
 
-    # Remove stale Yarn apt repo (expired GPG key causes apt-get update warnings)
-    sudo rm -f /etc/apt/sources.list.d/yarn.list 2>/dev/null || true
-
     # Install Claude Code CLI — pinned to match demo-ai-gov-firewall.
     echo "Installing Claude Code CLI v2.1.116..."
     curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.116 || echo "Warning: Claude Code install failed"
 
+    # Point npm globals at the user's HOME so `npm install -g` doesn't
+    # need sudo. Without this they default to /usr and fail under
+    # restricted-v2 (CAP_SETUID dropped → sudo can't elevate).
+    npm config set prefix "$HOME/.local" >/dev/null
+    export PATH="$HOME/.local/bin:$PATH"
+
     # Install Codex CLI — pinned to match demo-ai-gov-firewall.
     echo "Installing Codex CLI v0.122.0..."
-    sudo npm install -g @openai/codex@0.122.0 || echo "Warning: Codex install failed"
+    npm install --global --no-fund --no-audit @openai/codex@0.122.0 || echo "Warning: Codex install failed"
 
     # Claude Code configuration
     echo "Configuring Claude Code..."
@@ -522,20 +531,11 @@ resource "kubernetes_pod_v1" "workspace" {
   }
 
   spec {
-    security_context {
-      run_as_user = 1000
-      fs_group    = 1000
-    }
-
     container {
       name              = "dev"
-      image             = "codercom/enterprise-node:ubuntu"
+      image             = "${var.image_registry}/ubi9-node-workspace:latest"
       image_pull_policy = "Always"
-      command           = ["sh", "-c", coder_agent.main.init_script]
-
-      security_context {
-        run_as_user = 1000
-      }
+      command           = ["/usr/local/bin/uid_entrypoint", "sh", "-c", coder_agent.main.init_script]
 
       env {
         name  = "CODER_AGENT_TOKEN"

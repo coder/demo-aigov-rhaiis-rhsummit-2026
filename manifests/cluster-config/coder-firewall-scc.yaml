@@ -1,0 +1,128 @@
+# coder-firewall-scc — restricted-v2 baseline + NET_ADMIN/SYS_ADMIN.
+#
+# The demo-ai-gov-firewall-ocp Coder template installs HashiCorp
+# Boundary (the Coder Agent Firewall), which uses an nsjail backend to
+# build per-process network jails. nsjail needs CAP_NET_ADMIN (to
+# create/modify network namespaces) and CAP_SYS_ADMIN (mount, unshare,
+# pivot_root). The cluster's default `restricted-v2` SCC drops ALL
+# capabilities, so the firewall pod can't start under it.
+#
+# Rather than push the whole namespace to a broader SCC, we create a
+# narrowly-targeted SCC that mirrors restricted-v2 in every other
+# dimension (UID range, SELinux, seccomp, volumes, host-* off) and adds
+# ONLY those two capabilities, then bind it to a dedicated
+# ServiceAccount used by the firewall workspace pod.
+#
+# This file is sync wave 0 (cluster-config layer). The Coder workspace
+# pod won't start without the SCC + SA in place.
+---
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: coder-firewall-scc
+  annotations:
+    kubernetes.io/description: >-
+      restricted-v2 baseline plus CAP_NET_ADMIN / CAP_SYS_ADMIN for
+      pods running HashiCorp Boundary's nsjail backend (Coder Agent
+      Firewall). All other fields (UID range, SELinux, seccomp) match
+      restricted-v2 — only the capability set differs.
+# Host-* features stay off (same as restricted-v2).
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegeEscalation: false
+allowPrivilegedContainer: false
+# Capability set: NET_BIND_SERVICE is the restricted-v2 baseline;
+# NET_ADMIN + SYS_ADMIN are the two boundary/nsjail needs.
+allowedCapabilities:
+- NET_BIND_SERVICE
+- NET_ADMIN
+- SYS_ADMIN
+defaultAddCapabilities: null
+# Drop the dangerous-but-not-needed-by-nsjail capabilities. We can't use
+# `requiredDropCapabilities: [ALL]` like restricted-v2 does because that
+# would override allowedCapabilities and re-drop NET_ADMIN/SYS_ADMIN.
+# Enumerate the ones we definitely don't want instead.
+requiredDropCapabilities:
+- KILL
+- MKNOD
+- SETUID
+- SETGID
+fsGroup:
+  type: MustRunAs
+priority: null
+readOnlyRootFilesystem: false
+runAsUser:
+  type: MustRunAsRange
+seLinuxContext:
+  type: MustRunAs
+seccompProfiles:
+- runtime/default
+supplementalGroups:
+  type: RunAsAny
+userNamespaceLevel: AllowHostLevel
+# `users` / `groups` left empty — we grant access via RBAC (the
+# ClusterRole + RoleBinding below) instead of stuffing SA names into
+# the SCC. This is the modern OCP pattern and keeps the SCC reusable.
+users: []
+groups: []
+volumes:
+- configMap
+- csi
+- downwardAPI
+- emptyDir
+- ephemeral
+- image
+- persistentVolumeClaim
+- projected
+- secret
+---
+# Dedicated SA for the firewall workspace pods. The Coder template
+# sets `service_account_name = "coder-firewall-runner"` on its pod
+# spec; admission then matches the pod against the SCCs this SA can
+# `use`, picks coder-firewall-scc, and lets the pod through with the
+# extra caps.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coder-firewall-runner
+  namespace: coder-workspaces
+---
+# ClusterRole granting `use` on the coder-firewall-scc SCC. OCP's SCC
+# admission checks `use` verb on `securitycontextconstraints` in the
+# `security.openshift.io` API group, scoped by resourceNames to the
+# specific SCC. Keeping the verb narrow (no list/get/watch) avoids
+# leaking the SCC contents to anything bound to this role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: coder-firewall-scc-use
+rules:
+- apiGroups:
+  - security.openshift.io
+  resources:
+  - securitycontextconstraints
+  resourceNames:
+  - coder-firewall-scc
+  verbs:
+  - use
+---
+# Namespaced RoleBinding — only the SA in coder-workspaces gets `use`.
+# Other namespaces that ever need this SCC would create their own SA
+# and bind it here too (or use a ClusterRoleBinding); for the demo,
+# the binding is intentionally scoped to a single namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coder-firewall-runner-scc
+  namespace: coder-workspaces
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: coder-firewall-scc-use
+subjects:
+- kind: ServiceAccount
+  name: coder-firewall-runner
+  namespace: coder-workspaces
