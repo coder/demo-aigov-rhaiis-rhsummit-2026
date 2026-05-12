@@ -1,0 +1,89 @@
+# gpu-l40s-tp-fp8 — Second multi-GPU L40S MachineSet for FP8 Llama 70B.
+#
+# Why a separate node:
+# §36 documented the first FP8 attempt failed on AWS InsufficientInstanceCapacity
+# in us-east-1a. Retrying in us-east-1b — master-1 sits in this AZ, so the
+# subnet is known to work for cluster pods (NAT egress, route tables, SGs).
+#
+# Why FP8 (not INT4, not FP16):
+# §36 also recorded the reasoning — INT4 erodes the cautious-agent probe-
+# and-omit behavior frontier models exhibit; FP8 retains it. FP16 won't fit
+# the 4× L40S KV-cache budget at 32K context.
+#
+# Hardware: g6e.12xlarge (4× L40S 48 GiB).
+# Cost: ~$7.45/hr while running. INT4 prod stays on its own MachineSet
+# (us-east-1a). Once FP8 is verified serving, chatd's openai-compat
+# provider URL flips; the INT4 MachineSet can be scaled to 0 post-event.
+# If FP8 fails (capacity, init), this MachineSet scales to 0 and INT4
+# remains the booth path.
+---
+apiVersion: machine.openshift.io/v1beta1
+kind: MachineSet
+metadata:
+  name: cluster-pqc4z-worker-l40s-tp-fp8-us-east-1b
+  namespace: openshift-machine-api
+  labels:
+    machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+  annotations:
+    capacity.cluster-autoscaler.kubernetes.io/labels: kubernetes.io/arch=amd64,gpu-purpose=tensor-parallel-fp8
+    machine.openshift.io/GPU: "4"
+    machine.openshift.io/memoryMb: "393216"
+    machine.openshift.io/vCPU: "48"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+      machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-tp-fp8-us-east-1b
+  template:
+    metadata:
+      labels:
+        machine.openshift.io/cluster-api-cluster: cluster-pqc4z
+        machine.openshift.io/cluster-api-machine-role: worker
+        machine.openshift.io/cluster-api-machine-type: worker
+        machine.openshift.io/cluster-api-machineset: cluster-pqc4z-worker-l40s-tp-fp8-us-east-1b
+    spec:
+      metadata:
+        labels:
+          gpu-purpose: tensor-parallel-fp8
+      providerSpec:
+        value:
+          ami:
+            id: ami-04018496b0a1da2d2
+          apiVersion: machine.openshift.io/v1beta1
+          blockDevices:
+            - ebs:
+                encrypted: true
+                iops: 0
+                kmsKey:
+                  arn: ""
+                volumeSize: 400
+                volumeType: gp3
+          credentialsSecret:
+            name: aws-cloud-credentials
+          deviceIndex: 0
+          iamInstanceProfile:
+            id: cluster-pqc4z-worker-profile
+          instanceType: g6e.12xlarge
+          kind: AWSMachineProviderConfig
+          metadata: {}
+          metadataServiceOptions: {}
+          placement:
+            availabilityZone: us-east-1b
+            region: us-east-1
+          securityGroups:
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-node
+            - filters:
+                - name: tag:Name
+                  values:
+                    - cluster-pqc4z-lb
+          subnet:
+            id: subnet-047a2f01877be7843
+          tags:
+            - name: kubernetes.io/cluster/cluster-pqc4z
+              value: owned
+          userDataSecret:
+            name: worker-user-data
