@@ -1,0 +1,161 @@
+# iptables-nat-modules — ensure netfilter NAT modules are loaded on
+# workspace nodes so HashiCorp Boundary's nsjail backend can configure
+# the MASQUERADE rule it needs for the per-process network namespace.
+#
+# Why this exists:
+#   OCP 4.21 uses OVN-Kubernetes as the CNI by default. OVN does its
+#   service NAT in OVS userspace rules, NOT in kernel netfilter — so
+#   the kernel modules `nft_chain_nat` / `nft_masq` / `nf_nat` /
+#   `iptable_nat` are NOT auto-loaded on workers. Inside a workspace
+#   pod, iptables-nft's MASQUERADE target fails with:
+#     iptables v1.8.10 (nf_tables): RULE_APPEND failed (No such file
+#       or directory): rule in chain POSTROUTING
+#     Extension MASQUERADE revision 0 not supported, missing kernel module?
+#   The container can't `modprobe` itself (CAP_SYS_MODULE is blocked
+#   by every reasonable SCC); the modules must already be loaded.
+#
+# What this DaemonSet does:
+#   Runs ONE pod per worker node with a privileged container that calls
+#   `modprobe` on the netfilter modules, then `sleep infinity`. The
+#   sleep loop keeps the pod alive so node reboots trigger the
+#   modprobe again on the new pod scheduling.
+#
+# Alternatives considered (NOT picked):
+#   - MachineConfig with a /etc/modules-load.d/ drop-in. Cleaner /
+#     declarative / survives via kernel arg, but requires a worker
+#     node roll (~10 min per node). Booth-speed: not worth it.
+#   - Skip the firewall template variant. The firewall narrative is
+#     central to the demo's "AI governance" story; can't skip.
+#
+# Backout:
+#   oc delete -f iptables-nat-modules-ds.yaml
+#   Modules stay loaded until node reboot. Subsequent reboots will not
+#   reload them (so workspace will break again after a node restart).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: iptables-nat-modules
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo
+    # Allow the privileged pods this namespace needs.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+  annotations:
+    workload.openshift.io/allowed: management
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: iptables-nat-modules
+  namespace: iptables-nat-modules
+---
+# Grant the SA `use` on the privileged SCC — needed because the
+# DaemonSet pod runs privileged: true to call modprobe.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: iptables-nat-modules-privileged-scc
+rules:
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["privileged"]
+    verbs: ["use"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: iptables-nat-modules-privileged-scc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: iptables-nat-modules-privileged-scc
+subjects:
+  - kind: ServiceAccount
+    name: iptables-nat-modules
+    namespace: iptables-nat-modules
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: iptables-nat-modules
+  namespace: iptables-nat-modules
+  labels:
+    app.kubernetes.io/name: iptables-nat-modules
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: iptables-nat-modules
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: iptables-nat-modules
+    spec:
+      serviceAccountName: iptables-nat-modules
+      hostNetwork: false
+      # Tolerate any taint so the DaemonSet runs on every worker
+      # (including the GPU/TP nodes where workspace pods live alongside
+      # vLLM).
+      tolerations:
+        - operator: Exists
+      # Affinity: limit to worker nodes (not control-plane in the
+      # general case; though this cluster is converged so masters
+      # ARE workers — `node-role.kubernetes.io/worker` is set on all
+      # 3 nodes, including the GPU node).
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: modprobe
+          image: registry.access.redhat.com/ubi9/ubi-minimal:9.7
+          imagePullPolicy: IfNotPresent
+          # `nsenter` into the host's mount + uts + ipc namespaces so
+          # modprobe loads modules into the HOST kernel, not the
+          # container's. The container's `/lib/modules` would be empty
+          # otherwise.
+          command:
+            - /usr/bin/nsenter
+            - --target=1
+            - --mount
+            - --uts
+            - --ipc
+            - --net
+            - --
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Loading netfilter NAT modules for boundary nsjail..."
+              for m in nf_conntrack nf_nat nf_tables nft_chain_nat nft_masq xt_MASQUERADE iptable_nat; do
+                if ! lsmod | awk '{print $1}' | grep -qx "$m"; then
+                  if modprobe "$m" 2>/dev/null; then
+                    echo "  + loaded: $m"
+                  else
+                    echo "  ! could not load: $m (may not be needed; subsequent modules may pull it in)"
+                  fi
+                else
+                  echo "  = already loaded: $m"
+                fi
+              done
+              echo "Done. Modules loaded:"
+              lsmod | awk '/^(nf_|nft_|xt_MASQUERADE|iptable_nat)/ {print "  " $1}'
+              echo "Sleeping (DaemonSet stays running so pod restarts on node reboot re-trigger this script)."
+              exec sleep infinity
+          # Privileged is needed because:
+          #   - nsenter --target=1 requires CAP_SYS_ADMIN + the ability
+          #     to enter the host PID namespace (hostPID below)
+          #   - modprobe requires CAP_SYS_MODULE in the host kernel
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      # nsenter into PID 1 needs the host PID namespace.
+      hostPID: true
+      restartPolicy: Always
