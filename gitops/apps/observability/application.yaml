@@ -380,6 +380,50 @@ spec:
                 limits:
                   memory: 2Gi
                   cpu: 500m
+              # ── PostSync Helm hook Jobs (make-bucket / make-user) ──
+              # The minio 4.0.15 chart renders TWO post-install Helm hook
+              # Jobs that the minio.securityContext block above DOESN'T
+              # cover — they're separate `makeBucketJob` / `makeUserJob`
+              # values keys. On OCP restricted-v2 SCC the mc container
+              # ran as an admission-injected non-root UID and crashed
+              # with `mkdir /etc/minio: permission denied` because the
+              # hardcoded MC_CONFIG_DIR=/etc/minio/mc/ in the chart's
+              # `loki-storage` ConfigMap initialize script lives in a
+              # root-owned dir.
+              #
+              # Approach (Option 2): pin securityContext to a UID inside
+              # the namespace's openshift.io/sa.scc.uid-range (same
+              # 1000800000 used everywhere else in this file) AND mount
+              # an emptyDir over /etc/minio so the SCC-injected UID can
+              # write its mc config there. The chart doesn't expose
+              # extraEnvVars on these Jobs (so we can't redirect
+              # MC_CONFIG_DIR via env), but it DOES expose extraVolumes
+              # + extraVolumeMounts — emptyDir mount is the clean fix.
+              # No SCC binding/anyuid escalation needed.
+              makeBucketJob:
+                securityContext:
+                  enabled: true
+                  runAsUser: 1000800000
+                  runAsGroup: 1000800000
+                  fsGroup: 1000800000
+                extraVolumes:
+                  - name: mc-config
+                    emptyDir: {}
+                extraVolumeMounts:
+                  - name: mc-config
+                    mountPath: /etc/minio
+              makeUserJob:
+                securityContext:
+                  enabled: true
+                  runAsUser: 1000800000
+                  runAsGroup: 1000800000
+                  fsGroup: 1000800000
+                extraVolumes:
+                  - name: mc-config
+                    emptyDir: {}
+                extraVolumeMounts:
+                  - name: mc-config
+                    mountPath: /etc/minio
             # The loki SUBCHART has its own `loki:` block for the
             # Loki app's pod-level securityContext (chart default
             # 10001). Path: loki.loki.podSecurityContext.
