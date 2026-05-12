@@ -208,7 +208,7 @@ data "coder_parameter" "dotfiles_uri" {
   display_name = "Dotfiles URL"
   description  = "Git repository URL for your dotfiles. Defaults to the shared demo dotfiles. Clear this to skip the clone."
   type         = "string"
-  default      = "https://gitlab.zambruhni.com/lab/dotfiles"
+  default      = "https://github.com/ausbru87/dotfiles"
   mutable      = true
   icon         = "/icon/dotfiles.svg"
 }
