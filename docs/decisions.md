@@ -776,6 +776,8 @@ Cost: one Dockerfile line + a `build-images.yml` GHA run (~5 min to rebuild + pu
 
 **Related decision:** §35 (the symlink workaround that didn't scale).
 
+**2026-05-12 follow-up — FP8 attempt #2 succeeded in us-east-1b:** Same AMI, same Coder/RHAIIS chart, just `availabilityZone: us-east-1b` + the master-1 subnet (`subnet-047a2f01877be7843`). Capacity available. Machine Provisioned → Node Ready (~10 min) → image pull (~3 min) → 70 GiB FP8 download + TP-4 weight load (~13 min) → engine init (~1 min); total ~30 min to /v1/models = 200. Smoke `chat/completions` returned "pong". chatd cut over (provider base_url + model-config model both updated to FP8 in the same window); `vllm-planner-tp` (INT4) stays running on its us-east-1a MachineSet as a hot fallback. Next post-event: scale the INT4 MachineSet to 0 if FP8 holds at the booth; revisit the `coder-firewall-scc` + `iptables-nat-modules` DaemonSet (originally added thinking nsjail was the firewall path — turned out boundary supports landjail which doesn't need either; see §39).
+
 ---
 
 ## 37. Three-persona identity model — one Keycloak group per role tier
@@ -846,6 +848,50 @@ Each persona should map cleanly to ONE permissions tier that's enforced by group
 - The bridge starts supporting `.coder/template.yaml`-style per-project template overrides (handler.go has a TODO for this) — then the artemis-sim-dev-ocp default could be removed and replaced with project-driven selection.
 
 **Related decisions:** §35 (workspace SCC pattern / why we install at build time), §37 (the 3-persona identity model — alice is the developer who uses this template).
+
+---
+
+## 39. Coder Agent Firewall (boundary) on OCP — `--jail-type landjail`, not nsjail
+
+**Context:** The firewall workspace template installs HashiCorp Boundary's `boundary` CLI to enforce per-process network allowlisting. Boundary supports two backends:
+- `nsjail` (the default): creates a new Linux network namespace per command, sets up iptables MASQUERADE rules to NAT outbound packets through the parent pod's eth0
+- `landjail`: uses the Linux Landlock LSM (kernel ≥5.13) to restrict the process's network syscalls in-place — no new namespace, no iptables, no NAT
+
+We initially tried to make nsjail work and hit a cascade of issues:
+1. **`Operation not permitted` on `setuid`** — restricted-v2 SCC drops CAP_SETUID, but boundary's sudo-based install path needs it. Built a new `coder-firewall-scc` (modeled on restricted-v2) that allows `NET_BIND_SERVICE`, `NET_ADMIN`, `SYS_ADMIN` and DOESN'T drop `SETUID`/`SETGID`. Bound a dedicated `coder-firewall-runner` ServiceAccount to it.
+2. **`iptables: executable file not found`** — UBI9 doesn't ship iptables by default. Added `iptables-nft` to the `ubi9-base-workspace` Dockerfile.
+3. **`Extension MASQUERADE revision 0 not supported, missing kernel module?`** — OCP 4.21 uses OVN-Kubernetes for its CNI, which does service NAT in OVS userspace; the kernel modules `nft_chain_nat`/`nft_masq`/`nf_nat`/`iptable_nat` aren't auto-loaded on workers. Container can't `modprobe` (CAP_SYS_MODULE blocked by every reasonable SCC). Shipped a privileged DaemonSet (`iptables-nat-modules`) that nsenter's into PID 1 and loads the modules at boot, sleeping infinity so node-reboot pod restarts reload them.
+4. **`No route to host` even after the modules loaded** — the pod's `/proc/sys/net/ipv4/ip_forward` is `0` (again, OVN doesn't need it). Without kernel forwarding, nsjail's MASQUERADE rule has nowhere to forward packets to. Can't `sysctl -w` from inside the container (CAP_NET_ADMIN gates `net.*` sysctls in the host netns; pod's writes only affect the pod's netns, not the host's, but they're also gated).
+
+**Picked: `landjail`.** Boundary v0.9.0 exposes `--jail-type landjail` / `BOUNDARY_JAIL_TYPE=landjail`. Verified end-to-end on the live workspace pod:
+
+| Domain | Status |
+|---|---|
+| `api.github.com` (allowed) | HTTP 200 in 57ms |
+| `api.anthropic.com` (allowed) | HTTP 404 (route 404, server reached) |
+| `coder.apps.cluster...` (allowed) | HTTP 200 |
+| `webhook.site` (denied) | HTTP 403 from boundary proxy |
+| `example.com` (denied) | HTTP 403 from boundary proxy |
+| `claude -p "say hello"` | "hello" |
+
+landjail runs as the workspace's own SCC-injected UID under restricted-v2 — no privileged setup needed. Boundary's allowlist enforcement (HTTP-proxy + LSM filtering) is identical between the two backends; only the *isolation mechanism* differs.
+
+**Concrete changes (commit `0cfb615`):**
+- `coder-templates/demo-ai-gov-firewall-ocp/main.tf`: wrappers at `~/.local/bin/boundary-wrappers/{claude,codex}` now pass `--config "$HOME/.config/coder_boundary/config.yaml" --jail-type landjail`. Shell profiles export `BOUNDARY_CONFIG` + `BOUNDARY_JAIL_TYPE=landjail` so direct `boundary --` invocations also use the new backend.
+- Boundary v0.9.0 has NO auto-discovery for `~/.config/coder_boundary/config.yaml` — `--config` or `BOUNDARY_CONFIG` is mandatory. Earlier template comment claiming otherwise was wrong.
+
+**Why not:**
+- **MachineConfig + systemd kmod-load** to fix nsjail's missing modules persistently — works, but requires a worker-node roll (10 min/node) which the user explicitly vetoed.
+- **`privileged` SCC for workspace pods** — bypasses the kernel-module + ip_forward issues by giving the pod everything, but unacceptable security narrative for a demo about AI governance.
+- **`hostNetwork: true`** — workspace shares the node's netns, nsjail can use the host's networking. Defeats the per-workspace isolation story.
+
+**Trigger to revisit:**
+- Boundary upstream lands a nsjail backend that auto-enables `ip_forward` in the pod's netns (would need CAP_NET_ADMIN, which we have via coder-firewall-scc) — could move back to nsjail for stronger isolation than landjail offers.
+- We migrate off OVN-Kubernetes — different CNIs have different netfilter behavior.
+
+**Cleanup candidates (post-event):** `manifests/cluster-config/coder-firewall-scc.yaml` and `manifests/cluster-config/iptables-nat-modules-ds.yaml` were added during the nsjail debugging path. landjail doesn't need either. Leaving both in place for the booth (they're harmless); revisit removal post-event.
+
+**Related decisions:** §35 (the `Operation not permitted` debugging that surfaced the same restricted-v2/CAP pattern).
 
 ---
 
