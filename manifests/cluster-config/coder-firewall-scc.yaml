@@ -23,7 +23,7 @@ metadata:
   annotations:
     kubernetes.io/description: >-
       restricted-v2 baseline plus CAP_NET_ADMIN / CAP_SYS_ADMIN for
-      pods running HashiCorp Boundary's nsjail backend (Coder Agent
+      pods running Coder Boundary's nsjail backend (Coder Agent
       Firewall). All other fields (UID range, SELinux, seccomp) match
       restricted-v2 — only the capability set differs.
 # Host-* features stay off (same as restricted-v2).
@@ -54,7 +54,7 @@ defaultAddCapabilities: null
 #
 # SETUID and SETGID stay in the bounding set (i.e. NOT dropped here) so
 # `sudo` works at workspace runtime. The firewall template's startup
-# script installs HashiCorp Boundary via `curl | sudo bash` and the
+# script installs Coder Boundary via `curl | sudo bash` and the
 # boundary binary itself does setuid into the per-process net namespace
 # at run time — without these caps, sudo fails with
 # `setresuid(): Operation not permitted` and the install + every

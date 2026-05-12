@@ -1,0 +1,54 @@
+# grafana-agent ServiceAccount needs the `privileged` SCC to read pod
+# logs from /var/log/pods on the OCP nodes.
+#
+# Why:
+#   The `coder-observability` Helm chart deploys Grafana Agent as a
+#   DaemonSet that uses `loki.source.file` to tail /var/log/pods/**/*.log
+#   on every node, then ships those log lines to Loki via remote_write.
+#   On OpenShift, /var/log/pods is `drwxr-x---` owned by root with the
+#   host's `var_log_t` SELinux label and no MCS suffix. Even with the
+#   container running as UID 0, the `hostmount-anyuid` SCC the chart
+#   uses by default places the container in a `container_t` SELinux
+#   domain that's DENIED read on `var_log_t` — `ls /var/log/pods/` fails
+#   with `Permission denied`.
+#
+# Fix:
+#   Bind the SA to `privileged` SCC which gives the container the
+#   `spc_t` (super-privileged container) SELinux domain and allows
+#   reading host log dirs. This is the standard OCP pattern for log
+#   shippers (also used by openshift-logging's Fluentd/Vector DSes).
+#
+# Without this binding, the Agent Firewall (boundary) dashboard shows
+# NO DATA — boundary's audit events get forwarded by the workspace
+# agent to the Coder server, the Coder server logs them to its stdout
+# (which goes to /var/log/pods/coder_*), but Grafana Agent can't read
+# those files → Loki never gets the `boundary_request` log lines → the
+# dashboard's LogQL queries return empty.
+#
+# Why this lives in cluster-config (not in the chart's values):
+#   The chart doesn't expose a `serviceAccount.scc` value, and SCC
+#   bindings are cluster-scoped (RBAC), not namespace-scoped (which the
+#   chart's Application is). Keeping the binding declared in
+#   cluster-config makes it survive chart upgrades / re-renders.
+#
+# Equivalent imperative form:
+#   oc adm policy add-scc-to-user privileged \
+#     -z grafana-agent -n coder-observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: coder-observability-grafana-agent-privileged
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo
+    app.kubernetes.io/component: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:privileged
+subjects:
+  - kind: ServiceAccount
+    name: grafana-agent
+    namespace: coder-observability

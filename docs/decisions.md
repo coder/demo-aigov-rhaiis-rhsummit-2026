@@ -853,7 +853,7 @@ Each persona should map cleanly to ONE permissions tier that's enforced by group
 
 ## 39. Coder Agent Firewall (boundary) on OCP — `--jail-type landjail`, not nsjail
 
-**Context:** The firewall workspace template installs HashiCorp Boundary's `boundary` CLI to enforce per-process network allowlisting. Boundary supports two backends:
+**Context:** The firewall workspace template installs Coder Boundary's `boundary` CLI to enforce per-process network allowlisting. Boundary supports two backends:
 - `nsjail` (the default): creates a new Linux network namespace per command, sets up iptables MASQUERADE rules to NAT outbound packets through the parent pod's eth0
 - `landjail`: uses the Linux Landlock LSM (kernel ≥5.13) to restrict the process's network syscalls in-place — no new namespace, no iptables, no NAT
 

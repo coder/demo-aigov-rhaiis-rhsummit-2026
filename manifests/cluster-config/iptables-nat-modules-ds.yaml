@@ -1,5 +1,5 @@
 # iptables-nat-modules — ensure netfilter NAT modules are loaded on
-# workspace nodes so HashiCorp Boundary's nsjail backend can configure
+# workspace nodes so Coder Boundary's nsjail backend can configure
 # the MASQUERADE rule it needs for the per-process network namespace.
 #
 # Why this exists:

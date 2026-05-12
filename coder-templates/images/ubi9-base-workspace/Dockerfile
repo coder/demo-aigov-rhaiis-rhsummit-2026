@@ -82,7 +82,7 @@ RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
     && rm -rf /var/cache/dnf
 
 # iptables-nft (added 2026-05-12) — the firewall workspace template runs
-# HashiCorp Boundary's nsjail backend, which uses iptables to set NAT
+# Coder Boundary's nsjail backend, which uses iptables to set NAT
 # rules on the per-process network namespace. UBI9 doesn't include it
 # by default. The pod still needs CAP_NET_ADMIN (granted by
 # coder-firewall-scc) for the binary's syscalls to actually take effect;
