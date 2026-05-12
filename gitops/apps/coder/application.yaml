@@ -241,9 +241,20 @@ spec:
             # Lets users disconnect cleanly + revoke the issued token.
             - name: CODER_EXTERNAL_AUTH_0_REVOKE_URL
               value: "https://gitlab.rhsummit.coderdemo.io/oauth/revoke"
-            # Match any HTTPS clone of a GitLab project on this host.
+            # Bare host substring (per Coder docs example for self-hosted
+            # GitLab: `CODER_EXTERNAL_AUTH_0_REGEX=gitlab\.example\.com`).
+            # https://coder.com/docs/admin/external-auth
+            #
+            # The over-anchored `^https://.../.*` form we had before
+            # didn't match the URL Coder's GIT_ASKPASS helper (the
+            # /tmp/coder.<rand>/coder binary that the agent installs)
+            # passes during git credential resolution. Result: no
+            # external_auth provider matched, git got no token, clone
+            # failed unless the agent embedded the token in the URL
+            # directly (which several AI agents fell back to —
+            # observable in AI Bridge interception logs).
             - name: CODER_EXTERNAL_AUTH_0_REGEX
-              value: "^https://gitlab\\.rhsummit\\.coderdemo\\.io/.*"
+              value: "gitlab\\.rhsummit\\.coderdemo\\.io"
             # Scopes Coder requests when initiating the OAuth flow.
             # SPACE-separated per RFC 6749 (commas produce GitLab's
             # "requested scope is invalid, unknown, or malformed").
