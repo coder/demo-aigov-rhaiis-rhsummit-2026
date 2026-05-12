@@ -627,14 +627,29 @@ else
     }')
 
   echo "==> Upserting custom org role '${ROLE_NAME}'..."
-  # POST creates; PUT upserts. We always PUT so it's idempotent across
-  # Argo re-syncs — Coder accepts PUT on a non-existent role and creates
-  # it (`putOrgRoles` in enterprise/coderd/roles.go).
+  # In Coder 2.33.2 the org-roles endpoints split: POST creates, PUT
+  # updates by name. PUT against the collection endpoint (without a
+  # role name in the path) returns 404. So:
+  #   1. Try POST first — creates a new role.
+  #   2. If 409 ("already exists") fall back to PUT /<rolename> to
+  #      update in place.
+  # An older comment in this script claimed PUT-on-collection was
+  # idempotent; that's no longer true (Coder 2.33+).
   ROLE_HTTP=$(echo "$ROLE_PAYLOAD" | curl -s -o /tmp/role-resp.json -w "%{http_code}" \
-      -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+      -X POST -H "$AUTH" -H "Content-Type: application/json" \
       --data-binary @- "${CODER_API}/organizations/${ORG_ID}/members/roles")
   if [ "$ROLE_HTTP" = "200" ] || [ "$ROLE_HTTP" = "201" ]; then
-    echo "    OK (HTTP $ROLE_HTTP)"
+    echo "    OK (HTTP $ROLE_HTTP — created)"
+  elif [ "$ROLE_HTTP" = "409" ]; then
+    echo "    Already exists — PUT to update in place..."
+    ROLE_HTTP=$(echo "$ROLE_PAYLOAD" | curl -s -o /tmp/role-resp.json -w "%{http_code}" \
+        -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+        --data-binary @- "${CODER_API}/organizations/${ORG_ID}/members/roles/${ROLE_NAME}")
+    if [ "$ROLE_HTTP" = "200" ]; then
+      echo "    OK (HTTP $ROLE_HTTP — updated)"
+    else
+      echo "    UPDATE FAILED (HTTP $ROLE_HTTP): $(cat /tmp/role-resp.json)"
+    fi
   elif [ "$ROLE_HTTP" = "402" ] || [ "$ROLE_HTTP" = "403" ]; then
     echo "    SKIP — Coder license lacks FeatureCustomRoles (HTTP $ROLE_HTTP). $(cat /tmp/role-resp.json | jq -r '.message // .detail // empty')"
   else
