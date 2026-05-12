@@ -89,27 +89,25 @@ spec:
             - name: AWS_REGION
               value: "us-east-1"
             # RHAIIS — single openai-compat provider pointing at
-            # vllm-planner (Llama 3.3 70B INT4 on L40S). vllm-executor
-            # (Qwen 2.5 7B on A10G) is left running but NOT registered
-            # in chatd until we add a router (LiteLLM / llm-d / Coder
-            # AI Gateway when it lands) — chatd's schema only allows
-            # one openai-compat provider at a time. See the script's
-            # header comment for the full reasoning.
-            # Production model: Llama 3.3 70B INT4 (RedHatAI w4a16) on
-            # the tensor-parallel deployment (vllm-planner-tp) using
-            # 2× L40S for 32K context. The combo of the agents-config
-            # system prompt + plan-mode instructions is what makes
-            # this model viable as the demo backend; without those
-            # guardrails it falls back to brute-force destructive
-            # shortcuts (rm -rf .git, etc.). See decisions §31.
+            # vllm-planner-tp-fp8 (Llama 3.3 70B FP8-dynamic on 4× L40S
+            # via TP=4 in us-east-1b). Promoted from INT4 → FP8 on
+            # 2026-05-12 after the second FP8 attempt succeeded (§36
+            # follow-up). FP8 preserves the cautious-agent probe-and-omit
+            # behavior that INT4 erodes — see §35.
+            #
+            # vllm-planner-tp (INT4 prod) stays running on its own us-east-1a
+            # MachineSet for now as a hot fallback. If FP8 misbehaves at
+            # the booth, point this back at the INT4 service URL +
+            # change the model_id back to .w4a16 (rollback ref in
+            # /tmp/chatd-rollback.txt at the time of the cutover).
             - name: RHAIIS_BASE_URL
-              value: "http://vllm-planner-tp.ocp-ai.svc.cluster.local:8000/v1"
+              value: "http://vllm-planner-tp-fp8.ocp-ai.svc.cluster.local:8000/v1"
             - name: RHAIIS_MODEL_ID
-              value: "RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16"
+              value: "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
             - name: RHAIIS_DISPLAY_NAME
-              value: "Llama 3.3 70B Instruct INT4 (RHAIIS sovereign)"
+              value: "Llama 3.3 70B Instruct FP8 (RHAIIS sovereign)"
             - name: RHAIIS_PROVIDER_DISPLAY
-              value: "RHAIIS (Sovereign Llama 3.3 70B Instruct INT4)"
+              value: "RHAIIS (Sovereign Llama 3.3 70B Instruct FP8)"
             - name: BEDROCK_PROVIDER_MODE
               value: "native"     # set to "aibridge" if chatd's `bedrock` provider type doesn't work
             - name: HOME
