@@ -895,6 +895,39 @@ landjail runs as the workspace's own SCC-injected UID under restricted-v2 — no
 
 ---
 
+## 40. Coder external_auth REGEX — bare host substring, NOT anchored URL pattern
+
+**Context:** §32 documented four landmines in Coder's GitLab self-hosted external_auth recipe. Found a fifth at the booth: the REGEX format.
+
+We had `CODER_EXTERNAL_AUTH_0_REGEX=^https://gitlab\.rhsummit\.coderdemo\.io/.*`. Looked reasonable — match URLs from this GitLab host. But it BROKE the credential-helper flow:
+
+- Coder installs a `GIT_ASKPASS` helper at `/tmp/coder.<rand>/coder` in every workspace
+- When git needs credentials, it invokes that helper with the repository URL
+- The helper checks each external_auth provider's REGEX and uses the first one that matches
+- Anchored URL form (`^https://.../.*`) didn't match — likely because the URL git passes through credential helper is just the host portion (`https://gitlab.rhsummit.coderdemo.io`) without a trailing path
+- Result: no provider matched, helper returned empty, git prompted for username (and in non-interactive mode, failed)
+
+Observable symptom: AI agents in workspaces fell back to embedding the OAuth token directly in the clone URL (`https://${GITLAB_TOKEN}@gitlab.../...`). One agent's intercepted thought (visible in AI Bridge log around 14:40 UTC 2026-05-12): *"Great! The clone appears to have worked this time by using the GitLab token directly in the URL."* — meaning the first attempt with bare `git clone` failed.
+
+**Picked:** `CODER_EXTERNAL_AUTH_0_REGEX=gitlab\.rhsummit\.coderdemo\.io` (bare host substring, escaped dots). Matches the format in Coder's own docs example (https://coder.com/docs/admin/external-auth) and the working reference at `lab/k3s-infra/helm-values/coder.yaml`.
+
+**Verified working** (post-fix, in a workspace whose owner had authorized GitLab external_auth):
+```
+$ GIT_ASKPASS=/tmp/coder.rxqeAr/coder \
+    git clone https://gitlab.rhsummit.coderdemo.io/alice/artemis-sim.git
+Cloning into 'artemis-sim'... done.
+```
+No token in URL, no manual git config, just inherits GIT_ASKPASS from the agent's session.
+
+**Why not:**
+- **Anchored full-URL regex** — the obvious form, but doesn't match what Coder's credential helper actually queries for. Coder's docs example IS the bare-host form; we generalized "match git URLs" to "match the full URL pattern" and got bitten.
+
+**Trigger to revisit:** if Coder ever changes how `GIT_ASKPASS` passes the URL to the helper (e.g. includes full path), the anchored form might start working. But the bare-host form is the documented one — stick with it.
+
+**Related decisions:** §32 (the original four-landmine recipe — this is landmine #5).
+
+---
+
 ## Decisions explicitly deferred to post-event
 
 These came up; we said "not for booth, document and move on":
