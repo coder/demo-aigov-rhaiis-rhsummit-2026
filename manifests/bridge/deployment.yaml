@@ -75,11 +75,12 @@ spec:
                 secretKeyRef:
                   name: gitlab-bridge-pat
                   key: token
-            # Default Coder template name to use when an issue triggers.
-            # Project-level override via GitLab CI var / .coder file is
-            # a future enhancement.
+            # Default Coder template name to use when an issue carries
+            # a bare `coder-workspace` or any `coder-agent[:slug]` label.
+            # The `coder-workspace:<template-slug>` label form overrides
+            # this per-issue (see services/bridge/README.md).
             - name: DEFAULT_TEMPLATE
-              value: "ai-dev-ocp"
+              value: "artemis-sim-dev-ocp"
             - name: LOG_LEVEL
               value: "info"
           securityContext:

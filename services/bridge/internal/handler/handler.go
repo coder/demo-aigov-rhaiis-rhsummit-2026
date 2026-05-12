@@ -102,12 +102,12 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// assignee. Either alone is a noop — order doesn't matter, whichever
 	// webhook event satisfies both conditions triggers the spawn. Repeat
 	// events after that hit the workspace-exists idempotency check below.
-	mode, modelSlug := webhook.ExtractMode(p.Labels)
+	mode, slug := webhook.ExtractMode(p.Labels)
 	if mode == webhook.ModeNone {
-		log.Info("noop: no coder-{hitl,agent} label")
+		log.Info("noop: no coder-{workspace,agent} label")
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": true, "action": "noop",
-			"reason": "no coder-{hitl,agent} label",
+			"reason": "no coder-{workspace,agent} label",
 		})
 		return
 	}
@@ -120,9 +120,9 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	log = log.With("mode", string(mode), "assignee", assignee, "model_slug", modelSlug)
+	log = log.With("mode", string(mode), "assignee", assignee, "slug", slug)
 
-	wsName := webhook.WorkspaceName(assignee, p.ObjectAttributes.IID)
+	wsName := webhook.WorkspaceName(p.Project.PathWithNamespace, p.ObjectAttributes.IID)
 	log = log.With("workspace", wsName)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -143,7 +143,7 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Workspace idempotency — but DON'T early-return. A coder-hitl
+	// 2. Workspace idempotency — but DON'T early-return. A coder-workspace
 	// trigger creates the workspace; a later coder-agent trigger on
 	// the same issue needs to find the existing workspace AND still
 	// proceed to chat creation.
@@ -156,9 +156,15 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Resolve the template. Default to cfg.DefaultTemplate; project-
-	// level override (GitLab CI variable / .coder file) is a TODO.
+	// 3. Resolve the template. The `coder-workspace:<slug>` label form
+	// selects a named Coder template; bare `coder-workspace` (and
+	// `coder-agent`, regardless of slug — the slug there is the model
+	// name) falls back to cfg.DefaultTemplate.
 	if workspace == nil {
+		templateName := h.cfg.DefaultTemplate
+		if mode == webhook.ModeWorkspace && slug != "" {
+			templateName = slug
+		}
 		templates, err := h.coder.ListTemplates(ctx)
 		if err != nil {
 			h.forwardCoderError(w, log, "list templates", err)
@@ -166,31 +172,37 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 		var tmpl *coder.Template
 		for i := range templates {
-			if templates[i].Name == h.cfg.DefaultTemplate {
+			if templates[i].Name == templateName {
 				tmpl = &templates[i]
 				break
 			}
 		}
 		if tmpl == nil {
-			log.Warn("default template not found", "template", h.cfg.DefaultTemplate)
+			log.Warn("template not found", "template", templateName)
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 				"ok":    false,
-				"error": "default template not found in coder: " + h.cfg.DefaultTemplate,
+				"error": "template not found in coder: " + templateName,
 			})
 			return
 		}
 
-		// 4. Create the workspace.
+		// 4. Create the workspace. Wire the GitLab project's web URL
+		// into the `git_repo` parameter so the template's repo defaults
+		// are only used for UI-driven workspace creation; webhook-driven
+		// workspaces always track the issue's project.
 		created, err := h.coder.CreateWorkspace(ctx, assignee, coder.CreateWorkspaceRequest{
 			TemplateID: tmpl.ID,
 			Name:       wsName,
+			RichParameterValues: []coder.WorkspaceBuildParameter{
+				{Name: "git_repo", Value: p.Project.WebURL},
+			},
 		})
 		if err != nil {
 			h.forwardCoderError(w, log, "create workspace", err)
 			return
 		}
 		workspace = created
-		log = log.With("workspace_id", created.ID)
+		log = log.With("workspace_id", created.ID, "template", templateName)
 		log.Info("workspace created")
 	}
 	wsURL := h.cfg.CoderPublicURL + "/@" + assignee + "/" + workspace.Name
@@ -226,9 +238,9 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			resp["chat_reused"] = true
 			log.Info("agent chat already exists, reusing", "chat_id", existingChat.ID)
 		} else {
-			modelID, slugErr := h.resolveModelSlug(ctx, modelSlug)
+			modelID, slugErr := h.resolveModelSlug(ctx, slug)
 			if slugErr != nil {
-				log.Warn("unknown model slug", "slug", modelSlug, "err", slugErr)
+				log.Warn("unknown model slug", "slug", slug, "err", slugErr)
 				resp["chat_error"] = slugErr.Error()
 			} else {
 				// Fetch issue title + body via the bridge's admin PAT so
@@ -424,7 +436,7 @@ func (h *Handler) commentBack(projectID, iid int, mode webhook.Mode, wsURL strin
 
 	var body string
 	switch mode {
-	case webhook.ModeHITL:
+	case webhook.ModeWorkspace:
 		body = "🛠️ Workspace ready: " + wsURL + "\n\n_Open it and start working._"
 	case webhook.ModeAgent:
 		body = "🤖 Coder agent dispatched.\n\n- **Workspace:** " + wsURL

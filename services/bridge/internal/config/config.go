@@ -27,7 +27,7 @@ func Load() (*Config, error) {
 		CoderToken:      os.Getenv("CODER_TOKEN"),
 		WebhookSecret:   os.Getenv("BRIDGE_WEBHOOK_SECRET"),
 		LogLevel:        getenv("LOG_LEVEL", "info"),
-		DefaultTemplate: getenv("DEFAULT_TEMPLATE", "ai-dev-ocp"),
+		DefaultTemplate: getenv("DEFAULT_TEMPLATE", "artemis-sim-dev-ocp"),
 		GitLabAPIURL:    strings.TrimRight(os.Getenv("GITLAB_API_URL"), "/"),
 		GitLabPAT:       os.Getenv("GITLAB_BRIDGE_PAT"),
 	}

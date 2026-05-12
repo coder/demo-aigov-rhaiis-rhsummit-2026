@@ -4,21 +4,25 @@ import "testing"
 
 func TestExtractMode(t *testing.T) {
 	tests := []struct {
-		name      string
-		labels    []Label
-		wantMode  Mode
-		wantSlug  string
+		name     string
+		labels   []Label
+		wantMode Mode
+		wantSlug string
 	}{
 		{"no labels", nil, ModeNone, ""},
 		{"unrelated", []Label{{Title: "bug"}, {Title: "priority:high"}}, ModeNone, ""},
-		{"hitl only", []Label{{Title: "coder-hitl"}}, ModeHITL, ""},
+		{"workspace only", []Label{{Title: "coder-workspace"}}, ModeWorkspace, ""},
+		{"workspace with slug", []Label{{Title: "coder-workspace:artemis-sim-dev-ocp"}}, ModeWorkspace, "artemis-sim-dev-ocp"},
+		{"workspace slug invalid suffix", []Label{{Title: "coder-workspace:foo bar"}}, ModeNone, ""},
+		{"workspace slug uppercase rejected", []Label{{Title: "coder-workspace:AI-Dev-OCP"}}, ModeNone, ""},
 		{"agent no slug", []Label{{Title: "coder-agent"}}, ModeAgent, ""},
 		{"agent llama slug", []Label{{Title: "coder-agent:llama"}}, ModeAgent, "llama"},
 		{"agent sonnet slug", []Label{{Title: "coder-agent:sonnet"}}, ModeAgent, "sonnet"},
-		{"slug lowercased", []Label{{Title: "coder-agent:Llama"}}, ModeAgent, "llama"},
-		{"both → agent wins", []Label{{Title: "coder-hitl"}, {Title: "coder-agent:opus"}}, ModeAgent, "opus"},
+		{"agent uppercase slug rejected", []Label{{Title: "coder-agent:Llama"}}, ModeNone, ""},
+		{"both → agent wins", []Label{{Title: "coder-workspace"}, {Title: "coder-agent:opus"}}, ModeAgent, "opus"},
+		{"both with slugs → agent wins", []Label{{Title: "coder-workspace:ai-dev-ocp"}, {Title: "coder-agent:opus"}}, ModeAgent, "opus"},
 		{"trims whitespace", []Label{{Title: "  coder-agent  "}}, ModeAgent, ""},
-		{"prefix-only doesn't match", []Label{{Title: "coder-hitl-x"}}, ModeNone, ""},
+		{"workspace prefix-only doesn't match", []Label{{Title: "coder-workspace-x"}}, ModeNone, ""},
 		{"agent with invalid suffix char doesn't match agent", []Label{{Title: "coder-agent:foo bar"}}, ModeNone, ""},
 	}
 	for _, tc := range tests {
@@ -45,25 +49,28 @@ func TestFirstAssignee(t *testing.T) {
 func TestWorkspaceName(t *testing.T) {
 	tests := []struct {
 		name     string
-		username string
+		repoPath string
 		iid      int
 		want     string
 	}{
-		{"simple", "alice", 7, "alice-gl7"},
-		{"uppercase lowered", "Alice", 12, "alice-gl12"},
-		{"dots sanitized", "alice.smith", 3, "alice-smith-gl3"},
-		{"long username truncated", "averyveryveryveryverylongusernameindeed", 42, "averyveryveryveryverylongusernam"},
-		{"trailing dash trimmed after truncation", "abcdefghijabcdefghijabcdefghijx", 1, "abcdefghijabcdefghijabcdefghijx"},
-		{"underscores sanitized", "user_one", 5, "user-one-gl5"},
+		{"simple", "alice/artemis-sim", 7, "artemis-sim-issue-7"},
+		{"uppercase lowered", "Demo/ProjectName", 12, "projectname-issue-12"},
+		{"dots sanitized to dashes", "group/sub-group/repo.with.dots", 3, "repo-with-dots-issue-3"},
+		{"underscores sanitized", "alice/user_one", 5, "user-one-issue-5"},
+		{"long repo truncated, suffix preserved", "group/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 99, "aaaaaaaaaaaaaaaaaaaaaaa-issue-99"},
+		{"long repo, large iid, suffix preserved", "group/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 12345, "aaaaaaaaaaaaaaaaaaaa-issue-12345"},
+		{"no namespace, just repo", "artemis-sim", 8, "artemis-sim-issue-8"},
+		{"empty path → just issue suffix", "", 4, "issue-4"},
+		{"trailing dash trimmed after truncation", "ns/aaaaaaaaaaaaaaaaaaaaaaa-bbbbb", 1, "aaaaaaaaaaaaaaaaaaaaaaa-issue-1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := WorkspaceName(tc.username, tc.iid)
+			got := WorkspaceName(tc.repoPath, tc.iid)
 			if got != tc.want {
 				t.Errorf("got %q want %q", got, tc.want)
 			}
 			if len(got) > 32 {
-				t.Errorf("name %q exceeds 32 chars", got)
+				t.Errorf("name %q exceeds 32 chars (len=%d)", got, len(got))
 			}
 		})
 	}

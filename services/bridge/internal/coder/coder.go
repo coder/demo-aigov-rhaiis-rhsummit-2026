@@ -108,8 +108,20 @@ func (c *Client) ListChats(ctx context.Context) ([]Chat, error) {
 }
 
 type CreateWorkspaceRequest struct {
-	TemplateID string `json:"template_id"`
-	Name       string `json:"name"`
+	TemplateID          string                    `json:"template_id"`
+	Name                string                    `json:"name"`
+	RichParameterValues []WorkspaceBuildParameter `json:"rich_parameter_values,omitempty"`
+}
+
+// WorkspaceBuildParameter is one entry in the `rich_parameter_values`
+// list on a workspace-build request. Mirrors codersdk.WorkspaceBuildParameter
+// — wire format is {name, value}. The bridge uses this to wire dynamic
+// inputs (e.g. `git_repo`) into templates that accept them, so the same
+// template can serve UI-driven workspaces (defaults) and webhook-driven
+// workspaces (defaults overridden per-issue).
+type WorkspaceBuildParameter struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // APIError carries the upstream Coder status + body so the handler can forward it.

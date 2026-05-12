@@ -51,9 +51,13 @@ type Label struct {
 type Mode string
 
 const (
-	ModeNone  Mode = ""
-	ModeHITL  Mode = "coder-hitl"  // create workspace, owner opens it
-	ModeAgent Mode = "coder-agent" // create workspace + autonomous chat
+	ModeNone Mode = ""
+	// ModeWorkspace creates a workspace the assignee opens themselves (the
+	// human-in-the-loop path). A bare `coder-workspace` label uses the
+	// default template; `coder-workspace:<template-slug>` selects a named
+	// Coder template (mirrors `coder-agent:<model-slug>` for chat models).
+	ModeWorkspace Mode = "coder-workspace"
+	ModeAgent     Mode = "coder-agent" // create workspace + autonomous chat
 )
 
 // agentLabelRE matches the `coder-agent` label with an optional `:<slug>`
@@ -64,22 +68,33 @@ const (
 // Unknown slugs are surfaced by the handler at chat-creation time.
 var agentLabelRE = regexp.MustCompile(`^coder-agent(?::([a-z0-9._-]+))?$`)
 
-// ExtractMode scans labels for coder-hitl or coder-agent(:slug). If both
-// modes are present, agent wins. Returns the mode and an optional model
-// slug (empty when no slug was supplied or in HITL mode).
+// workspaceLabelRE matches the `coder-workspace` label with an optional
+// `:<slug>` suffix selecting which Coder template to use. Mirrors
+// agentLabelRE.
+//   coder-workspace                       → ("coder-workspace", "")
+//   coder-workspace:artemis-sim-dev-ocp   → ("coder-workspace", "artemis-sim-dev-ocp")
+// Unknown templates are surfaced by the handler at workspace-creation time.
+var workspaceLabelRE = regexp.MustCompile(`^coder-workspace(?::([a-z0-9._-]+))?$`)
+
+// ExtractMode scans labels for coder-workspace(:slug) or coder-agent(:slug).
+// If both modes are present, agent wins. Returns the mode and an optional
+// slug — model slug for ModeAgent, template slug for ModeWorkspace, empty
+// when no slug was supplied.
 func ExtractMode(labels []Label) (Mode, string) {
-	var hitl bool
+	var workspaceSlug string
+	var workspaceFound bool
 	for _, l := range labels {
 		t := strings.TrimSpace(l.Title)
 		if m := agentLabelRE.FindStringSubmatch(t); m != nil {
 			return ModeAgent, strings.ToLower(strings.TrimSpace(m[1]))
 		}
-		if t == string(ModeHITL) {
-			hitl = true
+		if m := workspaceLabelRE.FindStringSubmatch(t); m != nil {
+			workspaceFound = true
+			workspaceSlug = strings.ToLower(strings.TrimSpace(m[1]))
 		}
 	}
-	if hitl {
-		return ModeHITL, ""
+	if workspaceFound {
+		return ModeWorkspace, workspaceSlug
 	}
 	return ModeNone, ""
 }
@@ -124,15 +139,36 @@ func VerifyToken(got, want string) error {
 
 var nameSanitizeRE = regexp.MustCompile(`[^a-z0-9-]+`)
 
-// WorkspaceName derives a deterministic Coder workspace name from a username and issue IID.
-// Coder enforces a 32-char limit and [a-z0-9-] charset; we truncate after sanitization.
-func WorkspaceName(username string, iid int) string {
-	base := strings.ToLower(username) + "-gl" + strconv.Itoa(iid)
-	base = nameSanitizeRE.ReplaceAllString(base, "-")
-	base = strings.Trim(base, "-")
-	if len(base) > 32 {
-		base = base[:32]
-		base = strings.TrimRight(base, "-")
+// WorkspaceName derives a deterministic Coder workspace name from the
+// GitLab project's `path_with_namespace` (e.g. "alice/artemis-sim") and the
+// issue IID. Only the last path segment is used (the repo name), so the
+// workspace name follows the natural convention `<repo>-issue-<iid>`
+// (e.g. "artemis-sim-issue-8"). Coder enforces a 32-char limit and
+// [a-z0-9-] charset; when the assembled name exceeds 32 chars, the
+// repo-name prefix is truncated so the `-issue-<iid>` suffix is preserved
+// (issue identity matters more than the repo name for a busy workspace
+// list).
+func WorkspaceName(repoPathWithNamespace string, iid int) string {
+	// Take the last path segment as the repo name.
+	repo := repoPathWithNamespace
+	if idx := strings.LastIndex(repo, "/"); idx >= 0 {
+		repo = repo[idx+1:]
 	}
-	return base
+	repo = strings.ToLower(repo)
+	repo = nameSanitizeRE.ReplaceAllString(repo, "-")
+	repo = strings.Trim(repo, "-")
+
+	suffix := "-issue-" + strconv.Itoa(iid)
+	if repo == "" {
+		// No repo name → fall through with just the issue suffix; trim
+		// the leading dash so we get "issue-<iid>".
+		return strings.TrimLeft(suffix, "-")
+	}
+
+	const maxLen = 32
+	if len(repo)+len(suffix) > maxLen {
+		repo = repo[:maxLen-len(suffix)]
+		repo = strings.TrimRight(repo, "-")
+	}
+	return repo + suffix
 }
