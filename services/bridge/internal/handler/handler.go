@@ -270,7 +270,8 @@ func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 7. Comment back on the GitLab issue.
-	go h.commentBack(p.Project.ID, p.ObjectAttributes.IID, mode, wsURL, resp["chat_url"], resp["chat_error"], log)
+	codeServerURL := h.codeServerURL(assignee, workspace.Name)
+	go h.commentBack(p.Project.ID, p.ObjectAttributes.IID, mode, wsURL, codeServerURL, resp["chat_url"], resp["chat_error"], log)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -430,16 +431,22 @@ func buildAgentSeedPrompt(issueURL, issueProject, iid string, issue *gitlab.Issu
 
 // commentBack posts a comment back on the GitLab issue. Best-effort, fires
 // in a goroutine; logs failures but doesn't surface them in the HTTP response.
-func (h *Handler) commentBack(projectID, iid int, mode webhook.Mode, wsURL string, chatURL, chatErr any, log *slog.Logger) {
+func (h *Handler) commentBack(projectID, iid int, mode webhook.Mode, wsURL, codeServerURL string, chatURL, chatErr any, log *slog.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	var body string
 	switch mode {
 	case webhook.ModeWorkspace:
-		body = "🛠️ Workspace ready: " + wsURL + "\n\n_Open it and start working._"
+		body = "🛠️ Workspace ready.\n\n- **Workspace:** " + wsURL
+		if codeServerURL != "" {
+			body += "\n- **VS Code (in-browser):** " + codeServerURL
+		}
 	case webhook.ModeAgent:
 		body = "🤖 Coder agent dispatched.\n\n- **Workspace:** " + wsURL
+		if codeServerURL != "" {
+			body += "\n- **VS Code (in-browser):** " + codeServerURL
+		}
 		if s, ok := chatURL.(string); ok {
 			body += "\n- **Chat:** " + s
 		}
@@ -452,6 +459,37 @@ func (h *Handler) commentBack(projectID, iid int, mode webhook.Mode, wsURL strin
 	if err := h.gitlab.PostIssueComment(ctx, projectID, iid, body); err != nil {
 		log.Error("issue comment failed", "err", err)
 	}
+}
+
+// codeServerURL builds the deterministic subdomain URL for the code-server
+// app on the workspace's `main` agent. Coder constructs subdomain-app URLs
+// as `https://<app-slug>--<agent>--<workspace>--<owner>.<wildcard-base>`,
+// where the wildcard base is whatever's under `CODER_WILDCARD_ACCESS_URL`
+// (e.g. `*.coder.apps.cluster.rhsummit.coderdemo.io`). The bridge derives
+// that base from `CoderPublicURL`'s host — since the deployment's wildcard
+// is always a direct subdomain of the access URL's host.
+//
+// Returns "" when we can't construct a URL (e.g. CoderPublicURL empty or
+// missing scheme). The caller treats empty as "skip the code-server line".
+//
+// All our -ocp templates use `coder_agent.main` as the agent name and the
+// `code-server` registry module's default app slug (also literally
+// `code-server`). If a future template uses a different agent name or app
+// slug, the URL here will be wrong — flag it then.
+func (h *Handler) codeServerURL(owner, workspaceName string) string {
+	if h.cfg.CoderPublicURL == "" || owner == "" || workspaceName == "" {
+		return ""
+	}
+	// Pull out the host from CoderPublicURL (`https://host/...` → `host`).
+	host := strings.TrimPrefix(h.cfg.CoderPublicURL, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	if i := strings.IndexAny(host, "/?#"); i != -1 {
+		host = host[:i]
+	}
+	if host == "" {
+		return ""
+	}
+	return "https://code-server--main--" + workspaceName + "--" + owner + "." + host
 }
 
 func (h *Handler) forwardCoderError(w http.ResponseWriter, log *slog.Logger, op string, err error) {
