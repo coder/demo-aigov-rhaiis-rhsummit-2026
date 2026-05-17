@@ -1,13 +1,17 @@
 # Catalog Readiness — Audit + Gap Analysis
 
-> **Status as of 2026-05-17**: the repo is **~65% catalog-ready**. The
-> heavy lifting (Terraform for AWS, IRSA, OpenShift install, Argo CD
-> bootstrap, GitOps app-of-apps) is in place and parameterized via
-> `terraform/variables.tf`. The remaining gap is downstream: ~25 manifests
-> + 6 scripts + 1 Go service hardcode the booth's `cluster.rhsummit.coderdemo.io`
-> hostname or the demo's AWS account ID. There's an existing
-> `scripts/configure-manifests.sh` that handles 7 of those files; this
-> doc enumerates the rest and what's still manual.
+> **Status as of 2026-05-17 (end of overnight Phase 0–4)**: the repo
+> is **~90% catalog-ready** on branch `catalog-readiness`. P0–P2 gaps
+> closed: parameterization, sealed-secret bootstrap, persona bootstrap,
+> grafana-agent privileged via chart values, preflight + postdeploy
+> smoke scripts, FRESH-ACCOUNT-BOOTSTRAP and NON-DECLARATIVE-CHANGES
+> docs, TF vars for GPU + RHAIIS quant.
+>
+> Remaining open work: one-command `make catalog-deploy` target,
+> automated GitHub OAuth app creation (today still manual), proper
+> R53 NS-delegation flow when the parent zone lives in another
+> account. See [§7](#7-what-this-branch-adds-in-priority-order) for
+> the up-to-date status.
 
 This document is the authoritative source of "what does a fresh deploy need
 that isn't yet declarative." Read alongside
@@ -266,49 +270,68 @@ The work in this branch (`catalog-readiness`) closes those gaps.
 
 ## 7. What this branch adds (in priority order)
 
-Tracked in `/loops` task list; updates in commits on `catalog-readiness`:
+Status as of end of overnight session 2026-05-17:
 
-1. **(P0) Extend `scripts/configure-manifests.sh`** to cover all 25 hostname
-   refs + AWS account ID + cluster infraName.
-2. **(P0) Add `grafana-agent` chart values override** so DS comes up
-   privileged on fresh deploy.
-3. **(P0) Write `scripts/gitlab-bootstrap-personas.sh`** (alice, bob,
-   demoadm + project membership).
-4. **(P1) Write `scripts/bootstrap-sealed-secrets.sh`** that walks the
-   operator through 14 inputs.
-5. **(P1) Write `scripts/catalog-preflight.sh`** — AWS creds + region
-   quota + GH org access + DNS pre-check.
-6. **(P1) Write `scripts/catalog-postdeploy-smoke.sh`** — verify Coder
-   login, bridge webhook, sample chat works, dashboard data.
-7. **(P2) Add TF variable for GPU presence** (`enable_gpu = true|false`)
-   so the catalog default ships without GPUs (cheaper).
-8. **(P2) Add TF variable for `rhaiis_quant`** (`int4|fp8|none`).
-9. **(P2) Write `docs/FRESH-ACCOUNT-BOOTSTRAP.md`** — operator-facing
-   step-by-step (the README's quickstart is admin-team-focused, not
-   catalog-deployer-focused).
-10. **(P2) Write `docs/NON-DECLARATIVE-CHANGES.md`** — every mid-session
-    API mutation + the declarative form.
-11. **(P3) Delete vestigial MachineSets** (`gpu-l40s.yaml`,
-    `gpu-l40s-experiment.yaml`).
+1. ✅ **(P0) Extend `scripts/configure-manifests.sh`** to cover all 25
+   hostname refs + AWS account ID + cluster infraName. (commit `5c0ed07`)
+2. ✅ **(P0) `grafana-agent` chart values override** — DS comes up
+   privileged on fresh deploy via `gitops/apps/observability/application.yaml`
+   helm values block. (commit `5c0ed07`)
+3. ✅ **(P0) `scripts/gitlab-bootstrap-personas.sh`** (alice, bob,
+   demoadm + project membership + admin promotion). Idempotent. Tested
+   against booth cluster. (commit `5c0ed07`)
+4. ✅ **(P1) `scripts/bootstrap-sealed-secrets.sh`** — 14-secret
+   interactive walkthrough with auto-derive of Keycloak client secrets
+   from realm-demo.yaml, CNPG-password from coder/coder-app, and
+   bridge-webhook-secret via openssl. (commit `b800400`)
+5. ✅ **(P1) `scripts/catalog-preflight.sh`** — tooling versions, AWS
+   auth, region/quota, R53 zone, GH org access, Bedrock model
+   availability. Tested live. (commit `b6db0b0`)
+6. ✅ **(P1) `scripts/catalog-postdeploy-smoke.sh`** — cluster +
+   Argo health, Coder API + OIDC, Bridge healthz, GitLab + persona
+   identities, chatd providers, Loki ingest probe (catches ND11
+   grafana-agent regressions). Tested live. (commit `b6db0b0`)
+7. ✅ **(P2) TF `enable_gpu` + `rhaiis_quant`** — catalog defaults
+   to no GPUs (~$3/hr) for cheap deploys; opt in via tfvars.
+   (commit `35b5bfd`)
+8. ✅ **(P2) `docs/FRESH-ACCOUNT-BOOTSTRAP.md`** — operator-facing
+   10-step deployer flow with inputs table, tooling install, OAuth
+   apps, smoke test. (commit `b8f5cd2`)
+9. ✅ **(P2) `docs/NON-DECLARATIVE-CHANGES.md`** — ND1–ND16 with
+   declarative form + verify command for each. (commit `b8f5cd2`)
+10. ⏳ **(P2) `make catalog-deploy`** wrapper target — not yet
+    written; preflight → tf apply → configure-manifests → bootstrap
+    secrets → root-app apply → wait → postdeploy smoke. Achievable
+    in <100 LOC of Makefile + bash glue.
+11. 🔻 **(P3) Delete vestigial MachineSets** (`gpu-l40s.yaml`,
+    `gpu-l40s-experiment.yaml`) — deferred; their headers
+    intentionally call them archival, and they cost nothing at
+    `replicas: 0`. Future cleanup PR.
 
 ---
 
 ## 8. Honest assessment
 
-Calling this "1-click" today is generous. With the work in this branch
-landed, a deployer could realistically be at "alice opens a workspace
-via the bridge" in **~90 min from a fresh AWS account** — most of which
-is `terraform apply` + waiting for openshift-install + waiting for image
-pulls. Active operator typing time should drop to **~20 min**.
+With this branch landed, the catalog flow is **1-checklist** (not 1-click):
+operator follows `docs/FRESH-ACCOUNT-BOOTSTRAP.md`, runs ~6 commands,
+fills in ~10 values. Expected total wall time from a fresh AWS account
+to "alice opens a workspace via the bridge": **~90 min**, of which
+**~20 min is active typing** and the rest is `terraform apply` +
+openshift-install + Argo reconcile + image pulls.
 
-True 1-click (push button, walk away, demo is up in 60 min) needs:
-- Either a packaged installer (like Operator-Lifecycle-Manager bundle
-  or a GitHub Actions workflow that runs the whole flow) — out of
-  scope for this iteration.
-- Or a pre-built `make catalog-deploy` target that runs every script
-  in order with sensible defaults — achievable as P2 work.
+True 1-click needs item #10 (the `make catalog-deploy` wrapper),
+which orchestrates preflight → tf apply → configure-manifests →
+bootstrap-sealed-secrets → root-app apply → reconcile-wait →
+postdeploy smoke. Reasonable to land in a follow-up; not required
+for catalog viability since each step is already individually
+idempotent and the docs spell out the order.
 
-The realistic next milestone is "**1-checklist deploy**": operator
-follows a single doc (CATALOG-READINESS.md + FRESH-ACCOUNT-BOOTSTRAP.md),
-runs ~5 commands, fills in ~10 values. That's where this branch is
-aimed.
+What's NOT solvable without external automation:
+- **GitHub OAuth app creation** — requires a human in the GitHub UI
+  unless you set up GitHub App creation manifests (which themselves
+  require a user-level installation). Manual remains the right answer.
+- **Bedrock Marketplace subscription** — first-time-per-account
+  human flow. Documented; not automatable.
+- **R53 NS delegation** when the parent zone is in a different
+  account — needs cross-account credentials the catalog doesn't have.
+  Documented as a pre-flight step the deployer handles out of band.
