@@ -53,7 +53,7 @@ metadata:
     machine.openshift.io/memoryMb: "393216"
     machine.openshift.io/vCPU: "48"
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       machine.openshift.io/cluster-api-cluster: cluster-pqc4z
