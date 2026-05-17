@@ -104,6 +104,25 @@ spec:
           sqlExporter:
             enabled: false
 
+          # Grafana Agent container must run privileged to read /var/log/pods
+          # on OpenShift. Default chart SCC (hostmount-anyuid) places the
+          # container in `container_t` SELinux domain which is denied READ
+          # on host paths labeled `var_log_t`, even when the pod runs as
+          # UID 0. Privileged SCC moves us to `spc_t` which permits the
+          # read. Same pattern openshift-logging's Fluentd/Vector use.
+          #
+          # The grafana-agent SA also needs explicit `use` of the privileged
+          # SCC — see manifests/cluster-config/grafana-agent-privileged-binding.yaml.
+          #
+          # Without both: no pod logs reach Loki → every LogQL-backed
+          # dashboard shows "No data" (Agent Firewall, audit, etc.).
+          # See docs/CATALOG-READINESS.md §G1 for the full debugging history.
+          "grafana-agent":
+            agent:
+              securityContext:
+                privileged: true
+                runAsUser: 0
+
           grafana:
             enabled: true
             persistence:
