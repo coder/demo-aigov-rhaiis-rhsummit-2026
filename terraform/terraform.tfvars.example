@@ -35,17 +35,25 @@ control_plane_instance_type = "m6i.4xlarge"
 worker_count                = 0          # converged — no dedicated worker pool
 worker_instance_type        = "m6i.2xlarge"   # placeholder, unused when worker_count = 0
 
-# GPU pool — always 1 node when the cluster is up. RHAIIS (vllm-cuda-rhel9)
-# lands here exclusively via nodeSelector + nvidia.com/gpu resource request.
-gpu_count          = 1
-gpu_instance_type  = "g5.2xlarge"   # 1× A10G GPU (24 GiB VRAM), 8 vCPU, 32 GiB RAM
-gpu_zone_index     = 0              # us-east-1a
+# GPU pool — CATALOG DEFAULT is OFF (~$3/hr). When enable_gpu=true,
+# RHAIIS (vllm-cuda-rhel9) lands on this node via nodeSelector +
+# nvidia.com/gpu resource request, and the sovereign Llama inference
+# path is exercised. When false, chatd is Bedrock-only.
+enable_gpu         = false
+gpu_count          = 1                # ignored when enable_gpu=false
+gpu_instance_type  = "g6e.12xlarge"   # 4× L40S (48 GiB each), 48 vCPU, 384 GiB RAM
+gpu_zone_index     = 0                # us-east-1a
+
+# RHAIIS quantization choice. int4 is the production default
+# (well-tested, lower GPU floor); fp8 has open AZ-capacity issues;
+# none disables sovereign Llama entirely. Ignored when enable_gpu=false.
+rhaiis_quant       = "int4"
 
 # Single-Node OpenShift (cheapest "demo" — no HA story, no GPU):
 # control_plane_count         = 1
 # control_plane_instance_type = "m6i.8xlarge"
 # worker_count                = 0
-# gpu_count                   = 0
+# enable_gpu                  = false
 
 ###############################################################################
 # Coder

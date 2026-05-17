@@ -103,8 +103,14 @@ variable "worker_instance_type" {
 # GPU compute pool — hosts RHAIIS (vllm-cuda-rhel9)
 ###############################################################################
 
+variable "enable_gpu" {
+  description = "Whether to provision a GPU MachineSet + run RHAIIS. Catalog default is false (cheaper — ~$3/hr vs ~$10/hr). Set true to enable the sovereign Llama inference path (vLLM on L40S 48 GiB). When false, chatd uses Bedrock-only for chat; the rest of the demo (Coder, Bridge, GitLab, Keycloak, observability) is unaffected."
+  type        = bool
+  default     = false
+}
+
 variable "gpu_count" {
-  description = "Number of GPU worker nodes. Default 1 — RHAIIS always runs on the GPU node, every time the cluster is up. Set 0 only if you're temporarily disabling GPU and have a CPU fallback path for RHAIIS (not currently shipped in this repo)."
+  description = "Number of GPU worker nodes when enable_gpu=true. RHAIIS always runs on the GPU node when present. Ignored if enable_gpu=false."
   type        = number
   default     = 1
 }
@@ -119,6 +125,17 @@ variable "gpu_zone_index" {
   description = "Index into the AZ list (0..2) where the GPU node will live. g5 capacity is uneven across AZs; pinning to one predictable AZ avoids surprises at boot."
   type        = number
   default     = 0
+}
+
+variable "rhaiis_quant" {
+  description = "Quantization for the sovereign Llama 3.3 70B model on RHAIIS. 'int4' (default) uses RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16 — known-good on L40S 48 GiB with the 4-flag recipe (VLLM_USE_V1=0, --gpu-memory-utilization 0.95, --max-model-len 8192, --enforce-eager). 'fp8' uses RedHatAI/Meta-Llama-3.1-70B-Instruct-FP8-dynamic — better quality but currently has AZ-specific capacity issues on g6e.12xlarge. 'none' disables sovereign Llama entirely (chatd uses Bedrock-only)."
+  type        = string
+  default     = "int4"
+
+  validation {
+    condition     = contains(["int4", "fp8", "none"], var.rhaiis_quant)
+    error_message = "rhaiis_quant must be 'int4', 'fp8', or 'none'."
+  }
 }
 
 ###############################################################################

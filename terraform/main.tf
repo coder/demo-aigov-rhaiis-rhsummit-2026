@@ -151,7 +151,7 @@ resource "local_sensitive_file" "install_config" {
     control_plane_instance_type = var.control_plane_instance_type
     worker_count                = local.effective_worker_count
     worker_instance_type        = var.worker_instance_type
-    gpu_count                   = var.gpu_count
+    gpu_count                   = var.enable_gpu ? var.gpu_count : 0
     gpu_instance_type           = var.gpu_instance_type
     gpu_zone                    = local.vpc_azs[var.gpu_zone_index]
     pull_secret                 = trimspace(data.local_file.pull_secret.content)

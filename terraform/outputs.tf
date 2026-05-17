@@ -28,6 +28,16 @@ output "rhaiis_internal_url" {
   value       = "http://vllm.ocp-ai.svc:8000/v1"
 }
 
+output "enable_gpu" {
+  description = "Whether GPU + RHAIIS path is enabled. Read by scripts/configure-manifests.sh + scripts/catalog-postdeploy-smoke.sh."
+  value       = var.enable_gpu
+}
+
+output "rhaiis_quant" {
+  description = "RHAIIS quantization choice (int4|fp8|none). Read by configure-manifests.sh to wire chatd PROVIDER_URL."
+  value       = var.rhaiis_quant
+}
+
 output "kubeconfig_path" {
   description = "Path to the cluster kubeconfig. Use with: export KUBECONFIG=$(terraform output -raw kubeconfig_path)"
   value       = "${var.install_dir}/auth/kubeconfig"
