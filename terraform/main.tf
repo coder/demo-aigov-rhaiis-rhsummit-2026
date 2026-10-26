@@ -159,6 +159,13 @@ resource "local_sensitive_file" "install_config" {
   })
   file_permission      = "0600"
   directory_permission = "0700"
+
+  # NOTE: `openshift-install create cluster` consumes (deletes) this file
+  # during install, so Terraform will show it as needing (re)creation on
+  # subsequent plans. That recreation is harmless on its own; the important
+  # thing is that it must NOT cascade into re-running the installer. The
+  # `lifecycle { ignore_changes = [triggers] }` guards on null_resource.sts_setup
+  # and null_resource.openshift_install below break that cascade.
 }
 
 ###############################################################################
@@ -187,6 +194,18 @@ resource "null_resource" "sts_setup" {
     aws_profile        = var.aws_profile != null ? var.aws_profile : ""
     install_binary     = var.openshift_install_binary
     install_config_md5 = local_sensitive_file.install_config.content_md5
+  }
+
+  # Idempotency guard. `openshift-install create cluster` consumes (deletes)
+  # install-config.yaml, so local_sensitive_file.install_config is recreated on
+  # every subsequent apply, which flips install_config_md5 above. Without this
+  # guard that would force STS setup (create manifests + ccoctl aws create-all)
+  # to re-run against an already-installed cluster — minting a new infraID and
+  # duplicate OIDC provider / IAM roles. Ignore trigger drift so a stray apply
+  # is a no-op. For a legitimate re-install run `terraform destroy` first (or
+  # `terraform taint null_resource.sts_setup`).
+  lifecycle {
+    ignore_changes = [triggers]
   }
 
   provisioner "local-exec" {
@@ -264,6 +283,14 @@ resource "null_resource" "openshift_install" {
   triggers = {
     install_dir    = var.install_dir
     install_binary = var.openshift_install_binary
+  }
+
+  # Idempotency guard (see null_resource.sts_setup): never re-run
+  # `openshift-install create cluster` against an existing cluster on trigger
+  # drift. Re-installs must go through `terraform destroy` (or an explicit
+  # `terraform taint null_resource.openshift_install`) first.
+  lifecycle {
+    ignore_changes = [triggers]
   }
 
   provisioner "local-exec" {
