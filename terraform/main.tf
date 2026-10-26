@@ -46,14 +46,12 @@ data "aws_route53_zone" "base" {
   private_zone = false
 }
 
-# The cluster zone is created by openshift-install. We look it up here
-# so terraform can output the zone ID for scripts/configure-manifests.sh
-# and the cert-manager ClusterIssuer hostedZoneID.
-data "aws_route53_zone" "cluster" {
-  name         = "${var.cluster_name}.${var.base_domain}"
-  private_zone = false
-  depends_on   = [null_resource.openshift_install]
-}
+# NOTE: openshift-install creates the <cluster>.<base_domain> zone as a
+# PRIVATE (VPC-only) hosted zone, so there is no public zone by that name to
+# look up. The value exported as `cluster_zone_id` is used for the
+# cert-manager DNS-01 ClusterIssuer hostedZoneID, which must be the PUBLIC
+# delegated base zone (public resolvers must see _acme-challenge.* records).
+# We therefore source it from data.aws_route53_zone.base above.
 
 data "local_file" "pull_secret" {
   filename = pathexpand(var.pull_secret_path)

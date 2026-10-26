@@ -4,8 +4,8 @@ output "cluster_fqdn" {
 }
 
 output "cluster_zone_id" {
-  description = "Route 53 hosted zone ID for the cluster subdomain (created by openshift-install). Used by cert-manager for DNS-01 ACME challenges."
-  value       = data.aws_route53_zone.cluster.zone_id
+  description = "Public Route 53 hosted zone ID for the base domain (rhsummit.coderdemo.io). Used by scripts/configure-manifests.sh for the cert-manager DNS-01 ClusterIssuer hostedZoneID (ACME challenges must resolve on public DNS; the cluster subdomain zone is private)."
+  value       = data.aws_route53_zone.base.zone_id
 }
 
 output "cluster_api_url" {
