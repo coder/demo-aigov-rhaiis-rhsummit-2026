@@ -45,14 +45,14 @@ spec:
   source:
     repoURL: https://helm.coder.com/v2
     chart: coder
-    targetRevision: 2.33.2            # latest stable (Coder Agents beta — no longer behind an experiment flag)
+    targetRevision: 2.37.6            # pinned Coder release (chart == appVersion == image tag)
     helm:
       releaseName: coder
       values: |
         coder:
           image:
             repo: ghcr.io/coder/coder
-            tag: v2.33.2               # match chart targetRevision (latest stable as of 2026-05-11)
+            tag: v2.37.6               # MUST match chart targetRevision above
             pullPolicy: IfNotPresent
 
           # Prometheus scrape annotations on every pod
@@ -316,18 +316,25 @@ spec:
             #
             # Anthropic still routes via Bedrock + IRSA; no API key
             # required there.
-            - name: CODER_AIBRIDGE_ENABLED
+            # NOTE: In Coder 2.37.x the AI Bridge env vars were renamed from
+            # CODER_AIBRIDGE_* to CODER_AI_GATEWAY_*. The old names are
+            # silently ignored, so they MUST be renamed or AI Bridge/Bedrock
+            # is never configured. The provider (OpenAI key / BYOK / Bedrock)
+            # settings below are "seed-once": they seed provider config at
+            # first startup on an empty DB (our fresh-install case). On an
+            # existing DB, manage providers from the Coder UI / HTTP API.
+            - name: CODER_AI_GATEWAY_ENABLED
               value: "true"
-            - name: CODER_AIBRIDGE_STRUCTURED_LOGGING
+            - name: CODER_AI_GATEWAY_STRUCTURED_LOGGING
               value: "true"
-            - name: CODER_AIBRIDGE_RETENTION
+            - name: CODER_AI_GATEWAY_RETENTION
               value: "30d"
-            - name: CODER_AIBRIDGE_OPENAI_KEY
+            - name: CODER_AI_GATEWAY_OPENAI_KEY
               valueFrom:
                 secretKeyRef:
                   name: coder-secrets
                   key: openai-api-key
-            - name: CODER_AIBRIDGE_ALLOW_BYOK
+            - name: CODER_AI_GATEWAY_ALLOW_BYOK
               value: "false"
             - name: AWS_REGION
               value: "us-east-1"
@@ -339,29 +346,31 @@ spec:
             # BEDROCK_MODEL maps the default/primary model; Claude Code
             # sends Anthropic-native model names which AI Gateway resolves
             # to Bedrock inference profile IDs.
-            - name: CODER_AIBRIDGE_PROVIDER_0_TYPE
-              value: "anthropic"
-            - name: CODER_AIBRIDGE_PROVIDER_0_NAME
-              value: "anthropic"
-            - name: CODER_AIBRIDGE_PROVIDER_0_BEDROCK_REGION
+            # 2.37.x replaced the indexed CODER_AIBRIDGE_PROVIDER_0_* scheme
+            # with flat CODER_AI_GATEWAY_BEDROCK_* flags. Setting the Bedrock
+            # region/model routes Anthropic traffic to Bedrock via IRSA (no
+            # static keys). Model IDs pinned to what is enabled in this
+            # account's Bedrock (342934376218); 2.37.x defaults otherwise.
+            - name: CODER_AI_GATEWAY_BEDROCK_REGION
               value: "us-east-1"
-            - name: CODER_AIBRIDGE_PROVIDER_0_BEDROCK_MODEL
+            - name: CODER_AI_GATEWAY_BEDROCK_MODEL
               value: "us.anthropic.claude-sonnet-4-20250514-v1:0"
-            - name: CODER_AIBRIDGE_PROVIDER_0_BEDROCK_SMALL_FAST_MODEL
+            - name: CODER_AI_GATEWAY_BEDROCK_SMALL_FAST_MODEL
               value: "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
             # ── Coder Agents (beta) ─────────────────────────────────────
-            # The CODER_EXPERIMENTS=agents flag was removed in v2.33.2
-            # (PR #24432). Agents are on by default in beta — no env
-            # var required.
+            # Agents are on by default (no CODER_EXPERIMENTS=agents flag).
+            # Validate the chatd provider/model bootstrap API against 2.37.6
+            # (see gitops/apps/coder-agents-config/).
 
             # ── Telemetry / direct-connect off for demo network ─────────
-            - name: CODER_DISABLE_DIRECT_CONNECTIONS
+            # 2.37.x renames: CODER_DISABLE_DIRECT_CONNECTIONS -> CODER_BLOCK_DIRECT;
+            # CODER_DISABLE_NETWORK_TELEMETRY + CODER_DISABLE_USAGE_STATS are
+            # folded into CODER_TELEMETRY_ENABLE=false.
+            - name: CODER_BLOCK_DIRECT
               value: "true"
-            - name: CODER_DISABLE_NETWORK_TELEMETRY
-              value: "true"
-            - name: CODER_DISABLE_USAGE_STATS
-              value: "true"
+            - name: CODER_TELEMETRY_ENABLE
+              value: "false"
 
             # ── Prometheus ──────────────────────────────────────────────
             - name: CODER_PROMETHEUS_ENABLE

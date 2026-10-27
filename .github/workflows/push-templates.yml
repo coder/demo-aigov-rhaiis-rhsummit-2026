@@ -8,7 +8,7 @@ name: Push templates to Coder
 #
 # Templates currently pushed:
 #  - ai-dev-ocp           — UBI9 ubi9-node-workspace base + Claude/Codex/Gemini/Kiro CLIs
-#  - agents-dev-ocp       — UBI9 + Coder Agents (beta as of v2.33.1)
+#  - agents-dev-ocp       — UBI9 + Coder Agents (beta)
 #  - artemis-sim-dev-ocp  — UBI9 + C++/Node toolchain, NO AI tools (sim engineer persona)
 #
 # Both -ocp templates declare the same two variables (namespace and
@@ -42,7 +42,7 @@ permissions:
 env:
   IMAGE_REGISTRY: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026
   WORKSPACE_NAMESPACE: coder-workspaces
-  CODER_VERSION: 2.33.1
+  CODER_VERSION: 2.37.6
 
 jobs:
   push:

@@ -55,8 +55,8 @@ gpu_zone_index     = 0              # us-east-1a
 # v2.33.0-rc.3 (commit 3362b5ae, Apr 22 2026) is the latest tagged candidate.
 # RC tags live directly on `main` under the new release process — bump only
 # when a newer tagged rc.N exists, not on every main HEAD movement.
-coder_chart_version = "2.33.0-rc.3"
-coder_image_tag     = "v2.33.0-rc.3"
+coder_chart_version = "2.37.6"
+coder_image_tag     = "v2.37.6"
 coder_subdomain     = "coder"
 coder_oidc_provider_url = ""     # unused — GitHub OAuth replaces OIDC, see decisions.md §20
 

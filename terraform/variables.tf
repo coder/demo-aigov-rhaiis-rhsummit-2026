@@ -126,15 +126,15 @@ variable "gpu_zone_index" {
 ###############################################################################
 
 variable "coder_chart_version" {
-  description = "Coder Helm chart version. Pinned to a stable release. Coder Agents promoted from Early Access experiment to beta in v2.33.1 (PR #24432) — `CODER_EXPERIMENTS=agents` no longer required. Bump only when a newer minor or patch ships and we've validated AI Bridge / agents continuity."
+  description = "Coder Helm chart version. NOTE: the real install is driven by the GitOps/ArgoCD apps (gitops/apps/coder*), not this variable — kept in sync for reference. Bump only when a newer minor or patch ships and we've validated AI Gateway / agents continuity."
   type        = string
-  default     = "2.33.1"
+  default     = "2.37.6"
 }
 
 variable "coder_image_tag" {
   description = "Coder server container image tag. Should match coder_chart_version's app version."
   type        = string
-  default     = "v2.33.1"
+  default     = "v2.37.6"
 }
 
 variable "coder_subdomain" {

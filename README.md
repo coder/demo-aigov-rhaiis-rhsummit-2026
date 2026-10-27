@@ -23,8 +23,8 @@ Reference architecture + deployable demo for the **Coder + Red Hat** booth at **
 |---|---|
 | **Cluster** | OpenShift 4.21 IPI on AWS, 3× `m6i.4xlarge` converged control-plane+worker, 1× `g6e.12xlarge` GPU node (4× L40S 48 GiB) |
 | **GitOps** | Red Hat OpenShift GitOps (Argo CD), app-of-apps from `gitops/apps/` |
-| **Coder** | Helm chart **2.33.2**, image `v2.33.2` (Coder Agents beta promoted) |
-| **AI Bridge** | Centralized LLM proxy at `/api/v2/aibridge/{anthropic,openai}`. Anthropic → Bedrock via IRSA. OpenAI → central org key (`ALLOW_BYOK=false`) |
+| **Coder** | Helm chart **2.37.6**, image `v2.37.6` |
+| **AI Bridge** | Centralized LLM proxy (AI Gateway; env vars `CODER_AI_GATEWAY_*` as of 2.37.x) at `/api/v2/aibridge/{anthropic,openai}`. Anthropic → Bedrock via IRSA. OpenAI → central org key (`ALLOW_BYOK=false`) |
 | **RHAIIS (sovereign LLM)** | vLLM 0.8.4 V0 engine on RHAIIS image `rhoai-2.20-cuda`, `RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16`, tensor-parallel-2, **32K context** — `vllm-planner-tp.ocp-ai.svc.cluster.local:8000` |
 | **chatd** (Coder Agents) | Default model: Claude Sonnet 4 (Bedrock). Sovereign opt-in via `coder-agent:llama` label on issues |
 | **Identity** | **Dual IdP**. Keycloak (RHBK) — `demo` realm, 3 personas one per role tier: `alice` (developer/`/developers`), `bob` (PM/auditor/`/auditors`), `demoadm` (admin/`/admins`). GitHub OAuth — admin tier (gated to `demo-rhsummit-users` org). |
@@ -68,7 +68,7 @@ Deeper architectural narrative + every decision behind these choices: [`docs/arc
 │  │  │   postgres             CNPG Cluster (3 instances, multi-AZ)       │ │    │
 │  │  │   gpu-stack            NFD + NVIDIA ClusterPolicy                 │ │    │
 │  │  │   rhaiis               vllm-planner-tp (Llama 70B INT4, TP-2)     │ │    │
-│  │  │   coder                Helm chart 2.33.2 — dual-IdP (GitHub OAuth │ │    │
+│  │  │   coder                Helm chart 2.37.6 — dual-IdP (GitHub OAuth │ │    │
 │  │  │                        + Keycloak OIDC), dual external_auth       │ │    │
 │  │  │                        (slot 0 gitlab, slot 1 github)             │ │    │
 │  │  │   coder-provisioner    External provisioner Deployment            │ │    │
@@ -296,7 +296,7 @@ Subsequent booth-week rebuilds: ~50–60 min.
 ## Status
 
 **Booth-ready** ahead of Red Hat Summit 2026 (May 11). Live cluster running:
-- Coder 2.33.2, 3× replicas, dual-IdP login (Keycloak + GitHub), dual external_auth (GitLab + GitHub).
+- Coder 2.37.6, 3× replicas, dual-IdP login (Keycloak + GitHub), dual external_auth (GitLab + GitHub).
 - Llama 3.3 70B INT4 tensor-parallel-2 on the production `vllm-planner-tp` Deployment (32K context, 2× L40S).
 - chatd default = Claude Sonnet 4 (Bedrock). Sovereign opt-in via `coder-agent:llama` label.
 - Bridge service end-to-end functional: GitLab Issues webhook → Coder workspace + chat creation under the assignee's name.

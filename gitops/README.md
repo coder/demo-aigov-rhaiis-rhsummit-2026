@@ -11,7 +11,7 @@
 | `postgres` | 0 | CNPG `Cluster` CR (3 instances, multi-AZ via streaming replication) — auto-generates the `coder-app` Secret consumed by the Coder Helm chart |
 | `gpu-stack` | 0 | NodeFeatureDiscovery instance + NVIDIA GPU operator `ClusterPolicy`. Drivers + device-plugin + GPU Feature Discovery roll out onto the GPU nodes (g5.2xlarge A10G + g6e.2xlarge L40S — both labeled with `nvidia.com/gpu.product=...` once drivers come up). |
 | `cert-manager` | 0 | ClusterIssuers (Let's Encrypt prod + staging) using DNS-01 over Route 53 with ambient IRSA credentials |
-| `coder` | 1 | Coder Helm chart **2.33.1** — control plane + AI Bridge (env vars `CODER_AIBRIDGE_*`, endpoints `/api/v2/aibridge/{anthropic,openai}`). Reads `coder-app/uri` for Postgres, `coder-secrets` for GitHub OAuth + central `openai-api-key`. Internal provisioners disabled — see `coder-provisioner`. |
+| `coder` | 1 | Coder Helm chart **2.37.6** — control plane + AI Bridge / AI Gateway (env vars `CODER_AI_GATEWAY_*`, endpoints `/api/v2/aibridge/{anthropic,openai}`). Reads `coder-app/uri` for Postgres, `coder-secrets` for GitHub OAuth + central `openai-api-key`. Internal provisioners disabled — see `coder-provisioner`. |
 | `rhaiis` | 2 | vLLM Deployment + Service from `manifests/rhaiis/`. Pinned to `nvidia.com/gpu.product=NVIDIA-L40S` so it lands on the L40S node from `manifests/machinesets/gpu-l40s.yaml`. Currently serves `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` with `--tool-call-parser hermes`. |
 | `coder-routing` | 2 | OpenShift Route(s) for Coder with cert-manager-issued wildcard TLS + ingress wildcard policy patch |
 | `coder-provisioner` | 2 | External Coder provisioner daemon (5 replicas) — runs all template builds. Reads `coder-provisioner-key/key` to auth against the Coder API. |
