@@ -53,11 +53,10 @@ APP_NAME="coder-workspace-external-auth"
 SCOPES="api write_repository read_registry write_registry"
 
 # ── Get root password from Terraform sensitive output ──────────────
-GITLAB_ROOT_PASSWORD=$(cd "${TF_DIR}" && env -u AWS_ENDPOINT_URL AWS_PROFILE=ocp-deploy-acct terraform output -raw gitlab_root_password 2>/dev/null)
-if [ -z "${GITLAB_ROOT_PASSWORD}" ]; then
-  echo "ERROR: terraform output gitlab_root_password is empty. Has the GitLab module been applied?" >&2
-  exit 1
-fi
+# REMOVED: GitLab 18 dropped the resource-owner password grant, so the root
+# password is no longer used for API auth (an admin PAT is minted over SSH via
+# gitlab-rails below). The old guard also read `gitlab_root_password`, which is
+# not exported at the root module, so it always failed. Nothing here is needed.
 
 # ── Wait for GitLab to be ready ────────────────────────────────────
 echo "==> Probing ${GITLAB_URL}/users/sign_in for HTTP 200..."
