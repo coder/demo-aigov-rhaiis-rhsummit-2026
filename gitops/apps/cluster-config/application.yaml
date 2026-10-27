@@ -30,7 +30,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
-    targetRevision: main
+    targetRevision: chore/coder-2.37.6-upgrade
     path: manifests/cluster-config
   destination:
     server: https://kubernetes.default.svc
