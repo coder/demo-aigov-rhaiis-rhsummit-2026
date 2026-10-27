@@ -229,14 +229,16 @@ spec:
       port: 8000
       targetPort: http
 ---
-# ─── EXECUTOR (DEPRECATED 2026-05-11) ────────────────────────────────
-# Qwen 2.5 7B on A10G. Was never registered in chatd (kept idle waiting
-# for a router — LiteLLM / llm-d / Coder AI Gateway — that would let
-# us multiplex multiple openai-compat models behind a single chatd
-# provider entry; see decisions §28 for the schema constraint). With
-# the model lineup converging on Llama 70B TP-2, this executor is
-# pure dead weight. Scaled to 0; A10G GPU is freed for whatever else
-# lands on the g5.2xlarge general worker.
+# ─── EXECUTOR (ACTIVE — single-GPU model on the A10G-only cluster) ───
+# Qwen 2.5 7B Instruct on NVIDIA-A10G 24 GiB, TP=1, 16K context.
+# Re-activated for the RH Summit 2026 re-install (option A): this
+# cluster has a single A10G, so the L40S tensor-parallel planners
+# (vllm-planner-tp / -tp-fp8) can't schedule. The 7B executor fits the
+# A10G comfortably (~14 GiB weights + ~4 GiB KV at 16K, leaving margin)
+# and is the reliable "RHAIIS/vLLM inference actually running on the
+# provisioned hardware" workload. Revisit later to decide the long-term
+# model/hardware choice (e.g. L40S node for the 70B planner, or a
+# single-GPU-friendly mid-tier model in this slot).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -246,11 +248,12 @@ metadata:
     app.kubernetes.io/name: vllm
     app.kubernetes.io/component: executor
     app.kubernetes.io/part-of: coder-aigov-demo
-    coder.com/lifecycle: deprecated
+    coder.com/lifecycle: active
 spec:
-  # DEPRECATED — scaled to 0 (no router to dispatch to yet; see
-  # decisions §28). Bump to 1 once LiteLLM / AI Gateway lands.
-  replicas: 0
+  # ACTIVE — the single running vLLM model on the A10G-only cluster
+  # (option A, RH Summit 2026). Bump back to 0 if the L40S planners are
+  # restored and this slot is no longer needed.
+  replicas: 1
   strategy:
     type: Recreate
   selector:

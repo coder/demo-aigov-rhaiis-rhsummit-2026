@@ -25,7 +25,12 @@ metadata:
     app.kubernetes.io/component: planner-tp-fp8
     app.kubernetes.io/part-of: coder-aigov-demo
 spec:
-  replicas: 1
+  # DISABLED on the single-A10G cluster (option A, RH Summit 2026 re-install).
+  # Requires 4× NVIDIA-L40S on a node labeled gpu-purpose=tensor-parallel-fp8;
+  # the current cluster has a single NVIDIA-A10G (24 GiB). Restore to 1
+  # once an L40S FP8 tensor-parallel MachineSet is provisioned. See
+  # vllm-executor (vllm-deployment.yaml) for the active single-GPU model.
+  replicas: 0
   strategy:
     type: Recreate
   progressDeadlineSeconds: 3600
