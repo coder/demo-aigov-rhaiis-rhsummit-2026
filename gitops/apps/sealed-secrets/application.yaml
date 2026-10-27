@@ -37,9 +37,13 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://bitnami-labs.github.io/sealed-secrets
-    chart: sealed-secrets
-    targetRevision: 2.16.2       # pinned; bump deliberately
+    # Vendored chart: Bitnami's GitHub-Pages Helm repo
+    # (https://bitnami-labs.github.io/sealed-secrets) now returns 404, so the
+    # chart is committed at gitops/charts/sealed-secrets (v2.16.2) and rendered
+    # from git. Argo includes the crds/ (SealedSecret CRD) by default.
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: chore/coder-2.37.6-upgrade
+    path: gitops/charts/sealed-secrets
     helm:
       releaseName: sealed-secrets
       values: |
