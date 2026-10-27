@@ -69,10 +69,7 @@ spec:
   # HTTP on 8080.
   http:
     httpEnabled: true
-  resources:
-    requests:
-      cpu: "200m"
-      memory: "1Gi"
-    limits:
-      cpu: "2"
-      memory: "2Gi"
+  # NOTE: RHBK operator 22's Keycloak CRD has no top-level `spec.resources`
+  # field (added in later operators). Leaving it in makes Argo's server-side
+  # apply fail ("field not declared in schema"). Omitted here; if you need to
+  # pin requests/limits on operator 22, set them via `spec.unsupported.podTemplate`.
