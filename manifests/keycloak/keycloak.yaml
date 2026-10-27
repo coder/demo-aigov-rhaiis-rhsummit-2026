@@ -56,8 +56,13 @@ spec:
   # reconcile that gets stuck in HostAlreadyClaimed against ours.
   ingress:
     enabled: false
-  proxy:
-    headers: xforwarded
+  # proxy-headers: RHBK operator 22+ removed `spec.proxy`; the setting moved
+  # to additionalOptions (passes `--proxy-headers=xforwarded` so Keycloak
+  # trusts the X-Forwarded-* headers from the edge-terminating OpenShift
+  # Route in front of it — see route.yaml in this dir).
+  additionalOptions:
+    - name: proxy-headers
+      value: xforwarded
   # No TLS at the Keycloak pod — the OpenShift Route terminates TLS
   # via the cluster's wildcard cert (see route.yaml in this dir).
   # `http.httpEnabled: true` tells the operator to expose plain
