@@ -1,0 +1,7 @@
+# Never commit TF state (contains the Coder token + provider config) or local plugins
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+*.tfvars
+crash.log
