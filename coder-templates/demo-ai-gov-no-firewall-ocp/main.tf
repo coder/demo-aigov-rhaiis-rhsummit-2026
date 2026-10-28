@@ -205,9 +205,15 @@ data "coder_parameter" "dotfiles_branch" {
 
 locals {
   # AI Bridge endpoints — proxied through Coder, authenticated via session token
-  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/anthropic"
-  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai"
-  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai/v1"
+  # AI Gateway (Coder 2.37.x) routes by PROVIDER NAME under
+  # /api/v2/aibridge/<provider>, authenticated with the Coder session
+  # token (x-api-key). Our configured providers are `bedrock` (Anthropic
+  # Messages API -> Claude Code) and `openai-compat` (OpenAI Chat/Responses
+  # API -> Codex). The provider *type* aliases /anthropic and /openai are
+  # NOT valid routes and return 404 "route not supported".
+  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/bedrock"
+  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai-compat"
+  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai-compat/v1"
 
   # Claude Code settings.json — written to ~/.claude/settings.json
   # Controls environment variables, model selection, and onboarding state
