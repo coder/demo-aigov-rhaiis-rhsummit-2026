@@ -1,32 +1,20 @@
 # =============================================================================
-# Demo: AI Gov (no firewall) — Kubernetes Development Template
+# Demo: AI Gov (no firewall) — Kubernetes Development Template (OpenShift)
 # =============================================================================
 # Baseline companion to `demo-ai-gov-firewall`. Identical toolchain, same
-# pre-cloned demo repo, same pinned model defaults — the ONLY difference
-# is that this template does NOT install Coder Agent Firewall (boundary).
-# Agents here have unrestricted network access. Use this side of the
-# pair to show what AI coding agents can reach when governance isn't
-# in place, then run the same prompt in demo-ai-gov-firewall to show
-# the contrast.
+# pre-cloned demo repo, same pinned model defaults — the ONLY difference is
+# that this template does NOT install Coder Agent Firewall (boundary).
+# Agents here have unrestricted network access. Run the same prompt here and
+# in demo-ai-gov-firewall to show the contrast.
 #
-# Workspace access (three buttons in the Coder dashboard):
-#     - VS Code Desktop (built-in display_app)
-#     - code-server       (module — VS Code in the browser)
-#     - Terminal          (built-in display_app — web terminal)
-#
-# Included CLIs (matches demo-ai-gov-firewall exactly — minus boundary):
-#     - Claude Code (Anthropic, native install)
-#     - Codex       (OpenAI, npm)
-#
-# AI access:
-#   Both CLIs authenticate through Coder AI Bridge using the workspace
-#   owner's session token — no external API keys needed.
-#
-# Key environment variables (set on the agent):
-#   ANTHROPIC_BASE_URL / ANTHROPIC_API_BASE — AI Bridge Anthropic endpoint
-#   OPENAI_BASE_URL                         — AI Bridge OpenAI endpoint
-#   CLAUDE_API_KEY                          — session token (for Claude Code CLI)
-#   OPENAI_API_KEY                          — session token (for Codex CLI)
+# Claude Code + Codex are installed and configured by their official Coder
+# Registry modules (coder/claude-code, coder-labs/codex) and route through the
+# Coder AI Gateway using the workspace owner's session token:
+#     Claude Code -> provider `bedrock`        (model: Haiku 4.5)
+#     Codex       -> provider `openai-compat`  (model: GPT-5.6 Luna)
+# Models match demo-ai-gov-firewall so an A/B run compares firewall vs
+# no-firewall and nothing else. The modules pin the models (claude-code `model`
+# input / codex `base_config_toml`), so no CLI wrappers are needed here.
 # =============================================================================
 
 terraform {
@@ -62,6 +50,22 @@ variable "image_registry" {
   description = "Container registry that hosts the workspace base images. Defaults to the in-cluster OpenShift internal registry (images mirrored from GHCR via coder-templates/images/mirror-to-internal-registry.sh for a self-contained / air-gapped deploy; override at push time if you fork)."
   type        = string
   default     = "image-registry.openshift-image-registry.svc:5000/coder-workspaces"
+}
+
+# Anthropic model Claude Code requests through the AI Gateway (bedrock
+# provider). Haiku 4.5 by default — matches demo-ai-gov-firewall.
+variable "anthropic_model" {
+  type        = string
+  description = "Model id Claude Code requests through the Coder AI Gateway (bedrock provider)."
+  default     = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+}
+
+# OpenAI-compatible model Codex requests through the AI Gateway (openai-compat
+# provider). GPT-5.6 Luna by default — matches demo-ai-gov-firewall.
+variable "openai_model" {
+  type        = string
+  description = "Model id Codex requests through the Coder AI Gateway (openai-compat provider)."
+  default     = "us.openai.gpt-5.6-luna"
 }
 
 provider "kubernetes" {
@@ -174,12 +178,8 @@ data "coder_parameter" "git_repo" {
   icon         = "/icon/git.svg"
 }
 
-# Dotfiles URL/branch at template root (instead of taking the module's
-# built-in ones) so the workspace preset + prebuilds block can
-# reference them by name — Coder's preset validator only sees
-# template-root coder_parameter data sources. Passed into
-# module.dotfiles as `dotfiles_uri` / `dotfiles_branch`, suppressing
-# the module's own prompts.
+# Dotfiles URL/branch at template root (instead of the module's built-in ones)
+# so the workspace preset + prebuilds block can reference them by name.
 data "coder_parameter" "dotfiles_uri" {
   name         = "dotfiles_uri"
   display_name = "Dotfiles URL"
@@ -200,123 +200,29 @@ data "coder_parameter" "dotfiles_branch" {
 }
 
 # -----------------------------------------------------------------------------
-# Locals — AI Bridge URLs and tool configuration
+# Locals — AI Gateway endpoints + Codex config
 # -----------------------------------------------------------------------------
 
 locals {
   # AI Gateway (Coder 2.37.x) routes by PROVIDER NAME under
   # /api/v2/ai-gateway/<provider>, authenticated with the Coder session
-  # token. Our configured providers are `bedrock` (Anthropic Messages API
-  # -> Claude Code) and `openai-compat` (OpenAI Chat/Responses API -> Codex).
-  # The provider *type* aliases /anthropic and /openai are NOT valid routes
-  # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway
-  # (matches the proven partner reference templates).
-  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
-  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat"
-  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
+  # token. Providers: `bedrock` (Anthropic -> Claude Code) and
+  # `openai-compat` (OpenAI Responses -> Codex). Canonical prefix is
+  # /api/v2/ai-gateway (matches the proven partner reference templates).
+  ai_gateway_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
+  ai_gateway_openai_v1_url  = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
-  # Claude Code settings.json — written to ~/.claude/settings.json
-  # Controls environment variables, model selection, and onboarding state
-  claude_settings = {
-    env = {
-      ANTHROPIC_BASE_URL  = local.ai_bridge_anthropic_url
-      OPENAI_BASE_URL     = local.ai_bridge_openai_url
-      GH_TOKEN            = data.coder_external_auth.github.access_token
-      GH_USERNAME         = data.coder_workspace_owner.me.name
-      GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
-      GITLAB_USER         = data.coder_workspace_owner.me.name
-      GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"
-      GIT_AUTHOR_NAME     = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
-      GIT_AUTHOR_EMAIL    = data.coder_workspace_owner.me.email
-      GIT_COMMITTER_NAME  = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
-      GIT_COMMITTER_EMAIL = data.coder_workspace_owner.me.email
-    }
-    autoUpdaterStatus            = "disabled"
-    hasAcknowledgedCostThreshold = true
-    hasCompletedOnboarding       = true
-  }
-
-  # Claude Code config — written to ~/.claude.json
-  # Contains the API key (session token) and per-project onboarding state
-  claude_config = {
-    autoUpdaterStatus            = "disabled"
-    hasAcknowledgedCostThreshold = true
-    hasCompletedOnboarding       = true
-    primaryApiKey                = data.coder_workspace_owner.me.session_token
-    projects = {
-      "/home/coder" = {
-        hasCompletedProjectOnboarding = true
-        hasTrustDialogAccepted        = true
-      }
-    }
-  }
-
-}
-
-# -----------------------------------------------------------------------------
-# Agent — startup script installs CLIs and writes config files
-# -----------------------------------------------------------------------------
-
-resource "coder_agent" "main" {
-  arch = data.coder_provisioner.me.arch
-  os   = "linux"
-
-  # The startup script runs on every workspace start. It:
-  #   1. Sets up PATH for npm global bin, ~/.local/bin
-  #   2. Installs Claude Code (native) and Codex (npm) — pinned to the
-  #      same versions as demo-ai-gov-firewall for parity
-  #   3. Writes Claude Code config (settings.json + .claude.json)
-  #   4. Writes Codex config (config.toml with AI Bridge provider)
-  startup_script = <<-EOT
-    #!/bin/bash
-    touch ~/.bashrc
-
-    # Set up PATH for this script (npm global bin + ~/.local/bin for native installs)
-    NPM_BIN="$(npm config get prefix)/bin"
-    export PATH="$HOME/.local/bin:$NPM_BIN:$PATH"
-
-    # Persist PATH additions in .profile (sourced by login shells / Coder terminal)
-    for P in "$HOME/.local/bin" "$NPM_BIN"; do
-      grep -qF "$P" ~/.profile 2>/dev/null || echo "export PATH=\"$P:\$PATH\"" >> ~/.profile
-    done
-
-    # Install Claude Code CLI — pinned to match demo-ai-gov-firewall.
-    echo "Installing Claude Code CLI v2.1.116..."
-    curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.116 || echo "Warning: Claude Code install failed"
-
-    # Point npm globals at the user's HOME so `npm install -g` doesn't
-    # need sudo. Without this they default to /usr and fail under
-    # restricted-v2 (CAP_SETUID dropped → sudo can't elevate).
-    npm config set prefix "$HOME/.local" >/dev/null
-    export PATH="$HOME/.local/bin:$PATH"
-
-    # Install Codex CLI — pinned to match demo-ai-gov-firewall.
-    echo "Installing Codex CLI v0.122.0..."
-    npm install --global --no-fund --no-audit @openai/codex@0.159.2 || echo "Warning: Codex install failed"
-
-    # Claude Code configuration
-    echo "Configuring Claude Code..."
-    mkdir -p ~/.claude
-    cat > ~/.claude/settings.json << 'CLAUDESETTINGS'
-    ${jsonencode(local.claude_settings)}
-    CLAUDESETTINGS
-    cat > ~/.claude.json << 'CLAUDECONFIG'
-    ${jsonencode(local.claude_config)}
-    CLAUDECONFIG
-
-    # Codex configuration (AI Bridge)
-    echo "Configuring Codex..."
-    mkdir -p ~/.codex
-    cat > ~/.codex/config.toml << 'CODEXEOF'
+  # Codex config.toml — written verbatim by the coder-labs/codex module.
+  #   * web_search = "disabled": Bedrock's OpenAI endpoint rejects Codex's
+  #     default hosted web_search tool ("web search is not supported"),
+  #     closing the stream mid-turn. Disabling it lets turns complete.
+  #   * sandbox_mode = "danger-full-access": the pod is already the sandbox
+  #     and lacks bubblewrap.
+  codex_base_config = <<-TOML
     model_provider = "openai-compat"
-    model = "us.openai.gpt-5.6-luna"
+    model = "${var.openai_model}"
     model_reasoning_effort = "medium"
-    # web_search MUST be disabled: Codex attaches a hosted web_search tool by
-    # default, which Amazon Bedrock's OpenAI endpoint rejects ("web search is
-    # not supported for this request"), closing the stream mid-turn.
     web_search = "disabled"
-    # danger-full-access: the workspace pod is already the sandbox and lacks
-    # bubblewrap, which Codex's workspace-write OS sandbox requires.
     sandbox_mode = "danger-full-access"
     approval_policy = "never"
 
@@ -325,63 +231,72 @@ resource "coder_agent" "main" {
 
     [model_providers.openai-compat]
     name = "Coder AI Gateway (Bedrock)"
-    base_url = "${local.ai_bridge_openai_v1_url}"
+    base_url = "${local.ai_gateway_openai_v1_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
 
     [projects."/home/coder"]
     trust_level = "trusted"
-    CODEXEOF
+  TOML
+}
 
-    # Install CLI wrappers that pin each agent to the SAME model + flags
-    # used in demo-ai-gov-firewall. The only structural difference between
-    # the two templates is that those wrappers prepend `boundary --`; here
-    # they invoke the tool directly. Keeping the model + flags identical
-    # means an A/B run of a prompt is actually comparing firewall vs
-    # no-firewall and nothing else.
-    #
-    # claude: --dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0
-    # codex:  --dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna
-    echo "Installing demo wrappers..."
-    WRAPPERS_DIR="$HOME/.local/bin/demo-wrappers"
-    mkdir -p "$WRAPPERS_DIR"
-    for tool in claude codex; do
-      REAL_BIN="$(command -v "$tool" 2>/dev/null || true)"
-      if [ -z "$REAL_BIN" ]; then
-        echo "  skip $tool (not installed)"
-        continue
-      fi
-      case "$tool" in
-        claude) DEFAULT_ARGS="--dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0" ;;
-        codex)  DEFAULT_ARGS="" ;;  # model/approvals/sandbox come from ~/.codex/config.toml
-      esac
-      printf '#!/usr/bin/env bash\nexec %q %s "$@"\n' "$REAL_BIN" "$DEFAULT_ARGS" > "$WRAPPERS_DIR/$tool"
-      chmod +x "$WRAPPERS_DIR/$tool"
-      echo "  $tool → $REAL_BIN $DEFAULT_ARGS"
+# -----------------------------------------------------------------------------
+# Agent — startup locks Claude Code settings (CLIs installed by modules)
+# -----------------------------------------------------------------------------
+
+resource "coder_agent" "main" {
+  arch = data.coder_provisioner.me.arch
+  os   = "linux"
+
+  startup_script = <<-EOT
+    #!/bin/bash
+    touch ~/.bashrc
+
+    # PATH for npm global bin + ~/.local/bin (where the modules install the CLIs)
+    NPM_BIN="$(npm config get prefix)/bin"
+    export PATH="$HOME/.local/bin:$NPM_BIN:$PATH"
+    for P in "$HOME/.local/bin" "$NPM_BIN"; do
+      grep -qF "$P" ~/.profile 2>/dev/null || echo "export PATH=\"$P:\$PATH\"" >> ~/.profile
     done
 
-    for RC in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zprofile"; do
-      touch "$RC"
-      grep -qF 'demo-wrappers' "$RC" || \
-        echo 'export PATH="$HOME/.local/bin/demo-wrappers:$PATH"' >> "$RC"
-    done
+    # Claude Code user settings: bypass permission prompts and LOCK the model
+    # picker to the gateway's provisioned Anthropic models (selecting an
+    # unconfigured model makes the gateway reject the request). The
+    # coder/claude-code module writes install state to ~/.claude.json (a
+    # different file), so this is safe.
+    mkdir -p ~/.claude
+    cat > ~/.claude/settings.json << 'CLAUDESETTINGS'
+    {
+      "permissions": { "defaultMode": "bypassPermissions" },
+      "skipDangerousModePermissionPrompt": true,
+      "hasCompletedOnboarding": true,
+      "hasAcknowledgedCostThreshold": true,
+      "availableModels": [
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-opus-4-5-20251101-v1:0"
+      ]
+    }
+    CLAUDESETTINGS
 
     echo "=== Workspace Ready ==="
   EOT
 
-  # Environment variables available to all processes in the workspace.
-  # These point AI tools at the AI Bridge proxy endpoints.
   env = {
-    EDITOR             = "code"
-    VISUAL             = "code"
-    ANTHROPIC_BASE_URL = local.ai_bridge_anthropic_url
-    ANTHROPIC_API_BASE = local.ai_bridge_anthropic_url
-    OPENAI_BASE_URL    = local.ai_bridge_openai_url
+    EDITOR              = "code"
+    VISUAL              = "code"
+    GH_TOKEN            = data.coder_external_auth.github.access_token
+    GH_USERNAME         = data.coder_workspace_owner.me.name
+    GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
+    GITLAB_USER         = data.coder_workspace_owner.me.name
+    GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"
+    GIT_AUTHOR_NAME     = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+    GIT_AUTHOR_EMAIL    = data.coder_workspace_owner.me.email
+    GIT_COMMITTER_NAME  = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+    GIT_COMMITTER_EMAIL = data.coder_workspace_owner.me.email
 
-    # Coder v2.33 flipped devcontainer detection from opt-in to opt-on.
-    # With no docker socket in the pod, the agent still tries `docker ps`
-    # on every dashboard poll and hangs 4-8s per call, making the UI feel
-    # broken. Opt back out since this template has no devcontainer flow.
+    # Coder v2.33 flipped devcontainer detection to opt-on. With no docker
+    # socket in the pod, the agent hangs 4-8s per dashboard poll on `docker ps`.
+    # Opt back out since this template has no devcontainer flow.
     CODER_AGENT_DEVCONTAINERS_ENABLE = "false"
   }
 
@@ -419,19 +334,28 @@ resource "coder_agent" "main" {
 }
 
 # -----------------------------------------------------------------------------
-# AI Bridge API Keys — injected as env vars via coder_env
+# AI Gateway auth — workspace owner's session token as the API key.
+# ANTHROPIC_MODEL is set by the coder/claude-code module (var.anthropic_model).
 # -----------------------------------------------------------------------------
-# These use the workspace owner's Coder session token as the "API key".
-# AI Bridge validates this token and proxies requests to the real AI providers.
 
-# CLAUDE_API_KEY — used by Claude Code CLI for authentication
-resource "coder_env" "claude_api_key" {
+resource "coder_env" "anthropic_base_url" {
   agent_id = coder_agent.main.id
-  name     = "CLAUDE_API_KEY"
+  name     = "ANTHROPIC_BASE_URL"
+  value    = local.ai_gateway_anthropic_url
+}
+
+resource "coder_env" "anthropic_api_key" {
+  agent_id = coder_agent.main.id
+  name     = "ANTHROPIC_API_KEY"
   value    = data.coder_workspace_owner.me.session_token
 }
 
-# OPENAI_API_KEY — used by Codex CLI for authentication
+resource "coder_env" "openai_base_url" {
+  agent_id = coder_agent.main.id
+  name     = "OPENAI_BASE_URL"
+  value    = local.ai_gateway_openai_v1_url
+}
+
 resource "coder_env" "openai_api_key" {
   agent_id = coder_agent.main.id
   name     = "OPENAI_API_KEY"
@@ -442,10 +366,31 @@ resource "coder_env" "openai_api_key" {
 # Coder Registry Modules
 # -----------------------------------------------------------------------------
 
-# code-server — VS Code in the browser, accessible via subdomain.
-# The other two workspace-access buttons (VS Code Desktop and Terminal)
-# come from coder_agent.main.display_apps above — they're built-in and
-# don't need modules.
+# Claude Code — native install; model -> ANTHROPIC_MODEL. Gateway endpoint +
+# key come from the coder_env above.
+module "claude-code" {
+  count    = data.coder_workspace.me.start_count
+  source   = "registry.coder.com/coder/claude-code/coder"
+  version  = "5.4.0"
+  agent_id = coder_agent.main.id
+  workdir  = "/home/coder"
+  model    = var.anthropic_model
+}
+
+# Codex — pinned standalone binary + config.toml from base_config_toml.
+module "codex" {
+  count            = data.coder_workspace.me.start_count
+  source           = "registry.coder.com/coder-labs/codex/coder"
+  version          = "5.3.2"
+  agent_id         = coder_agent.main.id
+  workdir          = "/home/coder"
+  install_codex    = true
+  codex_version    = "0.159.2"
+  base_config_toml = local.codex_base_config
+}
+
+# code-server — VS Code in the browser (VS Code Desktop + Terminal come from
+# coder_agent.display_apps above).
 module "code-server" {
   count     = data.coder_workspace.me.start_count
   source    = "registry.coder.com/coder/code-server/coder"
@@ -463,33 +408,11 @@ module "dotfiles" {
   version  = "1.4.1"
   agent_id = coder_agent.main.id
 
-  # Pass the template-root coder_parameter values into the module.
-  # Because these are non-null, the module skips creating its own
-  # internal parameters — the root-level ones we defined above are
-  # what the user sees on the create form.
   dotfiles_uri    = data.coder_parameter.dotfiles_uri.value
   dotfiles_branch = data.coder_parameter.dotfiles_branch.value
-
-  # post_clone_script runs after the user's dotfiles are applied. The
-  # startup_script above appends the demo-wrappers PATH export to
-  # .profile/.bashrc/.zshrc/.zprofile, but many dotfiles repos (oh-my-zsh,
-  # prezto, etc.) REPLACE those files wholesale, wiping our export. This
-  # hook re-appends it to whatever rc files are in place post-clone — so
-  # `claude` and `codex` always resolve to the model-pinned wrappers
-  # (matching the firewall variant's behavior) regardless of dotfiles.
-  post_clone_script = <<-EOT
-    #!/usr/bin/env bash
-    set -e
-    LINE='export PATH="$HOME/.local/bin/demo-wrappers:$PATH"'
-    for RC in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zprofile"; do
-      [ -f "$RC" ] || continue
-      grep -qF 'demo-wrappers' "$RC" && continue
-      echo "$LINE" >> "$RC"
-    done
-  EOT
 }
 
-# git-clone — clone a repo into /home/coder on workspace start
+# git-clone — clone the demo repo into /home/coder on workspace start
 module "git-clone" {
   count    = data.coder_parameter.git_repo.value != "" ? data.coder_workspace.me.start_count : 0
   source   = "registry.coder.com/coder/git-clone/coder"
@@ -497,6 +420,41 @@ module "git-clone" {
   agent_id = coder_agent.main.id
   url      = data.coder_parameter.git_repo.value
   base_dir = "/home/coder"
+}
+
+# -----------------------------------------------------------------------------
+# AI CLI launchers (coder_app) — the modules install the binaries; these give
+# clickable terminal launchers. No firewall: they run the CLIs directly.
+# -----------------------------------------------------------------------------
+
+resource "coder_app" "claude_code" {
+  count        = data.coder_workspace.me.start_count
+  agent_id     = coder_agent.main.id
+  slug         = "claude-code"
+  display_name = "Claude Code"
+  icon         = "/icon/claude.svg"
+  group        = "AI Tools"
+  order        = 5
+  open_in      = "slim-window"
+  command      = <<-EOT
+    cd "$HOME"
+    claude --dangerously-skip-permissions
+  EOT
+}
+
+resource "coder_app" "codex" {
+  count        = data.coder_workspace.me.start_count
+  agent_id     = coder_agent.main.id
+  slug         = "codex"
+  display_name = "Codex"
+  icon         = "/icon/openai.svg"
+  group        = "AI Tools"
+  order        = 6
+  open_in      = "slim-window"
+  command      = <<-EOT
+    cd "$HOME"
+    codex --no-daemon
+  EOT
 }
 
 # -----------------------------------------------------------------------------
@@ -602,12 +560,6 @@ resource "kubernetes_pod_v1" "workspace" {
     }
   }
 
-  # Prebuild claim semantics: when a user claims a warm workspace, Coder
-  # re-applies the template with the real owner. Any owner-specific
-  # attribute on the pod (agent token baked into init_script, env vars,
-  # labels) would otherwise trigger a recreate mid-claim. ignore_changes
-  # = all keeps the running pod intact; the agent reconnects with the
-  # claiming user's token through Coder's runtime.
   lifecycle {
     ignore_changes = all
   }

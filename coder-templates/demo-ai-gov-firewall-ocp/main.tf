@@ -32,16 +32,18 @@
 # template where per-user auth is expected.
 #
 # Key environment variables (set on the agent):
-#   ANTHROPIC_BASE_URL / ANTHROPIC_API_BASE — AI Bridge Anthropic endpoint
-#   OPENAI_BASE_URL                         — AI Bridge OpenAI endpoint
-#   CLAUDE_API_KEY                          — session token (for Claude Code CLI)
+#   ANTHROPIC_BASE_URL / ANTHROPIC_API_BASE — AI Gateway Anthropic endpoint
+#                                             (/api/v2/ai-gateway/bedrock)
+#   OPENAI_BASE_URL                         — AI Gateway OpenAI endpoint
+#                                             (/api/v2/ai-gateway/openai-compat/v1)
+#   ANTHROPIC_API_KEY                       — session token (for Claude Code CLI)
 #   OPENAI_API_KEY                          — session token (for Codex CLI)
 #
-# Why CLAUDE_API_KEY instead of ANTHROPIC_API_KEY?
-#   Claude Code CLI reads CLAUDE_API_KEY for its primary auth. It uses
-#   ANTHROPIC_BASE_URL to know where to send requests. Setting
-#   ANTHROPIC_API_KEY would also work, but CLAUDE_API_KEY is the canonical
-#   env var for the Claude Code CLI specifically.
+# Auth model:
+#   Both CLIs authenticate to the AI Gateway with the workspace owner's
+#   Coder session token. Claude Code reads ANTHROPIC_API_KEY; Codex reads
+#   OPENAI_API_KEY. The gateway routes by provider NAME under
+#   /api/v2/ai-gateway/<provider> and injects the real upstream creds.
 #
 # Agent Firewall:
 #   The `boundary` binary is installed to /usr/local/bin and configured
@@ -258,141 +260,15 @@ locals {
     coder_host = local.coder_host
   })
 
-  # Claude Code settings.json — written to ~/.claude/settings.json
-  # Controls environment variables, model selection, and onboarding state
-  claude_settings = {
-    env = {
-      ANTHROPIC_BASE_URL  = local.ai_bridge_anthropic_url
-      OPENAI_BASE_URL     = local.ai_bridge_openai_url
-      GH_TOKEN            = data.coder_external_auth.github.access_token
-      GH_USERNAME         = data.coder_workspace_owner.me.name
-      GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
-      GITLAB_USER         = data.coder_workspace_owner.me.name
-      GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"
-      GIT_AUTHOR_NAME     = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
-      GIT_AUTHOR_EMAIL    = data.coder_workspace_owner.me.email
-      GIT_COMMITTER_NAME  = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
-      GIT_COMMITTER_EMAIL = data.coder_workspace_owner.me.email
-    }
-    autoUpdaterStatus            = "disabled"
-    hasAcknowledgedCostThreshold = true
-    hasCompletedOnboarding       = true
-  }
-
-  # Claude Code config — written to ~/.claude.json
-  # Contains the API key (session token) and per-project onboarding state
-  claude_config = {
-    autoUpdaterStatus            = "disabled"
-    hasAcknowledgedCostThreshold = true
-    hasCompletedOnboarding       = true
-    primaryApiKey                = data.coder_workspace_owner.me.session_token
-    projects = {
-      "/home/coder" = {
-        hasCompletedProjectOnboarding = true
-        hasTrustDialogAccepted        = true
-      }
-    }
-  }
-
-}
-
-# -----------------------------------------------------------------------------
-# Agent — startup script installs CLIs and writes config files
-# -----------------------------------------------------------------------------
-
-resource "coder_agent" "main" {
-  arch = data.coder_provisioner.me.arch
-  os   = "linux"
-
-  # The startup script runs on every workspace start. It:
-  #   1. Sets up PATH for npm global bin, ~/.local/bin
-  #   2. Installs Claude Code (native) and Codex (npm)
-  #   3. Installs the boundary binary and writes its allowlist config
-  #   4. Writes Claude Code config (settings.json + .claude.json)
-  #   5. Writes Codex config (config.toml with AI Bridge provider)
-  #   6. Generates boundary wrappers under ~/.local/bin/boundary-wrappers/
-  startup_script = <<-EOT
-    #!/bin/bash
-    touch ~/.bashrc
-
-    # Set up PATH for this script (npm global bin + ~/.local/bin for native installs)
-    NPM_BIN="$(npm config get prefix)/bin"
-    export PATH="$HOME/.local/bin:$NPM_BIN:$PATH"
-
-    # Persist PATH additions in .profile (sourced by login shells / Coder terminal)
-    for P in "$HOME/.local/bin" "$NPM_BIN"; do
-      grep -qF "$P" ~/.profile 2>/dev/null || echo "export PATH=\"$P:\$PATH\"" >> ~/.profile
-    done
-
-    # Install Claude Code CLI — pinned to a known-good stable release.
-    # Bump the version here when validating a newer Anthropic release.
-    # `stable` would auto-track, but explicit pinning is reproducible.
-    # Installer syntax: `bash -s -- [stable|latest|VERSION]`.
-    echo "Installing Claude Code CLI v2.1.116..."
-    curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.116 || echo "Warning: Claude Code install failed"
-
-    # Point npm globals at the user's HOME so `npm install -g` doesn't
-    # need sudo. Without this they default to /usr and fail under
-    # restricted-v2 (CAP_SETUID dropped → sudo can't elevate).
-    npm config set prefix "$HOME/.local" >/dev/null
-    export PATH="$HOME/.local/bin:$PATH"
-
-    # Install Codex CLI — pinned explicitly. The npm @latest dist-tag
-    # currently points at 0.122.0 (OpenAI publishes prereleases to
-    # separate tags: @alpha, @beta), but pinning gives a reproducible
-    # build. Bump here after testing a newer release.
-    echo "Installing Codex CLI v0.122.0..."
-    npm install --global --no-fund --no-audit @openai/codex@0.159.2 || echo "Warning: Codex install failed"
-
-    # Install Coder Agent Firewall (boundary) — nsjail-based process isolator
-    echo "Installing Agent Firewall (boundary)..."
-    curl -fsSL https://raw.githubusercontent.com/coder/boundary/main/install.sh | bash || echo "Warning: boundary install failed"
-
-    # Write boundary config to ~/.config/coder_boundary/config.yaml.
-    # IMPORTANT: as of boundary v0.9.0 this is NOT auto-discovered —
-    # the binary requires `--config <path>` or `BOUNDARY_CONFIG` env
-    # to actually load the allowlist. Without that, every call falls
-    # back to the implicit default-deny and traffic is fully blocked
-    # (the warning surfaces as: "No allow rules specified; all network
-    # traffic will be denied by default"). We set BOUNDARY_CONFIG in
-    # the shell profiles below AND pass --config explicitly in the
-    # wrappers so direct invocations and wrapped ones both work.
-    echo "Configuring Agent Firewall..."
-    mkdir -p ~/.config/coder_boundary
-    echo '${base64encode(local.boundary_config_yaml)}' | base64 -d > ~/.config/coder_boundary/config.yaml
-    chmod 600 ~/.config/coder_boundary/config.yaml
-
-    # Claude Code configuration
-    echo "Configuring Claude Code..."
-    mkdir -p ~/.claude
-    cat > ~/.claude/settings.json << 'CLAUDESETTINGS'
-    ${jsonencode(local.claude_settings)}
-    CLAUDESETTINGS
-    cat > ~/.claude.json << 'CLAUDECONFIG'
-    ${jsonencode(local.claude_config)}
-    CLAUDECONFIG
-
-    # Codex configuration (AI Bridge).
-    #
-    # sandbox_mode = "danger-full-access" disables Codex's internal
-    # bubblewrap-based bash sandbox. That sandbox collides with the
-    # NET_ADMIN + SYS_ADMIN capabilities the pod needs for boundary's
-    # nsjail backend — bwrap fails with "Unexpected capabilities but
-    # not setuid". The workspace pod itself is the sandbox here (PVC-
-    # scoped fs, container isolation, boundary filtering the network),
-    # so bwrap is redundant even when it works.
-    #
-    # [notice] and [projects] blocks match task-runner-codex: suppress
-    # the interactive prompts Codex would otherwise show at first run.
-    echo "Configuring Codex..."
-    mkdir -p ~/.codex
-    cat > ~/.codex/config.toml << 'CODEXEOF'
+  # Codex config.toml — written verbatim by the coder-labs/codex module
+  # (base_config_toml). Routes Codex through the AI Gateway openai-compat
+  # provider. web_search=disabled (Bedrock rejects Codex's default web_search
+  # tool, closing the stream); sandbox_mode=danger-full-access because the pod
+  # is the sandbox and Codex's bwrap sandbox conflicts with boundary's jail.
+  codex_base_config = <<-TOML
     model_provider = "openai-compat"
     model = "us.openai.gpt-5.6-luna"
     model_reasoning_effort = "medium"
-    # web_search MUST be disabled: Codex attaches a hosted web_search tool by
-    # default, which Amazon Bedrock's OpenAI endpoint rejects ("web search is
-    # not supported for this request"), closing the stream mid-turn.
     web_search = "disabled"
     sandbox_mode = "danger-full-access"
     approval_policy = "never"
@@ -415,7 +291,84 @@ resource "coder_agent" "main" {
     base_url = "${local.ai_bridge_openai_v1_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
-    CODEXEOF
+  TOML
+}
+
+# -----------------------------------------------------------------------------
+# Agent — startup script installs CLIs and writes config files
+# -----------------------------------------------------------------------------
+
+resource "coder_agent" "main" {
+  arch = data.coder_provisioner.me.arch
+  os   = "linux"
+
+  # The startup script runs on every workspace start. It:
+  #   1. Sets up PATH for npm global bin, ~/.local/bin
+  #   2. Installs the boundary binary and writes its allowlist config
+  #   3. Writes Claude Code settings (settings.json — model lock + bypass)
+  #   4. Generates boundary wrappers under ~/.local/bin/boundary-wrappers/
+  #      (waits for claude + codex, which their Coder Registry modules
+  #       install asynchronously)
+  # Claude Code and Codex themselves are installed by their Coder Registry
+  # modules (see module "claude-code" / module "codex" below); Codex's
+  # config.toml is written by that module from local.codex_base_config.
+  startup_script = <<-EOT
+    #!/bin/bash
+    touch ~/.bashrc
+
+    # Set up PATH for this script (npm global bin + ~/.local/bin for native installs)
+    NPM_BIN="$(npm config get prefix)/bin"
+    export PATH="$HOME/.local/bin:$NPM_BIN:$PATH"
+
+    # Persist PATH additions in .profile (sourced by login shells / Coder terminal)
+    for P in "$HOME/.local/bin" "$NPM_BIN"; do
+      grep -qF "$P" ~/.profile 2>/dev/null || echo "export PATH=\"$P:\$PATH\"" >> ~/.profile
+    done
+
+    # Claude Code and Codex are installed by their Coder Registry modules
+    # (coder/claude-code, coder-labs/codex) below; the boundary wrappers
+    # further down wrap whichever binaries those modules install. Keep the
+    # npm global prefix in HOME regardless (restricted-v2: no sudo).
+    npm config set prefix "$HOME/.local" >/dev/null
+    export PATH="$HOME/.local/bin:$PATH"
+
+    # Install Coder Agent Firewall (boundary) — nsjail-based process isolator
+    echo "Installing Agent Firewall (boundary)..."
+    curl -fsSL https://raw.githubusercontent.com/coder/boundary/main/install.sh | bash || echo "Warning: boundary install failed"
+
+    # Write boundary config to ~/.config/coder_boundary/config.yaml.
+    # IMPORTANT: as of boundary v0.9.0 this is NOT auto-discovered —
+    # the binary requires `--config <path>` or `BOUNDARY_CONFIG` env
+    # to actually load the allowlist. Without that, every call falls
+    # back to the implicit default-deny and traffic is fully blocked
+    # (the warning surfaces as: "No allow rules specified; all network
+    # traffic will be denied by default"). We set BOUNDARY_CONFIG in
+    # the shell profiles below AND pass --config explicitly in the
+    # wrappers so direct invocations and wrapped ones both work.
+    echo "Configuring Agent Firewall..."
+    mkdir -p ~/.config/coder_boundary
+    echo '${base64encode(local.boundary_config_yaml)}' | base64 -d > ~/.config/coder_boundary/config.yaml
+    chmod 600 ~/.config/coder_boundary/config.yaml
+
+    # Claude Code user settings: bypass permission prompts and LOCK the model
+    # picker to the gateway's provisioned Anthropic models. The
+    # coder/claude-code module writes install state to ~/.claude.json (a
+    # different file). Codex's config.toml is written by the coder-labs/codex
+    # module from local.codex_base_config (see module "codex" below).
+    echo "Configuring Claude Code settings..."
+    mkdir -p ~/.claude
+    cat > ~/.claude/settings.json << 'CLAUDESETTINGS'
+    {
+      "permissions": { "defaultMode": "bypassPermissions" },
+      "skipDangerousModePermissionPrompt": true,
+      "hasCompletedOnboarding": true,
+      "hasAcknowledgedCostThreshold": true,
+      "availableModels": [
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-opus-4-5-20251101-v1:0"
+      ]
+    }
+    CLAUDESETTINGS
 
     # Install boundary wrappers so every AI CLI runs under the firewall by
     # default. Each wrapper at ~/.local/bin/boundary-wrappers/<tool> exec's
@@ -455,8 +408,20 @@ resource "coder_agent" "main" {
     echo "Installing boundary wrappers..."
     WRAPPERS_DIR="$HOME/.local/bin/boundary-wrappers"
     mkdir -p "$WRAPPERS_DIR"
+    # Claude Code + Codex are installed asynchronously by their Coder Registry
+    # modules, so wait for both binaries before wrapping. Resolve them with a
+    # PATH that EXCLUDES our wrappers dir so REAL_BIN is always the real CLI
+    # (robust across restarts, when the wrappers dir is already on PATH).
+    echo "Waiting for claude + codex (installed by their modules)..."
+    WPATH="$PATH"
+    for i in $(seq 1 180); do
+      [ -f "$HOME/.profile" ] && . "$HOME/.profile" >/dev/null 2>&1 || true
+      WPATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v 'boundary-wrappers' | paste -sd: -)"
+      PATH="$WPATH" command -v claude >/dev/null 2>&1 && PATH="$WPATH" command -v codex >/dev/null 2>&1 && break
+      sleep 1
+    done
     for tool in claude codex; do
-      REAL_BIN="$(command -v "$tool" 2>/dev/null || true)"
+      REAL_BIN="$(PATH="$WPATH" command -v "$tool" 2>/dev/null || true)"
       if [ -z "$REAL_BIN" ]; then
         echo "  skip $tool (not installed)"
         continue
@@ -575,11 +540,20 @@ resource "coder_agent" "main" {
   # ~/.profile and ~/.bashrc in the startup_script — sufficient for the
   # interactive shells where users actually invoke those CLIs.
   env = {
-    EDITOR             = "code"
-    VISUAL             = "code"
-    ANTHROPIC_BASE_URL = local.ai_bridge_anthropic_url
-    ANTHROPIC_API_BASE = local.ai_bridge_anthropic_url
-    OPENAI_BASE_URL    = local.ai_bridge_openai_url
+    EDITOR              = "code"
+    VISUAL              = "code"
+    ANTHROPIC_BASE_URL  = local.ai_bridge_anthropic_url
+    ANTHROPIC_API_BASE  = local.ai_bridge_anthropic_url
+    OPENAI_BASE_URL     = local.ai_bridge_openai_v1_url
+    GH_TOKEN            = data.coder_external_auth.github.access_token
+    GH_USERNAME         = data.coder_workspace_owner.me.name
+    GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
+    GITLAB_USER         = data.coder_workspace_owner.me.name
+    GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"
+    GIT_AUTHOR_NAME     = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+    GIT_AUTHOR_EMAIL    = data.coder_workspace_owner.me.email
+    GIT_COMMITTER_NAME  = coalesce(data.coder_workspace_owner.me.full_name, data.coder_workspace_owner.me.name)
+    GIT_COMMITTER_EMAIL = data.coder_workspace_owner.me.email
 
     # Coder v2.33 flipped devcontainer detection from opt-in to opt-on.
     # With no docker socket in the pod, the agent still tries `docker ps`
@@ -631,10 +605,10 @@ resource "coder_agent" "main" {
 # These use the workspace owner's Coder session token as the "API key".
 # AI Bridge validates this token and proxies requests to the real AI providers.
 
-# CLAUDE_API_KEY — used by Claude Code CLI for authentication
-resource "coder_env" "claude_api_key" {
+# ANTHROPIC_API_KEY — used by Claude Code CLI for AI Gateway auth
+resource "coder_env" "anthropic_api_key" {
   agent_id = coder_agent.main.id
-  name     = "CLAUDE_API_KEY"
+  name     = "ANTHROPIC_API_KEY"
   value    = data.coder_workspace_owner.me.session_token
 }
 
@@ -648,6 +622,32 @@ resource "coder_env" "openai_api_key" {
 # -----------------------------------------------------------------------------
 # Coder Registry Modules
 # -----------------------------------------------------------------------------
+
+# Claude Code — native install; model -> ANTHROPIC_MODEL (Haiku 4.5). The
+# boundary wrappers (startup_script above) wrap the installed binary so every
+# invocation runs under the Agent Firewall. Gateway endpoint + key come from
+# the agent env / coder_env above.
+module "claude-code" {
+  count    = data.coder_workspace.me.start_count
+  source   = "registry.coder.com/coder/claude-code/coder"
+  version  = "5.4.0"
+  agent_id = coder_agent.main.id
+  workdir  = "/home/coder"
+  model    = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+}
+
+# Codex — pinned standalone binary + config.toml from base_config_toml
+# (model: GPT-5.6 Luna). Also wrapped by boundary.
+module "codex" {
+  count            = data.coder_workspace.me.start_count
+  source           = "registry.coder.com/coder-labs/codex/coder"
+  version          = "5.3.2"
+  agent_id         = coder_agent.main.id
+  workdir          = "/home/coder"
+  install_codex    = true
+  codex_version    = "0.159.2"
+  base_config_toml = local.codex_base_config
+}
 
 # code-server — VS Code in the browser, accessible via subdomain.
 # The other two workspace-access buttons (VS Code Desktop and Terminal)
