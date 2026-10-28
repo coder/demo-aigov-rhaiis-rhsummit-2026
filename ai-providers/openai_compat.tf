@@ -156,12 +156,3 @@ resource "coderd_agents_model" "nemotron_super_3_120b" {
   enabled        = true
   context_limit  = 262000
 }
-
-# --- Google -----------------------------------------------------------------
-resource "coderd_agents_model" "gemma_3_12b" {
-  ai_provider_id = coderd_ai_provider.openai_compat.id
-  model          = "google.gemma-3-12b-it"
-  display_name   = "Google Gemma 3 12B IT"
-  enabled        = true
-  context_limit  = 128000
-}
