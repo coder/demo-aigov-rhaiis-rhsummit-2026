@@ -308,24 +308,20 @@ resource "coder_agent" "main" {
     echo "Configuring Codex..."
     mkdir -p ~/.codex
     cat > ~/.codex/config.toml << 'CODEXEOF'
-    sandbox_mode = "workspace-write"
+    model = "us.openai.gpt-5.6-luna"
+    model_provider = "aibridge"
+    model_reasoning_effort = "medium"
     approval_policy = "never"
-    preferred_auth_method = "apikey"
-    profile = "aibridge"
+    sandbox_mode = "workspace-write"
 
     [sandbox_workspace_write]
     network_access = true
 
     [model_providers.aibridge]
-    name = "AI Bridge"
+    name = "AI Gateway"
     base_url = "${local.ai_bridge_openai_v1_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
-
-    [profiles.aibridge]
-    model_provider = "aibridge"
-    model = "us.openai.gpt-5.6-luna"
-    model_reasoning_effort = "medium"
     CODEXEOF
 
     # Install CLI wrappers that pin each agent to the SAME model + flags

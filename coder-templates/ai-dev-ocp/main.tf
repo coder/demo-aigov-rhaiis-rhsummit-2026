@@ -323,25 +323,30 @@ resource "coder_agent" "main" {
     # Codex configuration (AI Bridge)
     echo "Configuring Codex..."
     mkdir -p ~/.codex
+    # Codex config (AI Gateway) - modern schema: top-level model +
+    # model_provider (the legacy profile=/[profiles.*] form is rejected by
+    # current Codex). wire_api must be responses (chat was removed). Routes
+    # to the openai-compat provider.
+    # KNOWN LIMITATION: Coder AI Gateway streams the OpenAI Responses API as
+    # data-only SSE (no event: field lines) which the Codex CLI needs to
+    # detect completion, so Codex currently reports "stream closed before
+    # response.completed". Claude Code (Anthropic Messages API) is unaffected.
+    # No template change needed once the gateway emits event: lines.
     cat > ~/.codex/config.toml << 'CODEXEOF'
-    sandbox_mode = "workspace-write"
+    model = "us.openai.gpt-5.6-sol"
+    model_provider = "aibridge"
+    model_reasoning_effort = "medium"
     approval_policy = "never"
-    preferred_auth_method = "apikey"
-    profile = "aibridge"
+    sandbox_mode = "workspace-write"
 
     [sandbox_workspace_write]
     network_access = true
 
     [model_providers.aibridge]
-    name = "AI Bridge"
+    name = "AI Gateway"
     base_url = "${local.ai_bridge_openai_v1_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
-
-    [profiles.aibridge]
-    model_provider = "aibridge"
-    model = "us.openai.gpt-5.6-sol"
-    model_reasoning_effort = "medium"
     CODEXEOF
 
     echo "=== Workspace Ready ==="
