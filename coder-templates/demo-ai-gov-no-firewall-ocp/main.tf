@@ -76,11 +76,8 @@ data "coder_provisioner" "me" {}
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
-data "coder_external_auth" "github" {
-  id       = "github"
-  optional = true
-}
-
+# GitLab external_auth (optional). GitHub external_auth was removed —
+# GitLab is the only SCM integration for now.
 data "coder_external_auth" "gitlab" {
   id       = "gitlab"
   optional = true
@@ -210,7 +207,7 @@ locals {
   # `openai-compat` (OpenAI Responses -> Codex). Canonical prefix is
   # /api/v2/ai-gateway (matches the proven partner reference templates).
   ai_gateway_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
-  ai_gateway_openai_v1_url  = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
+  ai_gateway_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
   # Codex config.toml — written verbatim by the coder-labs/codex module.
   #   * web_search = "disabled": Bedrock's OpenAI endpoint rejects Codex's
@@ -284,8 +281,6 @@ resource "coder_agent" "main" {
   env = {
     EDITOR              = "code"
     VISUAL              = "code"
-    GH_TOKEN            = data.coder_external_auth.github.access_token
-    GH_USERNAME         = data.coder_workspace_owner.me.name
     GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
     GITLAB_USER         = data.coder_workspace_owner.me.name
     GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"

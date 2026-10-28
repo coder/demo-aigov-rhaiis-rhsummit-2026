@@ -107,11 +107,8 @@ data "coder_provisioner" "me" {}
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
-data "coder_external_auth" "github" {
-  id       = "github"
-  optional = true
-}
-
+# GitLab external_auth (optional). GitHub external_auth was removed —
+# GitLab is the only SCM integration for now.
 data "coder_external_auth" "gitlab" {
   id       = "gitlab"
   optional = true
@@ -545,8 +542,6 @@ resource "coder_agent" "main" {
     ANTHROPIC_BASE_URL  = local.ai_bridge_anthropic_url
     ANTHROPIC_API_BASE  = local.ai_bridge_anthropic_url
     OPENAI_BASE_URL     = local.ai_bridge_openai_v1_url
-    GH_TOKEN            = data.coder_external_auth.github.access_token
-    GH_USERNAME         = data.coder_workspace_owner.me.name
     GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
     GITLAB_USER         = data.coder_workspace_owner.me.name
     GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"

@@ -81,13 +81,9 @@ data "coder_provisioner" "me" {}
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
-# Both external_auth providers are optional — workspace boots whether
-# the user has authenticated to one, both, or neither.
-data "coder_external_auth" "github" {
-  id       = "github"
-  optional = true
-}
-
+# GitLab external_auth (optional) — workspace boots whether or not the
+# user has authenticated. GitHub external_auth was removed; GitLab is the
+# only SCM integration for now.
 data "coder_external_auth" "gitlab" {
   id       = "gitlab"
   optional = true
@@ -198,7 +194,7 @@ locals {
   # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway
   # (matches the proven partner reference templates).
   ai_gateway_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
-  ai_gateway_openai_v1_url  = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
+  ai_gateway_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
   # Codex config.toml — written verbatim by the coder-labs/codex module
   # (base_config_toml). Routes Codex through the AI Gateway openai-compat
@@ -307,8 +303,6 @@ resource "coder_agent" "main" {
   env = {
     EDITOR              = "code"
     VISUAL              = "code"
-    GH_TOKEN            = data.coder_external_auth.github.access_token
-    GH_USERNAME         = data.coder_workspace_owner.me.name
     GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
     GITLAB_USER         = data.coder_workspace_owner.me.name
     GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"
