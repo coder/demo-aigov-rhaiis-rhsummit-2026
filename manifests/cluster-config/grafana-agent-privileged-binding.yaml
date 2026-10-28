@@ -50,5 +50,7 @@ roleRef:
   name: system:openshift:scc:privileged
 subjects:
   - kind: ServiceAccount
-    name: grafana-agent
+    # Chart renamed the collector Grafana Agent -> Grafana Alloy; its SA
+    # is now `alloy` (was `grafana-agent`).
+    name: alloy
     namespace: coder-observability
