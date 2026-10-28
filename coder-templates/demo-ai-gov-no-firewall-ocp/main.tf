@@ -204,16 +204,16 @@ data "coder_parameter" "dotfiles_branch" {
 # -----------------------------------------------------------------------------
 
 locals {
-  # AI Bridge endpoints — proxied through Coder, authenticated via session token
   # AI Gateway (Coder 2.37.x) routes by PROVIDER NAME under
-  # /api/v2/aibridge/<provider>, authenticated with the Coder session
-  # token (x-api-key). Our configured providers are `bedrock` (Anthropic
-  # Messages API -> Claude Code) and `openai-compat` (OpenAI Chat/Responses
-  # API -> Codex). The provider *type* aliases /anthropic and /openai are
-  # NOT valid routes and return 404 "route not supported".
-  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/bedrock"
-  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai-compat"
-  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai-compat/v1"
+  # /api/v2/ai-gateway/<provider>, authenticated with the Coder session
+  # token. Our configured providers are `bedrock` (Anthropic Messages API
+  # -> Claude Code) and `openai-compat` (OpenAI Chat/Responses API -> Codex).
+  # The provider *type* aliases /anthropic and /openai are NOT valid routes
+  # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway
+  # (matches the proven partner reference templates).
+  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
+  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat"
+  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
   # Claude Code settings.json — written to ~/.claude/settings.json
   # Controls environment variables, model selection, and onboarding state
@@ -292,7 +292,7 @@ resource "coder_agent" "main" {
 
     # Install Codex CLI — pinned to match demo-ai-gov-firewall.
     echo "Installing Codex CLI v0.122.0..."
-    npm install --global --no-fund --no-audit @openai/codex@0.122.0 || echo "Warning: Codex install failed"
+    npm install --global --no-fund --no-audit @openai/codex@0.159.2 || echo "Warning: Codex install failed"
 
     # Claude Code configuration
     echo "Configuring Claude Code..."
@@ -308,20 +308,29 @@ resource "coder_agent" "main" {
     echo "Configuring Codex..."
     mkdir -p ~/.codex
     cat > ~/.codex/config.toml << 'CODEXEOF'
+    model_provider = "openai-compat"
     model = "us.openai.gpt-5.6-luna"
-    model_provider = "aibridge"
     model_reasoning_effort = "medium"
+    # web_search MUST be disabled: Codex attaches a hosted web_search tool by
+    # default, which Amazon Bedrock's OpenAI endpoint rejects ("web search is
+    # not supported for this request"), closing the stream mid-turn.
+    web_search = "disabled"
+    # danger-full-access: the workspace pod is already the sandbox and lacks
+    # bubblewrap, which Codex's workspace-write OS sandbox requires.
+    sandbox_mode = "danger-full-access"
     approval_policy = "never"
-    sandbox_mode = "workspace-write"
 
-    [sandbox_workspace_write]
-    network_access = true
+    [features]
+    daemon_auto_start = false
 
-    [model_providers.aibridge]
-    name = "AI Gateway"
+    [model_providers.openai-compat]
+    name = "Coder AI Gateway (Bedrock)"
     base_url = "${local.ai_bridge_openai_v1_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
+
+    [projects."/home/coder"]
+    trust_level = "trusted"
     CODEXEOF
 
     # Install CLI wrappers that pin each agent to the SAME model + flags
@@ -344,7 +353,7 @@ resource "coder_agent" "main" {
       fi
       case "$tool" in
         claude) DEFAULT_ARGS="--dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0" ;;
-        codex)  DEFAULT_ARGS="--dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna" ;;
+        codex)  DEFAULT_ARGS="" ;;  # model/approvals/sandbox come from ~/.codex/config.toml
       esac
       printf '#!/usr/bin/env bash\nexec %q %s "$@"\n' "$REAL_BIN" "$DEFAULT_ARGS" > "$WRAPPERS_DIR/$tool"
       chmod +x "$WRAPPERS_DIR/$tool"

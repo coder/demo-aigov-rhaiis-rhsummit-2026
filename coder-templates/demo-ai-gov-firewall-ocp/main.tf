@@ -236,16 +236,16 @@ data "coder_parameter" "dotfiles_branch" {
 # -----------------------------------------------------------------------------
 
 locals {
-  # AI Bridge endpoints — proxied through Coder, authenticated via session token
   # AI Gateway (Coder 2.37.x) routes by PROVIDER NAME under
-  # /api/v2/aibridge/<provider>, authenticated with the Coder session
-  # token (x-api-key). Our configured providers are `bedrock` (Anthropic
-  # Messages API -> Claude Code) and `openai-compat` (OpenAI Chat/Responses
-  # API -> Codex). The provider *type* aliases /anthropic and /openai are
-  # NOT valid routes and return 404 "route not supported".
-  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/bedrock"
-  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai-compat"
-  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai-compat/v1"
+  # /api/v2/ai-gateway/<provider>, authenticated with the Coder session
+  # token. Our configured providers are `bedrock` (Anthropic Messages API
+  # -> Claude Code) and `openai-compat` (OpenAI Chat/Responses API -> Codex).
+  # The provider *type* aliases /anthropic and /openai are NOT valid routes
+  # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway
+  # (matches the proven partner reference templates).
+  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
+  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat"
+  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
   # Coder access URL hostname — substituted into boundary.config.yaml.tftpl
   # so agents can reach AI Bridge, AgentAPI, and the workspace agent.
@@ -342,7 +342,7 @@ resource "coder_agent" "main" {
     # separate tags: @alpha, @beta), but pinning gives a reproducible
     # build. Bump here after testing a newer release.
     echo "Installing Codex CLI v0.122.0..."
-    npm install --global --no-fund --no-audit @openai/codex@0.122.0 || echo "Warning: Codex install failed"
+    npm install --global --no-fund --no-audit @openai/codex@0.159.2 || echo "Warning: Codex install failed"
 
     # Install Coder Agent Firewall (boundary) — nsjail-based process isolator
     echo "Installing Agent Firewall (boundary)..."
@@ -387,11 +387,18 @@ resource "coder_agent" "main" {
     echo "Configuring Codex..."
     mkdir -p ~/.codex
     cat > ~/.codex/config.toml << 'CODEXEOF'
+    model_provider = "openai-compat"
     model = "us.openai.gpt-5.6-luna"
-    model_provider = "aibridge"
     model_reasoning_effort = "medium"
-    approval_policy = "never"
+    # web_search MUST be disabled: Codex attaches a hosted web_search tool by
+    # default, which Amazon Bedrock's OpenAI endpoint rejects ("web search is
+    # not supported for this request"), closing the stream mid-turn.
+    web_search = "disabled"
     sandbox_mode = "danger-full-access"
+    approval_policy = "never"
+
+    [features]
+    daemon_auto_start = false
 
     [projects."/home/coder"]
     trust_level = "trusted"
@@ -403,8 +410,8 @@ resource "coder_agent" "main" {
     hide_rate_limit_model_nudge = true
     hide_world_writable_warning = true
 
-    [model_providers.aibridge]
-    name = "AI Gateway"
+    [model_providers.openai-compat]
+    name = "Coder AI Gateway (Bedrock)"
     base_url = "${local.ai_bridge_openai_v1_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
@@ -456,7 +463,7 @@ resource "coder_agent" "main" {
       fi
       case "$tool" in
         claude) DEFAULT_ARGS="--dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0" ;;
-        codex)  DEFAULT_ARGS="--dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna" ;;
+        codex)  DEFAULT_ARGS="" ;;  # model/approvals/sandbox come from ~/.codex/config.toml
       esac
       # --config + --jail-type must both be passed explicitly to boundary v0.9.0:
       #   --config: boundary doesn't auto-discover ~/.config/coder_boundary/config.yaml

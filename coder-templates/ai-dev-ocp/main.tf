@@ -187,16 +187,16 @@ data "coder_parameter" "git_repo" {
 # -----------------------------------------------------------------------------
 
 locals {
-  # AI Bridge endpoints — proxied through Coder, authenticated via session token
   # AI Gateway (Coder 2.37.x) routes by PROVIDER NAME under
-  # /api/v2/aibridge/<provider>, authenticated with the Coder session
-  # token (x-api-key). Our configured providers are `bedrock` (Anthropic
-  # Messages API -> Claude Code) and `openai-compat` (OpenAI Chat/Responses
-  # API -> Codex). The provider *type* aliases /anthropic and /openai are
-  # NOT valid routes and return 404 "route not supported".
-  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/bedrock"
-  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai-compat"
-  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/aibridge/openai-compat/v1"
+  # /api/v2/ai-gateway/<provider>, authenticated with the Coder session
+  # token. Our configured providers are `bedrock` (Anthropic Messages API
+  # -> Claude Code) and `openai-compat` (OpenAI Chat/Responses API -> Codex).
+  # The provider *type* aliases /anthropic and /openai are NOT valid routes
+  # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway
+  # (matches the proven partner reference templates).
+  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
+  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat"
+  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
   # Claude Code settings.json — written to ~/.claude/settings.json
   # Controls environment variables, model selection, and onboarding state.
@@ -293,7 +293,7 @@ resource "coder_agent" "main" {
 
     # Install Codex CLI (no sudo — user-prefixed npm above)
     echo "Installing Codex CLI..."
-    npm install --global --no-fund --no-audit @openai/codex@latest || true
+    npm install --global --no-fund --no-audit @openai/codex@0.159.2 || true
 
     # Install Gemini CLI (no sudo — user-prefixed npm above)
     echo "Installing Gemini CLI..."
@@ -320,33 +320,39 @@ resource "coder_agent" "main" {
     ${jsonencode(local.claude_config)}
     CLAUDECONFIG
 
-    # Codex configuration (AI Bridge)
+    # Codex configuration (Coder AI Gateway)
     echo "Configuring Codex..."
     mkdir -p ~/.codex
     # Codex config (AI Gateway) - modern schema: top-level model +
     # model_provider (the legacy profile=/[profiles.*] form is rejected by
-    # current Codex). wire_api must be responses (chat was removed). Routes
-    # to the openai-compat provider.
-    # KNOWN LIMITATION: Coder AI Gateway streams the OpenAI Responses API as
-    # data-only SSE (no event: field lines) which the Codex CLI needs to
-    # detect completion, so Codex currently reports "stream closed before
-    # response.completed". Claude Code (Anthropic Messages API) is unaffected.
-    # No template change needed once the gateway emits event: lines.
+    # current Codex). wire_api must be responses (chat was removed). Routes to
+    # the openai-compat provider. Matches the proven partner reference
+    # templates; web_search=disabled is the key fix (see below).
     cat > ~/.codex/config.toml << 'CODEXEOF'
+    model_provider = "openai-compat"
     model = "us.openai.gpt-5.6-sol"
-    model_provider = "aibridge"
     model_reasoning_effort = "medium"
+    # web_search MUST be disabled: Codex attaches a hosted web_search tool by
+    # default, which Amazon Bedrock's OpenAI endpoint rejects ("web search is
+    # not supported for this request"), closing the stream mid-turn. Disabling
+    # it lets turns complete. (Verified against this gateway.)
+    web_search = "disabled"
+    # danger-full-access: the workspace pod is already the sandbox and lacks
+    # bubblewrap, which Codex's workspace-write OS sandbox requires.
+    sandbox_mode = "danger-full-access"
     approval_policy = "never"
-    sandbox_mode = "workspace-write"
 
-    [sandbox_workspace_write]
-    network_access = true
+    [features]
+    daemon_auto_start = false
 
-    [model_providers.aibridge]
-    name = "AI Gateway"
+    [model_providers.openai-compat]
+    name = "Coder AI Gateway (Bedrock)"
     base_url = "${local.ai_bridge_openai_v1_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
+
+    [projects."/home/coder"]
+    trust_level = "trusted"
     CODEXEOF
 
     echo "=== Workspace Ready ==="
