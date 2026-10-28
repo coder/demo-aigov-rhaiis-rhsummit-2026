@@ -126,7 +126,7 @@ spec:
             # trick (it would render `chown :` and break the
             # statefulset YAML). Pin to a UID inside the
             # coder-observability namespace's
-            # openshift.io/sa.scc.uid-range (1000800000/10000); SCC
+            # openshift.io/sa.scc.uid-range (1000840000/10000); SCC
             # admission accepts an explicit in-range UID.
             #
             # initChownData is also explicitly disabled below — OCP's
@@ -134,9 +134,9 @@ spec:
             # fsGroup, so manual chown isn't needed.
             securityContext:
               runAsNonRoot: true
-              runAsUser: 1000800000
-              runAsGroup: 1000800000
-              fsGroup: 1000800000
+              runAsUser: 1000840000
+              runAsGroup: 1000840000
+              fsGroup: 1000840000
               seccompProfile:
                 type: RuntimeDefault
 
@@ -302,7 +302,7 @@ spec:
             # can't use the null+admission-injection trick the other
             # subcharts allow. Pin to a UID in the
             # coder-observability namespace's
-            # openshift.io/sa.scc.uid-range (1000800000/10000). The
+            # openshift.io/sa.scc.uid-range (1000840000/10000). The
             # SCC mutating admission accepts an explicit UID inside
             # the range. The chart has BOTH a podSecurityContext AND a
             # container-level securityContext (chart default
@@ -311,24 +311,24 @@ spec:
             alertmanager:
               podSecurityContext:
                 runAsNonRoot: true
-                runAsUser: 1000800000
-                runAsGroup: 1000800000
-                fsGroup: 1000800000
+                runAsUser: 1000840000
+                runAsGroup: 1000840000
+                fsGroup: 1000840000
                 seccompProfile:
                   type: RuntimeDefault
               securityContext:
                 runAsNonRoot: true
-                runAsUser: 1000800000
-                runAsGroup: 1000800000
+                runAsUser: 1000840000
+                runAsGroup: 1000840000
 
             # kube-state-metrics has the same schema constraint.
             kube-state-metrics:
               securityContext:
                 enabled: true
                 runAsNonRoot: true
-                runAsUser: 1000800000
-                runAsGroup: 1000800000
-                fsGroup: 1000800000
+                runAsUser: 1000840000
+                runAsGroup: 1000840000
+                fsGroup: 1000840000
                 seccompProfile:
                   type: RuntimeDefault
 
@@ -369,9 +369,9 @@ spec:
             minio:
               securityContext:
                 enabled: true
-                runAsUser: 1000800000
-                runAsGroup: 1000800000
-                fsGroup: 1000800000
+                runAsUser: 1000840000
+                runAsGroup: 1000840000
+                fsGroup: 1000840000
                 fsGroupChangePolicy: OnRootMismatch
               resources:
                 requests:
@@ -393,7 +393,7 @@ spec:
               #
               # Approach (Option 2): pin securityContext to a UID inside
               # the namespace's openshift.io/sa.scc.uid-range (same
-              # 1000800000 used everywhere else in this file) AND mount
+              # 1000840000 used everywhere else in this file) AND mount
               # an emptyDir over /etc/minio so the SCC-injected UID can
               # write its mc config there. The chart doesn't expose
               # extraEnvVars on these Jobs (so we can't redirect
@@ -403,9 +403,9 @@ spec:
               makeBucketJob:
                 securityContext:
                   enabled: true
-                  runAsUser: 1000800000
-                  runAsGroup: 1000800000
-                  fsGroup: 1000800000
+                  runAsUser: 1000840000
+                  runAsGroup: 1000840000
+                  fsGroup: 1000840000
                 extraVolumes:
                   - name: mc-config
                     emptyDir: {}
@@ -415,9 +415,9 @@ spec:
               makeUserJob:
                 securityContext:
                   enabled: true
-                  runAsUser: 1000800000
-                  runAsGroup: 1000800000
-                  fsGroup: 1000800000
+                  runAsUser: 1000840000
+                  runAsGroup: 1000840000
+                  fsGroup: 1000840000
                 extraVolumes:
                   - name: mc-config
                     emptyDir: {}
