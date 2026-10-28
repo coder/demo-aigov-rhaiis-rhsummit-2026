@@ -59,9 +59,9 @@ variable "namespace" {
 }
 
 variable "image_registry" {
-  description = "Container registry that hosts the workspace base images. Defaults to this repo's GHCR namespace; override at template-push time if you fork."
+  description = "Container registry that hosts the workspace base images. Defaults to the in-cluster OpenShift internal registry (images mirrored from GHCR via coder-templates/images/mirror-to-internal-registry.sh for a self-contained / air-gapped deploy; override at push time if you fork)."
   type        = string
-  default     = "ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026"
+  default     = "image-registry.openshift-image-registry.svc:5000/coder-workspaces"
 }
 
 provider "kubernetes" {
@@ -318,7 +318,7 @@ resource "coder_agent" "main" {
 
     [profiles.aibridge]
     model_provider = "aibridge"
-    model = "gpt-5.3-codex"
+    model = "us.openai.gpt-5.6-luna"
     model_reasoning_effort = "medium"
     CODEXEOF
 
@@ -329,8 +329,8 @@ resource "coder_agent" "main" {
     # means an A/B run of a prompt is actually comparing firewall vs
     # no-firewall and nothing else.
     #
-    # claude: --dangerously-skip-permissions --model haiku
-    # codex:  --dangerously-bypass-approvals-and-sandbox --model gpt-5.1-codex-mini
+    # claude: --dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0
+    # codex:  --dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna
     echo "Installing demo wrappers..."
     WRAPPERS_DIR="$HOME/.local/bin/demo-wrappers"
     mkdir -p "$WRAPPERS_DIR"
@@ -341,8 +341,8 @@ resource "coder_agent" "main" {
         continue
       fi
       case "$tool" in
-        claude) DEFAULT_ARGS="--dangerously-skip-permissions --model haiku" ;;
-        codex)  DEFAULT_ARGS="--dangerously-bypass-approvals-and-sandbox --model gpt-5.1-codex-mini" ;;
+        claude) DEFAULT_ARGS="--dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0" ;;
+        codex)  DEFAULT_ARGS="--dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna" ;;
       esac
       printf '#!/usr/bin/env bash\nexec %q %s "$@"\n' "$REAL_BIN" "$DEFAULT_ARGS" > "$WRAPPERS_DIR/$tool"
       chmod +x "$WRAPPERS_DIR/$tool"

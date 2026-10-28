@@ -98,8 +98,8 @@ Two installed, both authenticated through Coder **AI Bridge** — no external AP
 
 | CLI | Install | Default model |
 |---|---|---|
-| Claude Code | pinned native install (`v2.1.116`) | `haiku` |
-| Codex | npm global, pinned (`@openai/codex@0.122.0`) | `gpt-5.1-codex-mini` |
+| Claude Code | pinned native install (`v2.1.116`) | `global.anthropic.claude-haiku-4-5-20251001-v1:0` (Haiku 4.5) |
+| Codex | npm global, pinned (`@openai/codex@0.122.0`) | `us.openai.gpt-5.6-luna` |
 
 Gemini CLI and Kiro CLI aren't installed: AI Bridge doesn't currently support them (Gemini — [coder/aibridge#27](https://github.com/coder/aibridge/issues/27); Kiro — no base-URL override).
 
@@ -109,16 +109,16 @@ Every AI CLI invocation goes through a wrapper script at `~/.local/bin/boundary-
 
 Default args the wrappers inject:
 
-- `claude` → `--dangerously-skip-permissions --model haiku`
-- `codex` → `--dangerously-bypass-approvals-and-sandbox --model gpt-5.1-codex-mini`
+- `claude` → `--dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0`
+- `codex` → `--dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna`
 
 ### Running against a stronger model / bypassing the wrapper
 
 The wrappers are convenience, not enforcement. Call the real binary with your own flags:
 
 ```bash
-/home/coder/.local/bin/claude --model opus
-/usr/bin/codex --model gpt-5.4
+/home/coder/.local/bin/claude --model global.anthropic.claude-opus-4-5-20251101-v1:0
+/usr/bin/codex --model us.openai.gpt-5.6-sol
 ```
 
 To completely bypass boundary AND the default flags (debugging only):
@@ -133,7 +133,9 @@ Check what the wrapper actually does:
 cat ~/.local/bin/boundary-wrappers/claude
 ```
 
-Stronger models (Opus, Codex 5.4) reliably **refuse** obvious firewall-demo prompts — they pattern-match exfil and just won't do it. That's correct model behavior, but it means the firewall never actually gets exercised. Haiku / codex-mini are weaker on safety deliberation and happily run what they're asked, letting boundary do its job. That's why the wrapper pins those models by default.
+Stronger models (e.g. Opus 4.5) reliably **refuse** obvious firewall-demo prompts — they pattern-match exfil and just won't do it. That's correct model behavior, but it means the firewall never actually gets exercised. Haiku 4.5 is weaker on safety deliberation and happily runs what it's asked, letting boundary do its job — which is why the `claude` wrapper pins Haiku by default.
+
+> **Model note (RH Summit 2026 re-install):** models were remapped to those provisioned in this deployment's AI Gateway. Haiku 4.5 remains a good weak-safety model for the `claude` path. There is currently **no weak OpenAI-compatible model routable through the AI Bridge**, so `codex` defaults to `us.openai.gpt-5.6-luna` (a strong model that may refuse the demo prompts). Run the firewall demo primarily through `claude`.
 
 ## Allowlist
 

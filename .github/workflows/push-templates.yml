@@ -40,7 +40,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE_REGISTRY: ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026
+  IMAGE_REGISTRY: image-registry.openshift-image-registry.svc:5000/coder-workspaces
   WORKSPACE_NAMESPACE: coder-workspaces
   CODER_VERSION: 2.37.6
 

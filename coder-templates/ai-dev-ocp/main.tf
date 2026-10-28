@@ -62,9 +62,9 @@ variable "namespace" {
   default     = "coder-workspaces"
 }
 variable "image_registry" {
-  description = "Container registry that hosts the workspace base images. Defaults to this repo's GHCR namespace; override at template-push time if you fork."
+  description = "Container registry that hosts the workspace base images. Defaults to the in-cluster OpenShift internal registry (images mirrored from GHCR via coder-templates/images/mirror-to-internal-registry.sh for a self-contained / air-gapped deploy; override at push time if you fork)."
   type        = string
-  default     = "ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026"
+  default     = "image-registry.openshift-image-registry.svc:5000/coder-workspaces"
 }
 
 
@@ -201,20 +201,16 @@ locals {
   # forwards it to Bedrock, which only resolves canonical inference
   # profile IDs (the bare `claude-sonnet-4-20250514` form 404s).
   #
-  # Why Sonnet 4 specifically: it's the cheapest of the verified-subscribed
-  # set (see bedrock-model-sub.md, 2026-05-09). Other working IDs users
-  # can pick via /model:
-  #   us.anthropic.claude-sonnet-4-6
-  #   us.anthropic.claude-sonnet-4-5-20250929-v1:0
-  #   us.anthropic.claude-opus-4-7
-  #   us.anthropic.claude-opus-4-6-v1
-  #   us.anthropic.claude-opus-4-5-20251101-v1:0
-  #   us.anthropic.claude-opus-4-1-20250805-v1:0
-  # Anything Claude Code surfaces in /model that ISN'T on this list will
-  # 4xx — those are Anthropic-direct preview tags Bedrock doesn't host
-  # (e.g. `claude-opus-4-7[1m]`).
+  # Pinned to Opus 4.5 — the strongest of the models currently provisioned
+  # in this deployment's AI Gateway (Bedrock provider, IRSA-auth, verified
+  # subscribed in account 342934376218). The other provisioned Anthropic
+  # model users can pick via /model:
+  #   global.anthropic.claude-haiku-4-5-20251001-v1:0  (fast / cheap)
+  # Any model string Claude Code sends is forwarded verbatim to Bedrock, so
+  # it must be a provisioned, subscribed inference-profile ID; anything else
+  # 4xxes.
   claude_settings = {
-    model = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    model = "global.anthropic.claude-opus-4-5-20251101-v1:0"
     env = {
       ANTHROPIC_BASE_URL  = local.ai_bridge_anthropic_url
       OPENAI_BASE_URL     = local.ai_bridge_openai_url
@@ -338,7 +334,7 @@ resource "coder_agent" "main" {
 
     [profiles.aibridge]
     model_provider = "aibridge"
-    model = "gpt-5.3-codex"
+    model = "us.openai.gpt-5.6-sol"
     model_reasoning_effort = "medium"
     CODEXEOF
 

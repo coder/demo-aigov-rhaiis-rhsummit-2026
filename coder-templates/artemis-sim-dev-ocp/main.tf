@@ -64,9 +64,9 @@ variable "namespace" {
   default     = "coder-workspaces"
 }
 variable "image_registry" {
-  description = "Container registry that hosts the workspace base images. Defaults to this repo's GHCR namespace; override at template-push time if you fork."
+  description = "Container registry that hosts the workspace base images. Defaults to the in-cluster OpenShift internal registry (images mirrored from GHCR via coder-templates/images/mirror-to-internal-registry.sh for a self-contained / air-gapped deploy; override at push time if you fork)."
   type        = string
-  default     = "ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026"
+  default     = "image-registry.openshift-image-registry.svc:5000/coder-workspaces"
 }
 
 

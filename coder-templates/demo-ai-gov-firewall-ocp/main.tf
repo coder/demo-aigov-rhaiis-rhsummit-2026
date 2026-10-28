@@ -92,9 +92,9 @@ variable "namespace" {
 }
 
 variable "image_registry" {
-  description = "Container registry that hosts the workspace base images. Defaults to this repo's GHCR namespace; override at template-push time if you fork."
+  description = "Container registry that hosts the workspace base images. Defaults to the in-cluster OpenShift internal registry (images mirrored from GHCR via coder-templates/images/mirror-to-internal-registry.sh for a self-contained / air-gapped deploy; override at push time if you fork)."
   type        = string
-  default     = "ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026"
+  default     = "image-registry.openshift-image-registry.svc:5000/coder-workspaces"
 }
 
 provider "kubernetes" {
@@ -404,7 +404,7 @@ resource "coder_agent" "main" {
 
     [profiles.aibridge]
     model_provider = "aibridge"
-    model = "gpt-5.3-codex"
+    model = "us.openai.gpt-5.6-luna"
     model_reasoning_effort = "medium"
     CODEXEOF
 
@@ -434,8 +434,15 @@ resource "coder_agent" "main" {
     # invoking the real binary by absolute path (e.g.
     # /home/coder/.local/bin/claude) with their own flags.
     #
-    # claude: --dangerously-skip-permissions --model haiku
-    # codex:  --dangerously-bypass-approvals-and-sandbox --model gpt-5.1-codex-mini
+    # claude: --dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0
+    # codex:  --dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna
+    #
+    # Model note (RH Summit 2026 re-install): remapped from the original
+    # haiku / gpt-5.1-codex-mini to the models provisioned in this AI
+    # Gateway. Haiku 4.5 is still the weak-safety model this demo wants on
+    # the claude path. We have no weak OpenAI model routable via the bridge,
+    # so codex uses gpt-5.6-luna (strong — it may refuse obvious exfil
+    # prompts); run the firewall demo primarily via `claude`.
     echo "Installing boundary wrappers..."
     WRAPPERS_DIR="$HOME/.local/bin/boundary-wrappers"
     mkdir -p "$WRAPPERS_DIR"
@@ -446,8 +453,8 @@ resource "coder_agent" "main" {
         continue
       fi
       case "$tool" in
-        claude) DEFAULT_ARGS="--dangerously-skip-permissions --model haiku" ;;
-        codex)  DEFAULT_ARGS="--dangerously-bypass-approvals-and-sandbox --model gpt-5.1-codex-mini" ;;
+        claude) DEFAULT_ARGS="--dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0" ;;
+        codex)  DEFAULT_ARGS="--dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna" ;;
       esac
       # --config + --jail-type must both be passed explicitly to boundary v0.9.0:
       #   --config: boundary doesn't auto-discover ~/.config/coder_boundary/config.yaml

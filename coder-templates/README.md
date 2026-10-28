@@ -24,6 +24,23 @@ Workspace base images live in a SHARED tree at `coder-templates/images/`, NOT pe
 
 Both `-ocp` templates `FROM` `ubi9-node-workspace:latest`. Built by `.github/workflows/build-images.yml` on changes under `coder-templates/images/**`.
 
+### Air-gapped / self-contained image source (OpenShift internal registry)
+
+GHCR is the source of truth for the images, but at workspace-create time the
+`-ocp` templates pull from the **in-cluster OpenShift internal registry** so the
+cluster never fetches workspace images from the public internet (supply-chain
+hardening). Mirror the GHCR images into the internal registry with:
+
+```bash
+oc patch configs.imageregistry.operator.openshift.io/cluster \
+  --type=merge -p '{"spec":{"defaultRoute":true}}'   # once, to expose the push route
+coder-templates/images/mirror-to-internal-registry.sh
+```
+
+The templates default `image_registry` to
+`image-registry.openshift-image-registry.svc:5000/coder-workspaces`. Re-run the
+mirror script whenever the GHCR images are rebuilt.
+
 ## Pushing a template manually
 
 ```bash
@@ -32,7 +49,7 @@ coder login https://coder.<your-cluster-fqdn>
 coder templates push ai-dev-ocp \
   --directory . \
   --variable namespace=coder-workspaces \
-  --variable image_registry=ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026 \
+  --variable image_registry=image-registry.openshift-image-registry.svc:5000/coder-workspaces \
   --yes
 ```
 
@@ -43,6 +60,6 @@ Required GH secrets (set once with `gh secret set`):
 - `CODER_SESSION_TOKEN` — Coder session token (created via `coder tokens create` after login)
 
 Optional GH variable:
-- `IMAGE_REGISTRY` — overrides the default `ghcr.io/coder/demo-aigov-rhaiis-rhsummit-2026` registry path (use this if you fork the repo into another GH org)
+- `IMAGE_REGISTRY` — overrides the default in-cluster registry path (`image-registry.openshift-image-registry.svc:5000/coder-workspaces`); set to a GHCR path if you want workspaces to pull directly from GHCR instead of the mirrored internal registry.
 
 The workflow runs on push to `main` when `coder-templates/**` changes. No AWS credentials are required — image pushes use the workflow's built-in `GITHUB_TOKEN`.
