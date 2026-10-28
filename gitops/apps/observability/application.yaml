@@ -334,6 +334,12 @@ spec:
 
           loki:
             enabled: true
+            # Loki writes chunks/ruler to AWS S3 via IRSA. The `loki` SA
+            # assumes cluster-coder-loki through the cluster OIDC provider;
+            # pod-identity-webhook injects the web-identity token (no keys).
+            serviceAccount:
+              annotations:
+                eks.amazonaws.com/role-arn: arn:aws:iam::342934376218:role/cluster-coder-loki
             persistence:
               enabled: true
               size: 20Gi
@@ -367,6 +373,13 @@ spec:
             # than a demo with a single bucket needs and would block
             # scheduling on a constrained 3-node converged cluster.
             minio:
+              # Disabled: upstream quay.io/minio/minio images are now gated
+              # behind auth (401 on every tag, incl. latest). Loki uses a real
+              # AWS S3 bucket via IRSA instead (see loki.serviceAccount
+              # role-arn above + loki.loki.storage below) — supply-chain-clean
+              # and production-like on AWS. The keys below are inert while
+              # enabled=false; kept for easy revert.
+              enabled: false
               securityContext:
                 enabled: true
                 runAsUser: 1000840000
@@ -428,6 +441,18 @@ spec:
             # Loki app's pod-level securityContext (chart default
             # 10001). Path: loki.loki.podSecurityContext.
             loki:
+              # AWS S3 object storage via IRSA (no static keys). Region set
+              # so the SDK targets the standard AWS S3 endpoint; credentials
+              # come from the web-identity token injected on the loki SA.
+              storage:
+                type: s3
+                bucketNames:
+                  chunks: coder-rhsummit-loki-342934376218
+                  ruler: coder-rhsummit-loki-342934376218
+                  admin: coder-rhsummit-loki-342934376218
+                s3:
+                  region: us-east-1
+                  s3ForcePathStyle: false
               podSecurityContext:
                 runAsNonRoot: true
                 runAsUser: null
