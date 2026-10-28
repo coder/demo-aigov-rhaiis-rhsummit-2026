@@ -1,25 +1,31 @@
 # ai-dev-ocp
 
-AI-focused OpenShift workspace template. CLIs talk to Coder's AI Bridge,
-which proxies Anthropic traffic to AWS Bedrock (via the `coder-server`
-ServiceAccount's IRSA role) and OpenAI traffic through a central
-`coder-secrets.openai-api-key` (BYOK is disabled).
+AI-focused OpenShift workspace template. The Claude Code and Codex CLIs are
+installed and configured by their **official Coder Registry modules** and talk
+to the **Coder AI Gateway**, which proxies Anthropic traffic to AWS Bedrock
+(via the `coder-server` ServiceAccount's IRSA role) and OpenAI-compatible
+traffic to Bedrock's OpenAI endpoint. Gemini and Kiro CLIs authenticate
+independently.
 
 ## What's Included
 
-| Tool | Access | Description |
-|---|---|---|
-| code-server | Browser (subdomain) | VS Code in the browser |
-| Kiro IDE | Desktop (kiro:// protocol) | AWS / Anthropic coding agent IDE |
-| Cursor IDE | Desktop (cursor:// protocol) | AI-powered VS Code fork |
-| Claude Code | Terminal | Anthropic coding agent CLI (native installer) |
-| Codex | Terminal | OpenAI coding agent CLI (npm) |
-| Gemini CLI | Terminal | Google coding agent CLI (npm) |
-| Kiro CLI | Terminal | AWS coding agent CLI (curl install, non-interactive) |
+| Tool | Access | Source | Description |
+|---|---|---|---|
+| code-server | Browser (subdomain) | `coder/code-server` module | VS Code in the browser |
+| Kiro IDE | Desktop (kiro:// protocol) | `coder/kiro` module | AWS / Anthropic coding agent IDE |
+| Cursor IDE | Desktop (cursor:// protocol) | `coder/cursor` module | AI-powered VS Code fork |
+| Claude Code | Terminal / launcher | `coder/claude-code` module (v5.4.0) | Anthropic coding agent CLI (native install) |
+| Codex | Terminal / launcher | `coder-labs/codex` module (v5.3.2) | OpenAI coding agent CLI (pinned binary, codex `0.159.2`) |
+| Gemini CLI | Terminal | startup script (`npm -g @google/gemini-cli`) | Google coding agent CLI |
+| Kiro CLI | Terminal | startup script (`cli.kiro.dev` installer) | AWS coding agent CLI |
 
-Registry modules:
-- **dotfiles** — defaults to `https://github.com/ausbru87/dotfiles` on `main`; editable per-workspace, clear the URL to skip
-- **git-clone** — clones the repo from the `git_repo` parameter into `/home/coder` if set
+Neither the `claude-code` nor the `codex` module creates a `coder_app`; this
+template provides clickable **Claude Code** and **Codex** launchers under the
+"AI Tools" group via its own `coder_app` resources.
+
+Other Registry modules:
+- **dotfiles** (`v1.4.1`) — defaults to `https://github.com/ausbru87/dotfiles` on `main`; editable per-workspace, clear the URL to skip
+- **git-clone** (`v1.0.22`) — clones the repo from the `git_repo` parameter into `/home/coder` if set
 
 ## Parameters
 
@@ -30,47 +36,55 @@ Registry modules:
 | `disk_size` | 20 | no | Persistent volume size in GB (10, 20, 50) |
 | `git_repo` | — | no | Repository to clone on start (optional) |
 
-(Dotfiles URL/branch are surfaced by the `dotfiles` module's own form, not as a separate `coder_parameter`.)
+(Dotfiles URL/branch are surfaced by the `dotfiles` module's own form, not as a
+separate `coder_parameter`.)
 
-## AI Bridge wiring
+## Template variables (set at push time)
 
-Anthropic, OpenAI, and Google CLIs all authenticate through the AI Bridge
-endpoints. The workspace owner's Coder session token is injected as
-`CLAUDE_API_KEY` / `OPENAI_API_KEY`; AI Bridge validates the session and
-forwards to:
-- **Anthropic** → AWS Bedrock via the `cluster-coder-bedrock` IRSA role
-  on the `coder-server` ServiceAccount.
-- **OpenAI** → upstream `api.openai.com` using the central key in
-  `coder-secrets.openai-api-key` (`CODER_AIBRIDGE_ALLOW_BYOK=false`
-  forces all traffic through the central key for the audit trail).
+| Variable | Default | Purpose |
+|---|---|---|
+| `namespace` | `coder-workspaces` | Namespace for workspace pods |
+| `image_registry` | `image-registry.openshift-image-registry.svc:5000/coder-workspaces` | Registry hosting the base images |
+| `anthropic_model` | `global.anthropic.claude-opus-4-5-20251101-v1:0` | Model Claude Code requests through the gateway's `bedrock` provider |
+| `openai_model` | `us.openai.gpt-5.6-sol` | Model Codex requests through the gateway's `openai-compat` provider |
+
+## AI Gateway wiring
+
+Claude Code and Codex authenticate through the **Coder AI Gateway**, which
+routes by **provider NAME** under `/api/v2/ai-gateway/<provider>`. The
+workspace owner's Coder session token is injected as the API key; the gateway
+validates it and forwards to the real upstream:
+
+- **Claude Code** → provider `bedrock` → AWS Bedrock via the IRSA role on the
+  `coder-server` ServiceAccount.
+- **Codex** → provider `openai-compat` → Bedrock's OpenAI-compatible
+  (`/openai/v1`) endpoint.
+
+> The module option `enable_ai_gateway` is deliberately **not** used — its
+> generic `/anthropic` route and `ANTHROPIC_AUTH_TOKEN` don't match our
+> provider-named `bedrock` route. We wire the gateway via `coder_env` instead.
 
 ### Environment variables on every workspace
 
-| Variable | Source | Purpose |
+| Variable | Source | Value |
 |---|---|---|
-| `CLAUDE_API_KEY` | `coder_env` | Session token — Claude Code CLI auth |
-| `OPENAI_API_KEY` | `coder_env` | Session token — Codex CLI auth |
-| `ANTHROPIC_BASE_URL` | `coder_agent.env` | `<access_url>/api/v2/aibridge/anthropic` |
-| `ANTHROPIC_API_BASE` | `coder_agent.env` | Same as above (some Anthropic SDKs expect this name) |
-| `OPENAI_BASE_URL` | `coder_agent.env` | `<access_url>/api/v2/aibridge/openai` |
-
-Model is NOT in env vars — Claude Code reads `~/.claude/settings.json`
-where `model` is pinned to `us.anthropic.claude-sonnet-4-20250514-v1:0`
-(canonical Bedrock cross-region inference profile; the bare
-`claude-sonnet-4-20250514` form 404s). Other working IDs users can pick
-via `/model`:
-`us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-sonnet-4-5-20250929-v1:0`,
-`us.anthropic.claude-opus-4-7`, `us.anthropic.claude-opus-4-6-v1`,
-`us.anthropic.claude-opus-4-5-20251101-v1:0`, `us.anthropic.claude-opus-4-1-20250805-v1:0`.
-See `bedrock-model-sub.md` for the subscribed-models story.
+| `ANTHROPIC_BASE_URL` | `coder_env` | `<access_url>/api/v2/ai-gateway/bedrock` |
+| `ANTHROPIC_API_KEY` | `coder_env` | Workspace owner's Coder session token |
+| `ANTHROPIC_MODEL` | `coder/claude-code` module | `var.anthropic_model` |
+| `OPENAI_BASE_URL` | `coder_env` | `<access_url>/api/v2/ai-gateway/openai-compat/v1` |
+| `OPENAI_API_KEY` | `coder_env` | Workspace owner's Coder session token |
 
 ### Config files written on start
 
-| File | Tool | Contents |
-|---|---|---|
-| `~/.claude/settings.json` | Claude Code | AI Bridge URLs, git identity, model pin |
-| `~/.claude.json` | Claude Code | API key, onboarding state, project trust |
-| `~/.codex/config.toml` | Codex | `model_providers.aibridge` block + `profile = "aibridge"`, model `gpt-5.3-codex`, `wire_api = "responses"` |
+| File | Tool | Written by | Contents |
+|---|---|---|---|
+| `~/.claude/settings.json` | Claude Code | startup script | Permission bypass + model picker locked to the gateway's provisioned Anthropic models (Opus 4.5, Haiku 4.5) |
+| `~/.claude.json` | Claude Code | `coder/claude-code` module | Install/onboarding state |
+| `~/.codex/config.toml` | Codex | `coder-labs/codex` module (`base_config_toml`) | `model_providers.openai-compat` block, `wire_api = "responses"`, model `us.openai.gpt-5.6-sol`, `web_search = "disabled"`, `sandbox_mode = "danger-full-access"` |
+
+**Codex `web_search = "disabled"`** is required: Codex attaches a hosted
+web_search tool by default, which Bedrock's OpenAI endpoint rejects ("web
+search is not supported for this request"), closing the stream mid-turn.
 
 ## Infrastructure
 
@@ -80,12 +94,20 @@ See `bedrock-model-sub.md` for the subscribed-models story.
 - **Container command:** `["/usr/local/bin/uid_entrypoint", "sh", "-c", coder_agent.main.init_script]`.
   The entrypoint appends a passwd entry for the runtime UID injected by
   restricted-v2 SCC, then exec's the agent init script.
-- **SCC:** restricted-v2 (default). Files in `/home/coder` are
-  group-0-writable via `chgrp -R 0 + chmod -R g=u` baked into the base
-  image; runtime `whoami` resolves correctly for any UID in the
-  namespace's allowed range.
-- **Storage:** ReadWriteOnce PVC mounted at `/home/coder`, size from
-  the `disk_size` parameter.
+- **SCC:** restricted-v2 (default). Native CLI installs (no npm sudo) keep the
+  workspace compatible with the restricted SCC. Files in `/home/coder` are
+  group-0-writable via `chgrp -R 0 + chmod -R g=u` baked into the base image.
+- **Storage:** ReadWriteOnce PVC mounted at `/home/coder`, size from the
+  `disk_size` parameter.
 - **Anti-affinity:** soft preference to spread workspaces across nodes.
-- **Image pull secret:** `ghcr-pull` (sealed) in the
-  `coder-workspaces` namespace.
+
+## Pushing
+
+```bash
+cd coder-templates/ai-dev-ocp
+coder templates push ai-dev-ocp \
+  --directory . \
+  --variable namespace=coder-workspaces \
+  --variable image_registry=image-registry.openshift-image-registry.svc:5000/coder-workspaces \
+  --yes
+```

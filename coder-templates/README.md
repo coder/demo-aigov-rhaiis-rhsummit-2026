@@ -6,8 +6,26 @@ directory.
 
 ## Templates currently shipped
 
-- **`ai-dev-ocp/`** — code-server + Kiro IDE + Cursor + Claude Code / Codex / Gemini / Kiro CLIs. AI Bridge wired (Anthropic via Bedrock IRSA, OpenAI via central key). Pinned Claude model is the canonical Bedrock inference profile `us.anthropic.claude-sonnet-4-20250514-v1:0`.
-- **`agents-dev-ocp/`** — code-server only. The agentic loop runs server-side via Coder Agents (chatd) talking to Bedrock + RHAIIS-hosted Qwen 2.5 Coder 32B. No AI Bridge env vars / no LLM CLIs in the workspace.
+- **`ai-dev-ocp/`** — code-server + Kiro IDE + Cursor + Claude Code / Codex / Gemini / Kiro CLIs. Claude Code and Codex install via the official Coder Registry modules (`coder/claude-code`, `coder-labs/codex`) and route through the **Coder AI Gateway**. Defaults: Claude Opus 4.5 (`global.anthropic.claude-opus-4-5-20251101-v1:0`), Codex GPT-5.6 Sol (`us.openai.gpt-5.6-sol`).
+- **`demo-ai-gov-no-firewall-ocp/`** — governance demo baseline: code-server + Claude Code + Codex (modules), AI Gateway wired, demo repo pre-cloned. No Agent Firewall — shows unrestricted agent reach.
+- **`demo-ai-gov-firewall-ocp/`** — the same toolchain behind the **Coder Agent Firewall** (`boundary`, landjail backend). AI CLIs run through per-tool boundary wrappers against a default-deny allowlist. Crown-jewel demo.
+- **`agents-dev-ocp/`** — code-server only. The agentic loop runs server-side via Coder Agents (chatd) talking to Bedrock + RHAIIS-hosted Qwen 2.5 Coder 32B. No AI Gateway env vars / no LLM CLIs in the workspace.
+- **`artemis-sim-dev-ocp/`** — plain dev workspace (no AI wiring) for the Artemis simulation demo.
+
+## AI Gateway routing convention
+
+Templates that wire AI CLIs target the **Coder AI Gateway** (Coder 2.37.x),
+which routes by **provider NAME** under `/api/v2/ai-gateway/<provider>`:
+
+- Claude Code → `.../api/v2/ai-gateway/bedrock` (Anthropic Messages API)
+- Codex → `.../api/v2/ai-gateway/openai-compat/v1` (OpenAI Responses API)
+
+Auth is the workspace owner's Coder **session token**, injected via `coder_env`
+(`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`); the gateway validates it and injects
+the real upstream credentials. The provider-*type* aliases `/anthropic` and
+`/openai` are NOT valid routes (404 "route not supported"). Codex must set
+`web_search = "disabled"` — Bedrock's OpenAI endpoint rejects the hosted
+web_search tool and closes the stream mid-turn.
 
 ## Conventions
 

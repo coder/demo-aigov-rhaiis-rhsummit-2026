@@ -13,9 +13,9 @@ Two demos, increasing in realism. Part 1 is a 15-second "does the firewall work?
 
 **Handy reference tabs to keep open during a demo:**
 
-- **Firewall dashboard:** <https://grafana.zambruhni.com/d/agent-boundaries/coder-agent-boundaries> (live DENY events)
+- **Firewall dashboard:** deployment-specific Grafana (coder-observability) — live DENY events
 - **The demo repo:** <https://gitlab.zambruhni.com/lab/cool-project> (the project the agent will try to set up in Part 2)
-- **The allowlist file:** [boundary.config.yaml.tftpl](https://gitlab.zambruhni.com/lab/coder-templates/-/blob/main/templates/demo-ai-gov-firewall/boundary.config.yaml.tftpl?ref_type=heads) (what's allowed vs blocked — e.g. npm intentionally NOT on the list)
+- **The allowlist file:** `boundary.config.yaml.tftpl` (next to `main.tf`) — what's allowed vs blocked (e.g. npm intentionally NOT on the list)
 
 ### Setup (both parts)
 
@@ -70,15 +70,30 @@ The story: **the agent's good intentions don't have to be trusted.** The firewal
 
 ## How the firewall works
 
-`boundary` runs the target process in a Linux network namespace whose only route out is a transparent HTTP/HTTPS proxy. The proxy reads `~/.config/coder_boundary/config.yaml` and either forwards or drops each request:
+`boundary` (v0.9.0) runs each AI CLI under the **landjail** backend (Linux
+Landlock LSM): the wrapped process can only reach hosts on the allowlist; a
+transparent HTTP/HTTPS proxy reads `~/.config/coder_boundary/config.yaml` and
+either forwards or drops each request:
 
 ```
 agent ──▶ boundary proxy ──┬──▶ allowed host   (log: allow)
                            └──X denied host    (log: deny)
 ```
 
+> [!NOTE]
+> We use **landjail**, not boundary's default **nsjail**. nsjail does NOT work
+> on OpenShift 4.21 / OVN-Kubernetes: the pod's `ip_forward` sysctl is 0, so
+> nsjail's MASQUERADE NAT rule has nowhere to forward packets ("No route to
+> host"). landjail uses Landlock — no network namespace, no iptables, no
+> privileged setup. The wrappers pass `--jail-type landjail` explicitly and
+> `BOUNDARY_JAIL_TYPE=landjail` is exported in the shell profiles.
+
 > [!IMPORTANT]
-> The agent's **`WebFetch` / `WebSearch` tools run server-side** — the HTTP request originates from the AI provider's infrastructure, not the workspace pod. Boundary never sees those requests and cannot filter them. Only things the agent runs via its **`Bash` tool** (curl, git, pip, npm, any subprocess) go through boundary.
+> The agent's **`WebFetch` / `WebSearch` tools run server-side** — the HTTP
+> request originates from the AI provider's infrastructure, not the workspace
+> pod. Boundary never sees those requests and cannot filter them. Only things
+> the agent runs via its **`Bash` tool** (curl, git, pip, npm, any subprocess)
+> go through boundary.
 
 ## Access points
 
@@ -94,14 +109,26 @@ All other built-in display apps (VS Code Insiders, SSH helper, port-forwarding h
 
 ## AI CLIs
 
-Two installed, both authenticated through Coder **AI Bridge** — no external API keys needed. Session tokens are injected on workspace start.
+Two installed, both authenticated through the Coder **AI Gateway** — no
+external API keys needed. The gateway routes by **provider NAME** under
+`/api/v2/ai-gateway/<provider>`; the workspace owner's session token is
+injected via `coder_env` as `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`.
 
-| CLI | Install | Default model |
+| CLI | Install (Coder Registry module) | Default model |
 |---|---|---|
-| Claude Code | pinned native install (`v2.1.116`) | `global.anthropic.claude-haiku-4-5-20251001-v1:0` (Haiku 4.5) |
-| Codex | npm global, pinned (`@openai/codex@0.122.0`) | `us.openai.gpt-5.6-luna` |
+| Claude Code | `coder/claude-code` v5.4.0 — native installer | `global.anthropic.claude-haiku-4-5-20251001-v1:0` (Haiku 4.5) |
+| Codex | `coder-labs/codex` v5.3.2 — pinned standalone binary (codex `0.159.2`) | `us.openai.gpt-5.6-luna` |
 
-Gemini CLI and Kiro CLI aren't installed: AI Bridge doesn't currently support them (Gemini — [coder/aibridge#27](https://github.com/coder/aibridge/issues/27); Kiro — no base-URL override).
+Both CLIs are installed **natively** (no npm/sudo), which keeps the workspace
+compatible with OpenShift's restricted SCC model. The modules install the
+binaries asynchronously; the startup script **waits** for both before building
+the boundary wrappers (see below). Codex's `~/.codex/config.toml` is written by
+its module from `base_config_toml` and sets `web_search = "disabled"` (Bedrock's
+OpenAI endpoint rejects the hosted web_search tool and closes the stream),
+`sandbox_mode = "danger-full-access"`, and `wire_api = "responses"`.
+
+Gemini CLI and Kiro CLI aren't installed: the AI Gateway doesn't currently
+support them (Gemini — [coder/aibridge#27](https://github.com/coder/aibridge/issues/27); Kiro — no base-URL override).
 
 ## Wrapper behavior
 
@@ -110,7 +137,7 @@ Every AI CLI invocation goes through a wrapper script at `~/.local/bin/boundary-
 Default args the wrappers inject:
 
 - `claude` → `--dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0`
-- `codex` → `--dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna`
+- `codex` → *(none)* — model, approval policy, and sandbox mode all come from `~/.codex/config.toml` (`approval_policy = "never"`, `sandbox_mode = "danger-full-access"`, model `us.openai.gpt-5.6-luna`)
 
 ### Running against a stronger model / bypassing the wrapper
 
@@ -118,7 +145,7 @@ The wrappers are convenience, not enforcement. Call the real binary with your ow
 
 ```bash
 /home/coder/.local/bin/claude --model global.anthropic.claude-opus-4-5-20251101-v1:0
-/usr/bin/codex --model us.openai.gpt-5.6-sol
+/home/coder/.local/bin/codex --model us.openai.gpt-5.6-sol
 ```
 
 To completely bypass boundary AND the default flags (debugging only):
@@ -135,7 +162,7 @@ cat ~/.local/bin/boundary-wrappers/claude
 
 Stronger models (e.g. Opus 4.5) reliably **refuse** obvious firewall-demo prompts — they pattern-match exfil and just won't do it. That's correct model behavior, but it means the firewall never actually gets exercised. Haiku 4.5 is weaker on safety deliberation and happily runs what it's asked, letting boundary do its job — which is why the `claude` wrapper pins Haiku by default.
 
-> **Model note (RH Summit 2026 re-install):** models were remapped to those provisioned in this deployment's AI Gateway. Haiku 4.5 remains a good weak-safety model for the `claude` path. There is currently **no weak OpenAI-compatible model routable through the AI Bridge**, so `codex` defaults to `us.openai.gpt-5.6-luna` (a strong model that may refuse the demo prompts). Run the firewall demo primarily through `claude`.
+> **Model note (RH Summit 2026 re-install):** models were remapped to those provisioned in this deployment's AI Gateway. Haiku 4.5 remains a good weak-safety model for the `claude` path. There is currently **no weak OpenAI-compatible model routable through the AI Gateway**, so `codex` defaults to `us.openai.gpt-5.6-luna` (a strong model that may refuse the demo prompts). Run the firewall demo primarily through `claude`.
 
 ## Allowlist
 
@@ -199,38 +226,40 @@ The structurally robust alternative — shadowing the real binary at `~/.local/b
 
 ## Prerequisites
 
-> [!IMPORTANT]
-> boundary's nsjail backend needs `NET_ADMIN` and `SYS_ADMIN` Linux capabilities on the pod. Your cluster's Pod Security Standards must permit these — on the `coder-workspaces` namespace in `k3s-infra`, it's labelled `pod-security.kubernetes.io/enforce: privileged`.
+> [!NOTE]
+> This template runs the pod under the **`coder-firewall-runner`**
+> ServiceAccount, bound to the custom **`coder-firewall-scc`** SCC
+> (`manifests/cluster-config/coder-firewall-scc.yaml`). That SCC mirrors
+> restricted-v2 but additionally allows the `NET_ADMIN` + `SYS_ADMIN`
+> capabilities (requested in the pod `security_context`). These were required
+> by boundary's original nsjail backend; the **landjail** backend used here
+> doesn't strictly need them, but the SCC + caps are kept so the template also
+> works if nsjail is ever re-enabled. UID / SELinux / seccomp are still
+> injected by the SCC at admission time.
 
-- Kubernetes cluster reachable from Coder
-- Namespace with PSS that permits `NET_ADMIN` + `SYS_ADMIN`
-- Coder deployment with AI Bridge enabled (`CODER_AIBRIDGE_ENABLED=true`) and upstream Anthropic + OpenAI API keys
+- OpenShift / Kubernetes cluster reachable from Coder
+- The `coder-firewall-scc` SCC applied and bound to `coder-firewall-runner` in the workspace namespace
+- Coder deployment (2.37.x) with the **AI Gateway** enabled and the `bedrock` + `openai-compat` providers configured (see `ai-providers/`)
 
 ## Architecture
 
-- **Image:** `codercom/enterprise-node:ubuntu`
-- **Pod:** single container, UID 1000, with `NET_ADMIN` + `SYS_ADMIN` caps
+- **Image:** `${var.image_registry}/ubi9-node-workspace:latest` (OpenShift internal registry, mirrored from GHCR)
+- **Pod:** single container under the `coder-firewall-runner` SA, with `NET_ADMIN` + `SYS_ADMIN` caps; UID injected by `coder-firewall-scc`
 - **Storage:** ReadWriteOnce PVC at `/home/coder`
 - **Anti-affinity:** soft preference to spread workspaces across nodes
-- **Dotfiles default:** `https://gitlab.zambruhni.com/lab/dotfiles` (branch `main`) — editable per-workspace
-- **Auto-cloned repo:** `https://gitlab.zambruhni.com/lab/cool-project` — the demo SDK whose `CLAUDE.md` / `AGENTS.md` drive the demo flow
+- **Dotfiles default:** `https://github.com/ausbru87/dotfiles` (branch `demo`) — editable per-workspace
+- **Auto-cloned repo:** `https://gitlab.zambruhni.com/lab/cool-project.git` — the demo SDK whose `CLAUDE.md` / `AGENTS.md` drive the demo flow; clear `git_repo` to skip
 
 ## Deploying
 
-Committed changes to `templates/demo-ai-gov-firewall/` are picked up by the GitLab CI pipeline:
-
-1. **Validate** — `terraform fmt -check`, `init`, `validate`, `plan` on every MR
-2. **Push** — on `main`, `coder templates push demo-ai-gov-firewall` runs automatically and the new version is activated
-
-Existing running workspaces don't auto-update — they stay on whatever version they were created from until stopped and restarted.
-
-Manual push (only if CI is broken):
-
 ```bash
-coder templates push demo-ai-gov-firewall \
-  --directory templates/demo-ai-gov-firewall \
-  --name "$(git rev-parse --short HEAD)" \
-  --message "manual: <reason>" \
-  --activate \
+cd coder-templates/demo-ai-gov-firewall-ocp
+coder templates push demo-ai-gov-firewall-ocp \
+  --directory . \
+  --variable namespace=coder-workspaces \
+  --variable image_registry=image-registry.openshift-image-registry.svc:5000/coder-workspaces \
   --yes
 ```
+
+Existing running workspaces don't auto-update — they stay on whatever version
+they were created from until stopped and restarted.
