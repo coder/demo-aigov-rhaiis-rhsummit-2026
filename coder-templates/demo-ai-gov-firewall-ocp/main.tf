@@ -708,7 +708,24 @@ module "code-server" {
   # from the internet — air-gapped posture + no flaky-download startup failures.
   install_prefix = "/usr/lib/code-server"
   offline        = true
-  order          = 1
+
+  # Disable GitHub Copilot / Copilot Chat in code-server so it neither runs nor
+  # surfaces in the UI and conflicts with the demo's own AI agents.
+  #   - extensions.allowed: VS Code policy; the server refuses to ENABLE the
+  #     Copilot extensions even if a user side-loads them ("*"=true keeps every
+  #     other extension allowed — verified this does not over-block).
+  #   - github.copilot.enable=false: no inline completions if ever present.
+  #   - chat.commandCenter.enabled=false: hides the chat entry point in the UI.
+  machine-settings = {
+    "extensions.allowed" = {
+      "*"                   = true
+      "github.copilot"      = false
+      "github.copilot-chat" = false
+    }
+    "github.copilot.enable"      = { "*" = false }
+    "chat.commandCenter.enabled" = false
+  }
+  order = 1
 }
 
 # dotfiles — clone and apply user dotfiles on workspace start
