@@ -405,35 +405,29 @@ resource "coder_script" "claude_approve_key" {
   run_on_start = true
   script       = <<-EOT
     #!/usr/bin/env bash
-    set -u
-    CFG="$HOME/.claude.json"
-
-    # Wait up to ~120s for the claude-code module install to finish writing
-    # ~/.claude.json (hasCompletedOnboarding=true lands near the end of
-    # install) so our edit is not clobbered.
-    for _ in $(seq 1 60); do
-      if [ -f "$CFG" ] && jq -e '.hasCompletedOnboarding == true' "$CFG" >/dev/null 2>&1; then
-        break
-      fi
-      sleep 2
-    done
-    sleep 5
-    [ -f "$CFG" ] || echo '{}' > "$CFG"
-
-    KEY="$${ANTHROPIC_API_KEY:-}"
-    if [ -n "$KEY" ]; then
+    # Detached + backgrounded so this NEVER blocks workspace "ready"/startup.
+    # It waits for the claude-code module to finish writing ~/.claude.json
+    # (hasCompletedOnboarding=true), then merges the current ANTHROPIC_API_KEY
+    # suffix (last 20 chars) into customApiKeyResponses.approved so Claude Code
+    # does not prompt. Output is redirected to a log file (NOT the agent's
+    # stdout pipe) so the orphaned background job can't hold the script open.
+    (
+      set -u
+      CFG="$HOME/.claude.json"
+      for _ in $(seq 1 60); do
+        [ -f "$CFG" ] && jq -e '.hasCompletedOnboarding == true' "$CFG" >/dev/null 2>&1 && break
+        sleep 2
+      done
+      [ -f "$CFG" ] || echo '{}' > "$CFG"
+      KEY="$${ANTHROPIC_API_KEY:-}"
+      [ -n "$KEY" ] || exit 0
       SUFFIX=$(printf %s "$KEY" | tail -c 20)
       tmp=$(mktemp)
-      if jq --arg k "$SUFFIX" '
-            .customApiKeyResponses = (.customApiKeyResponses // {"approved": [], "rejected": []})
-            | .customApiKeyResponses.approved = (((.customApiKeyResponses.approved // []) + [$k]) | unique)
-            | .customApiKeyResponses.rejected = ((.customApiKeyResponses.rejected // []) - [$k])
-          ' "$CFG" > "$tmp" 2>/dev/null && mv "$tmp" "$CFG"; then
-        echo "Pre-approved ANTHROPIC_API_KEY in $CFG (Claude Code will not prompt)."
-      else
-        rm -f "$tmp"; echo "Warning: could not pre-approve ANTHROPIC_API_KEY."
-      fi
-    fi
+      jq --arg k "$SUFFIX" '.customApiKeyResponses = (.customApiKeyResponses // {"approved":[],"rejected":[]}) | .customApiKeyResponses.approved = (((.customApiKeyResponses.approved // []) + [$k]) | unique) | .customApiKeyResponses.rejected = ((.customApiKeyResponses.rejected // []) - [$k])' "$CFG" > "$tmp" 2>/dev/null \
+        && mv "$tmp" "$CFG" && echo "Pre-approved ANTHROPIC_API_KEY." \
+        || rm -f "$tmp"
+    ) >/tmp/claude-approve-key.log 2>&1 &
+    disown 2>/dev/null || true
     exit 0
   EOT
 }
