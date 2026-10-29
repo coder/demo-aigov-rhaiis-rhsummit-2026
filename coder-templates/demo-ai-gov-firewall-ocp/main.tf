@@ -631,6 +631,58 @@ module "claude-code" {
   model    = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
+# Pre-approve the ANTHROPIC_API_KEY so Claude Code never shows its
+# "Detected a custom API key ... Do you want to use this API key?" prompt on
+# first use. Claude Code matches on the LAST 20 CHARACTERS it stores in
+# ~/.claude.json under customApiKeyResponses.approved. Our key is the Coder
+# session token, which rotates every workspace start, so this runs on_start.
+# Modeled on the proven partner reference
+# (greg-the-coder/partner-ai-dlc-gitops awshp-k8s-with-claude-code). The
+# coder/claude-code module writes ~/.claude.json during install, so we wait
+# for it to settle (hasCompletedOnboarding=true) before merging our entry.
+# (The approval lives in ~/.claude.json; the model-lock + permission bypass we
+# write to ~/.claude/settings.json in startup_script are a different file.)
+resource "coder_script" "claude_approve_key" {
+  count        = data.coder_workspace.me.start_count
+  agent_id     = coder_agent.main.id
+  display_name = "Claude Code: pre-approve API key"
+  icon         = "/icon/claude.svg"
+  run_on_start = true
+  script       = <<-EOT
+    #!/usr/bin/env bash
+    set -u
+    CFG="$HOME/.claude.json"
+
+    # Wait up to ~120s for the claude-code module install to finish writing
+    # ~/.claude.json (hasCompletedOnboarding=true lands near the end of
+    # install) so our edit is not clobbered.
+    for _ in $(seq 1 60); do
+      if [ -f "$CFG" ] && jq -e '.hasCompletedOnboarding == true' "$CFG" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 2
+    done
+    sleep 5
+    [ -f "$CFG" ] || echo '{}' > "$CFG"
+
+    KEY="$${ANTHROPIC_API_KEY:-}"
+    if [ -n "$KEY" ]; then
+      SUFFIX=$(printf %s "$KEY" | tail -c 20)
+      tmp=$(mktemp)
+      if jq --arg k "$SUFFIX" '
+            .customApiKeyResponses = (.customApiKeyResponses // {"approved": [], "rejected": []})
+            | .customApiKeyResponses.approved = (((.customApiKeyResponses.approved // []) + [$k]) | unique)
+            | .customApiKeyResponses.rejected = ((.customApiKeyResponses.rejected // []) - [$k])
+          ' "$CFG" > "$tmp" 2>/dev/null && mv "$tmp" "$CFG"; then
+        echo "Pre-approved ANTHROPIC_API_KEY in $CFG (Claude Code will not prompt)."
+      else
+        rm -f "$tmp"; echo "Warning: could not pre-approve ANTHROPIC_API_KEY."
+      fi
+    fi
+    exit 0
+  EOT
+}
+
 # Codex — pinned standalone binary + config.toml from base_config_toml
 # (model: GPT-5.6 Luna). Also wrapped by boundary.
 module "codex" {
