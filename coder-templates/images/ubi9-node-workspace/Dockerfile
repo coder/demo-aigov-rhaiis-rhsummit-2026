@@ -77,6 +77,19 @@ RUN curl -fsSL https://code-server.dev/install.sh \
     && chmod -R a+rX /usr/lib/code-server \
     && /usr/lib/code-server/bin/code-server --version
 
+# Unlink GitHub Copilot from the code-server (VS Code) CORE. This build's
+# product.json hardcodes `defaultChatAgent` -> GitHub.copilot, which is what
+# makes the built-in Chat panel / "Set up Copilot" surface appear regardless of
+# installed extensions. Strip it so Copilot is not wired into core at all. The
+# templates ALSO set `chat.disableAIFeatures = true` (user setting) to hide the
+# chat UI entirely; this is the air-gapped, belt-and-suspenders half.
+RUN PJ="$(find /usr/lib/code-server -name product.json -path '*/vscode/*' | head -1)" \
+    && test -n "$PJ" \
+    && jq 'del(.defaultChatAgent)' "$PJ" > "$PJ.tmp" \
+    && mv "$PJ.tmp" "$PJ" \
+    && ! jq -e 'has("defaultChatAgent")' "$PJ" >/dev/null \
+    && echo "Removed defaultChatAgent from $PJ"
+
 # Re-apply OCP-friendly home perms after the root-owned installs above
 # (corepack writes shims to /usr/lib/node_modules, but anything that
 # touched /home/coder needs to stay group-writable).

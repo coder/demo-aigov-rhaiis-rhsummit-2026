@@ -709,21 +709,24 @@ module "code-server" {
   install_prefix = "/usr/lib/code-server"
   offline        = true
 
-  # Disable GitHub Copilot / Copilot Chat in code-server so it neither runs nor
-  # surfaces in the UI and conflicts with the demo's own AI agents.
-  #   - extensions.allowed: VS Code policy; the server refuses to ENABLE the
-  #     Copilot extensions even if a user side-loads them ("*"=true keeps every
-  #     other extension allowed — verified this does not over-block).
-  #   - github.copilot.enable=false: no inline completions if ever present.
-  #   - chat.commandCenter.enabled=false: hides the chat entry point in the UI.
+  # Disable GitHub Copilot / Copilot Chat in code-server so it does not surface
+  # in the UI and conflict with the demo's own AI agents. In this code-server
+  # build the chat panel is baked into VS Code CORE (product.json
+  # defaultChatAgent -> GitHub.copilot), NOT an extension, so the real
+  # kill-switch is chat.disableAIFeatures (application scope => USER settings).
+  # The workspace image additionally strips defaultChatAgent from product.json,
+  # and extensions.allowed blocks the Copilot extensions from being enabled if
+  # side-loaded.
+  settings = {
+    "chat.disableAIFeatures" = true
+  }
   machine-settings = {
+    "chat.disableAIFeatures" = true
     "extensions.allowed" = {
       "*"                   = true
       "github.copilot"      = false
       "github.copilot-chat" = false
     }
-    "github.copilot.enable"      = { "*" = false }
-    "chat.commandCenter.enabled" = false
   }
   order = 1
 }
