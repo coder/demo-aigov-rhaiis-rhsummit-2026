@@ -37,7 +37,7 @@ web_search tool and closes the stream mid-turn.
 
 Workspace base images live in a SHARED tree at `coder-templates/images/`, NOT per-template:
 - `ubi9-base-workspace` — UBI 9.7 + EPEL + zsh/tmux/neovim/fzf/ripgrep + starship + the SCC-compliant `uid_entrypoint.sh` pattern
-- `ubi9-node-workspace` — `FROM ubi9-base-workspace` + NodeSource Node 22 + corepack
+- `ubi9-node-workspace` — `FROM ubi9-base-workspace` + NodeSource Node 22 + corepack + C++ toolchain + **code-server pre-baked at `/usr/lib/code-server`** (so the `-ocp` templates run it offline via the `coder/code-server` module's `offline = true` instead of downloading from `code-server.dev` on every start)
 - `agents-config-tools` — UBI9-minimal + aws + jq + curl, used by the `coder-agents-config` Argo Job
 
 Both `-ocp` templates `FROM` `ubi9-node-workspace:latest`. Built by `.github/workflows/build-images.yml` on changes under `coder-templates/images/**`.

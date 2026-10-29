@@ -61,6 +61,22 @@ RUN dnf install -y --nodocs --setopt=install_weak_deps=False \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 
+# code-server — pre-baked so workspaces don't download it from code-server.dev
+# on every start. That runtime download is flaky (transient TLS resets have
+# left workspaces with a missing /tmp/code-server/bin/code-server and code-server
+# never starting) and it violates this demo's air-gapped posture (the cluster
+# should not reach the public internet for workspace software). Installed via
+# the official standalone method to a fixed, read-only system prefix. The
+# coder/code-server module in every -ocp template is configured with
+#   offline = true, install_prefix = "/usr/lib/code-server"
+# so it runs THIS copy and never fetches from the internet. Pin the version to
+# the module's previous default (v4.144.0); bump this ARG to upgrade.
+ARG CODE_SERVER_VERSION=4.144.0
+RUN curl -fsSL https://code-server.dev/install.sh \
+      | sh -s -- --method=standalone --prefix=/usr/lib/code-server --version="${CODE_SERVER_VERSION}" \
+    && chmod -R a+rX /usr/lib/code-server \
+    && /usr/lib/code-server/bin/code-server --version
+
 # Re-apply OCP-friendly home perms after the root-owned installs above
 # (corepack writes shims to /usr/lib/node_modules, but anything that
 # touched /home/coder needs to stay group-writable).

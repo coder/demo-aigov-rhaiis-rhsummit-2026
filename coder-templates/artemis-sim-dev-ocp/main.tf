@@ -283,8 +283,15 @@ module "code-server" {
   agent_id  = coder_agent.main.id
   folder    = "/home/coder"
   subdomain = true
-  group     = "Web IDEs"
-  order     = 1
+
+  # Run the code-server binary pre-baked into the workspace image
+  # (ubi9-node-workspace: /usr/lib/code-server) instead of downloading it from
+  # code-server.dev on every start. offline=true => the module never fetches
+  # from the internet — air-gapped posture + no flaky-download startup failures.
+  install_prefix = "/usr/lib/code-server"
+  offline        = true
+  group          = "Web IDEs"
+  order          = 1
 }
 
 # dotfiles — clone and apply user dotfiles on workspace start
