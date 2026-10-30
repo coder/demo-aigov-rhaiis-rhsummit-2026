@@ -58,10 +58,10 @@ resource "null_resource" "inspector_ec2_scan_mode" {
   triggers = {
     scan_mode = "EC2_HYBRID"
     region    = var.aws_region
-    profile   = var.aws_profile
+    profile   = var.aws_profile == null ? "" : var.aws_profile
   }
 
   provisioner "local-exec" {
-    command = "aws inspector2 update-configuration --region ${self.triggers.region} --profile ${self.triggers.profile} --ec2-configuration '{\"scanMode\":\"${self.triggers.scan_mode}\"}'"
+    command = "aws inspector2 update-configuration --region ${self.triggers.region} ${self.triggers.profile != "" ? "--profile ${self.triggers.profile}" : ""} --ec2-configuration '{\"scanMode\":\"${self.triggers.scan_mode}\"}'"
   }
 }
