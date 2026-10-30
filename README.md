@@ -44,6 +44,12 @@ Deeper architectural narrative + every decision behind these choices: [`docs/arc
 
 > Rendered with the [`diagrams`](https://diagrams.mingrammer.com/) library — the same engine behind the [AWS Diagram MCP Server](https://awslabs.github.io/mcp/servers/aws-diagram-mcp-server/) — so AWS components use the official AWS architecture icon set. Source: [`docs/architecture-diagram.py`](docs/architecture-diagram.py); regenerate with `python3 docs/architecture-diagram.py` (needs Graphviz + `pip install diagrams`). A text/ASCII version follows below.
 
+**Platform / GitOps component view** — the OpenShift platform, the OLM operators (`gitops/operator/`), and every Argo CD `Application` (`gitops/apps/` app-of-apps) grouped by sync-wave, including Coder and its satellites:
+
+![OpenShift platform and Argo CD app-of-apps component diagram](docs/images/architecture-openshift.png)
+
+> Source: [`docs/architecture-openshift.py`](docs/architecture-openshift.py); regenerate with `python3 docs/architecture-openshift.py`.
+
 ```
 ┌─── AWS account (your account, your region) ────────────────────────────────────┐
 │                                                                                │
