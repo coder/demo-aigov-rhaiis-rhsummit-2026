@@ -42,8 +42,13 @@
 #   GITLAB_API=https://gitlab.rhsummit.coderdemo.io/api/v4
 #
 # Requires admin kube context (so the Coder admin token can be read
-# from the SealedSecret) + SSH to the GitLab EC2 host (for the
-# admin PAT mint via gitlab-rails runner).
+# from the SealedSecret) + AWS credentials with SSM + EC2 read access
+# (the GitLab admin PAT is minted via SSM Run Command — the VM is
+# SSM-managed and has no public SSH).
+#
+# Extra env vars (with defaults):
+#   GL_AWS_PROFILE=ocp-deploy-acct   (AWS CLI profile for SSM/EC2 + tf output)
+#   CLUSTER_NAME=cluster             (used for the GitLab Name-tag fallback)
 
 set -euo pipefail
 
@@ -54,6 +59,8 @@ DEMO_PERSONAS="${DEMO_PERSONAS:-alice,bob,demoadm}"
 DEMO_PROJECTS="${DEMO_PROJECTS:-alice/artemis-sim}"
 CODER_URL="${CODER_URL:-https://coder.apps.cluster.rhsummit.coderdemo.io}"
 GITLAB_API="${GITLAB_API:-https://gitlab.rhsummit.coderdemo.io/api/v4}"
+GL_AWS_PROFILE="${GL_AWS_PROFILE:-ocp-deploy-acct}"
+CLUSTER_NAME="${CLUSTER_NAME:-cluster}"
 
 MODE="interactive"
 case "${1:-}" in
@@ -94,27 +101,48 @@ if [ -z "$CODER_TOKEN" ]; then
   echo "$(red ERROR): could not read coder-admin-token from cluster" >&2; exit 1
 fi
 
-GITLAB_IP=""
+# Resolve the GitLab EC2 instance ID. The VM is SSM-managed and public SSH is
+# closed, so we mint the admin PAT via SSM Run Command (below) rather than SSH.
+GITLAB_IID=""
 if [ -d "${TF_DIR}" ]; then
-  GITLAB_IP=$(cd "${TF_DIR}" && env -u AWS_ENDPOINT_URL AWS_PROFILE=ocp-deploy-acct \
-    terraform output -raw gitlab_public_ip 2>/dev/null || echo "")
+  GITLAB_IID=$(cd "${TF_DIR}" && env -u AWS_ENDPOINT_URL AWS_PROFILE="$GL_AWS_PROFILE" \
+    terraform output -raw gitlab_instance_id 2>/dev/null || echo "")
 fi
-if [ -z "$GITLAB_IP" ]; then
-  echo "$(yellow WARN): could not read gitlab_public_ip from terraform; will skip GitLab cleanup" >&2
+# Fallback: find it by Name tag.
+if [ -z "$GITLAB_IID" ]; then
+  GITLAB_IID=$(AWS_PROFILE="$GL_AWS_PROFILE" aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=${CLUSTER_NAME}-gitlab" \
+              "Name=instance-state-name,Values=running" \
+    --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null | awk '{print $1}')
+fi
+if [ -z "$GITLAB_IID" ]; then
+  echo "$(yellow WARN): could not resolve GitLab instance id; will skip GitLab cleanup" >&2
 fi
 
-# Mint a short-lived GitLab admin PAT (only if we got the IP).
+# Mint a short-lived GitLab admin PAT via SSM Run Command. gitlab-rails runs as
+# root under the SSM agent, so no sudo needed. We pass the Ruby one-liner as a
+# JSON params file to avoid quoting hell; %q(...) keeps the Ruby quote-free.
 GITLAB_PAT=""
-if [ -n "$GITLAB_IP" ]; then
-  log "Minting 1-hour GitLab admin PAT…"
-  GITLAB_PAT=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o UserKnownHostsFile=/dev/null \
-    ec2-user@"$GITLAB_IP" 'sudo gitlab-rails runner "
-      u = User.find_by(username: %q(root))
-      t = u.personal_access_tokens.create!(scopes: [:api, :admin_mode], name: %q(demo-reset), expires_at: 1.hour.from_now)
-      puts t.token
-    "' 2>/dev/null | tail -1)
+if [ -n "$GITLAB_IID" ]; then
+  log "Minting 1-hour GitLab admin PAT via SSM (instance $GITLAB_IID)…"
+  RUBY='u=User.find_by(username: %q(root)); t=u.personal_access_tokens.create!(scopes:[:api,:admin_mode], name:%q(demo-reset), expires_at: 1.hour.from_now); puts t.token'
+  PARAMS_FILE=$(mktemp)
+  printf '{"commands":["gitlab-rails runner \\"%s\\""]}' "$RUBY" > "$PARAMS_FILE"
+  CID=$(AWS_PROFILE="$GL_AWS_PROFILE" aws ssm send-command \
+    --instance-ids "$GITLAB_IID" --document-name AWS-RunShellScript \
+    --comment "demo-reset PAT mint" --parameters file://"$PARAMS_FILE" \
+    --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+  rm -f "$PARAMS_FILE"
+  if [ -n "$CID" ]; then
+    AWS_PROFILE="$GL_AWS_PROFILE" aws ssm wait command-executed \
+      --command-id "$CID" --instance-id "$GITLAB_IID" 2>/dev/null || true
+    GITLAB_PAT=$(AWS_PROFILE="$GL_AWS_PROFILE" aws ssm get-command-invocation \
+      --command-id "$CID" --instance-id "$GITLAB_IID" \
+      --query 'StandardOutputContent' --output text 2>/dev/null \
+      | grep -oE 'glpat-[A-Za-z0-9_-]+' | head -1)
+  fi
   if [ -z "$GITLAB_PAT" ] || [ "${GITLAB_PAT:0:6}" != "glpat-" ]; then
-    echo "$(yellow WARN): failed to mint GitLab admin PAT — will skip GitLab cleanup" >&2
+    echo "$(yellow WARN): failed to mint GitLab admin PAT via SSM — will skip GitLab cleanup" >&2
     GITLAB_PAT=""
   fi
 fi
