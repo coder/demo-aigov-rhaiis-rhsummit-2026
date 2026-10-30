@@ -40,6 +40,10 @@ Deeper architectural narrative + every decision behind these choices: [`docs/arc
 
 ## Architecture at a glance
 
+![AWS architecture diagram of the RH Summit 2026 Coder + Red Hat demo](docs/images/architecture-aws.png)
+
+> Rendered with the [`diagrams`](https://diagrams.mingrammer.com/) library — the same engine behind the [AWS Diagram MCP Server](https://awslabs.github.io/mcp/servers/aws-diagram-mcp-server/) — so AWS components use the official AWS architecture icon set. Source: [`docs/architecture-diagram.py`](docs/architecture-diagram.py); regenerate with `python3 docs/architecture-diagram.py` (needs Graphviz + `pip install diagrams`). A text/ASCII version follows below.
+
 ```
 ┌─── AWS account (your account, your region) ────────────────────────────────────┐
 │                                                                                │
