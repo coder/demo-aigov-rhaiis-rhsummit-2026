@@ -15,7 +15,8 @@ GITLAB_HOSTNAME="${gitlab_hostname}"
 REGISTRY_HOSTNAME="${registry_hostname}"
 KEYCLOAK_HOSTNAME="${keycloak_hostname}"
 LE_EMAIL="${letsencrypt_email}"
-OIDC_CLIENT_SECRET='${oidc_client_secret}'
+KEYCLOAK_SECRET_ARN="${keycloak_secret_arn}"
+AWS_REGION_SM="${aws_region}"
 GITLAB_ROOT_PASSWORD='${gitlab_root_password}'
 
 # ── 1. Wait for the data volume (attached as /dev/nvme1n1 on AL2023 Nitro) ──
@@ -47,6 +48,32 @@ dnf install -y --allowerasing curl postfix policycoreutils openssh-server perl d
 # in containers without competing with GitLab for kernel resources.
 systemctl enable --now docker
 usermod -aG docker ec2-user
+
+# ── 2b. Fetch the GitLab OIDC client secret from AWS Secrets Manager ─────────
+# No OIDC secret is baked into user-data or Terraform state. The instance
+# profile grants read-only secretsmanager:GetSecretValue on exactly this one
+# secret ARN. awscli v2 is not in the AL2023 base AMI, so install it (dnf
+# package if present, else the official bundle); jq parses the JSON bundle.
+dnf install -y jq unzip >/dev/null 2>&1 || true
+if ! command -v aws >/dev/null 2>&1; then
+  dnf install -y awscli-2 >/dev/null 2>&1 || dnf install -y awscli >/dev/null 2>&1 || {
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
+    (cd /tmp && unzip -q awscliv2.zip && ./aws/install)
+  }
+fi
+
+# Disable xtrace around the fetch so the secret never lands in the boot log.
+set +x
+SECRET_JSON="$(aws secretsmanager get-secret-value --region "$${AWS_REGION_SM}" \
+  --secret-id "$${KEYCLOAK_SECRET_ARN}" --query SecretString --output text)"
+OIDC_CLIENT_SECRET="$(printf '%s' "$SECRET_JSON" | jq -r '.gitlab_client_secret')"
+unset SECRET_JSON
+if [ -z "$${OIDC_CLIENT_SECRET}" ] || [ "$${OIDC_CLIENT_SECRET}" = "null" ]; then
+  echo "FATAL: could not read gitlab_client_secret from $${KEYCLOAK_SECRET_ARN}" >&2
+  exit 1
+fi
+set -x
+echo "Fetched gitlab OIDC client secret from Secrets Manager (len=$${#OIDC_CLIENT_SECRET})."
 
 # ── 3. GitLab CE Omnibus ─────────────────────────────────────────────────────
 # Official GitLab package repo for RHEL-family. Works on AL2023 because

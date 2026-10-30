@@ -74,6 +74,21 @@ output "coder_bedrock_role_arn" {
   value       = aws_iam_role.coder_bedrock.arn
 }
 
+output "keycloak_realm_secret_arn" {
+  description = "ARN of the AWS Secrets Manager secret holding Keycloak demo-realm persona passwords + OIDC client secrets. Consumed in-cluster via External Secrets Operator."
+  value       = aws_secretsmanager_secret.keycloak_demo_realm.arn
+}
+
+output "keycloak_realm_secret_name" {
+  description = "Name of the AWS Secrets Manager secret for the Keycloak demo realm. Retrieve values with: aws secretsmanager get-secret-value --secret-id <this> --query SecretString --output text | jq ."
+  value       = aws_secretsmanager_secret.keycloak_demo_realm.name
+}
+
+output "external_secrets_role_arn" {
+  description = "IAM role ARN assumed by the External Secrets Operator SA (external-secrets/eso-aws-sm) via IRSA to read the Keycloak realm secret. Annotate the SA with this ARN."
+  value       = aws_iam_role.external_secrets.arn
+}
+
 output "bedrock_model_catalog_url" {
   description = "Direct link to the Bedrock Model catalog in the AWS console for this region. AWS retired the per-model approval page; serverless models now auto-enable on first invocation. First-time Anthropic users may be prompted for a one-page use-case form when opening the model — fill it in once, approval is typically minutes."
   value       = "https://${var.aws_region}.console.aws.amazon.com/bedrock/home?region=${var.aws_region}#/foundation-models"

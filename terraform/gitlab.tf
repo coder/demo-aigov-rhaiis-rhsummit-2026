@@ -32,11 +32,11 @@ module "gitlab" {
   ssh_ingress_cidr    = var.gitlab_ssh_ingress_cidr
   ingress_lb_hostname = var.gitlab_ingress_lb_hostname
 
-  # OIDC client secret — must match the value in
-  # manifests/keycloak/realm-demo.yaml's `gitlab` client. See the
-  # comment in that file for the booth-grade hardcoded-secret rationale.
-  keycloak_oidc_client_secret = var.gitlab_keycloak_oidc_client_secret
-  gitlab_root_password        = var.gitlab_root_password
+  # OIDC client secret source: the GitLab VM fetches its `gitlab` client secret
+  # at boot from the AWS Secrets Manager realm bundle (via its instance
+  # profile). No secret value passes through Terraform variables or state.
+  keycloak_secret_arn  = aws_secretsmanager_secret.keycloak_demo_realm.arn
+  gitlab_root_password = var.gitlab_root_password
 }
 
 ###############################################################################

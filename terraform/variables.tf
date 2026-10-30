@@ -201,13 +201,6 @@ variable "gitlab_ingress_lb_hostname" {
   default     = ""
 }
 
-variable "gitlab_keycloak_oidc_client_secret" {
-  description = "OIDC client secret for the `gitlab` client in the Keycloak `demo` realm. Hardcoded in manifests/keycloak/realm-demo.yaml as 'gitlab-client-secret-demo-2026' — pass the same value here so cloud-init wires the right secret into gitlab.rb's omniauth_providers config."
-  type        = string
-  default     = "gitlab-client-secret-demo-2026"
-  sensitive   = true
-}
-
 variable "gitlab_root_password" {
   description = "Initial password for GitLab's `root` user. Primary booth login is Keycloak SSO; root is for emergency console access only (e.g. when SSO is misconfigured). Set in terraform.tfvars."
   type        = string

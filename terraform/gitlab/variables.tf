@@ -82,10 +82,9 @@ variable "ssh_ingress_cidr" {
   description = "CIDR allowed to SSH (port 22) to the GitLab VM. EMPTY (default) = no public SSH rule at all — operators use SSM Session Manager (the instance has the AmazonSSMManagedInstanceCore profile). Set a specific CIDR (e.g. an office IP /32) only if you need direct SSH; never 0.0.0.0/0 (Security Hub EC2.19/EC2.18). HTTPS (443) is always 0.0.0.0/0 since the booth uses it."
 }
 
-variable "keycloak_oidc_client_secret" {
+variable "keycloak_secret_arn" {
   type        = string
-  sensitive   = true
-  description = "OIDC client secret for the `gitlab` client in the Keycloak `demo` realm. Hardcoded in manifests/keycloak/realm-demo.yaml for booth-grade simplicity; passed here so cloud-init can wire GitLab's `omniauth_providers` config."
+  description = "ARN of the AWS Secrets Manager secret holding the Keycloak demo-realm credentials (JSON). cloud-init fetches the `gitlab_client_secret` key from it at boot via the instance profile (IRSA-free; EC2 instance role) and wires GitLab's `omniauth_providers` config. No OIDC secret is baked into Terraform state or user-data."
 }
 
 variable "gitlab_root_password" {

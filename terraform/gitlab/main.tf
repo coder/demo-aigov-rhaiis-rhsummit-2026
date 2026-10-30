@@ -127,6 +127,24 @@ resource "aws_iam_role_policy_attachment" "gitlab_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Read-only access to the Keycloak demo-realm secret so cloud-init can fetch
+# the `gitlab` OIDC client secret at boot (keeps it out of Terraform state and
+# out of the rendered user-data). Scoped to the single secret ARN.
+data "aws_iam_policy_document" "gitlab_keycloak_secret" {
+  statement {
+    sid       = "ReadKeycloakRealmSecret"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [var.keycloak_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "gitlab_keycloak_secret" {
+  name   = "read-keycloak-realm-secret"
+  role   = aws_iam_role.gitlab.name
+  policy = data.aws_iam_policy_document.gitlab_keycloak_secret.json
+}
+
 resource "aws_iam_instance_profile" "gitlab" {
   name = "${var.cluster_name}-gitlab"
   role = aws_iam_role.gitlab.name
@@ -195,7 +213,8 @@ resource "aws_instance" "gitlab" {
     registry_hostname    = local.registry_hostname
     keycloak_hostname    = local.keycloak_hostname
     letsencrypt_email    = local.letsencrypt_email
-    oidc_client_secret   = var.keycloak_oidc_client_secret
+    keycloak_secret_arn  = var.keycloak_secret_arn
+    aws_region           = var.aws_region
     gitlab_root_password = var.gitlab_root_password
   })
 
