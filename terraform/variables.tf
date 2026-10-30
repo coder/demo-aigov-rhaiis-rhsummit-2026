@@ -190,9 +190,9 @@ variable "gitlab_ssh_key_name" {
 }
 
 variable "gitlab_ssh_ingress_cidr" {
-  description = "CIDR allowed to SSH (port 22) to the GitLab VM. Default 0.0.0.0/0 — narrow this to your office IP in terraform.tfvars before applying to prod."
+  description = "CIDR allowed to SSH (port 22) to the GitLab VM. EMPTY (default) = no public SSH — the VM is SSM-managed, so operators use SSM Session Manager instead (keeps Security Hub EC2.19/EC2.18 green). Set a specific office /32 only if you need direct SSH; never 0.0.0.0/0."
   type        = string
-  default     = "0.0.0.0/0"
+  default     = ""
 }
 
 variable "gitlab_keycloak_oidc_client_secret" {

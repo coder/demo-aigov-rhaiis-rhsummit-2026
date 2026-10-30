@@ -87,8 +87,11 @@ coder_oidc_provider_url = ""     # unused — GitHub OAuth replaces OIDC, see de
 #     --public-key-material fileb://~/.ssh/id_ed25519.pub
 gitlab_ssh_key_name = "rhsummit-gitlab"
 
-# Narrow to your office IP for prod. Default open is fine for booth.
-# gitlab_ssh_ingress_cidr = "0.0.0.0/0"
+# SSH to the GitLab VM is CLOSED by default (the VM is SSM-managed — use
+# `aws ssm start-session --target <instance-id>` for operator access). Only set
+# this if you specifically need direct SSH, and scope it to an office /32 —
+# never 0.0.0.0/0 (Security Hub EC2.19/EC2.18).
+# gitlab_ssh_ingress_cidr = "203.0.113.10/32"
 
 # OIDC client secret — keep in sync with the value hardcoded in
 # manifests/keycloak/realm-demo.yaml's `gitlab` client. Default is fine

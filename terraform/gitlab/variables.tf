@@ -54,8 +54,8 @@ variable "ssh_key_name" {
 
 variable "ssh_ingress_cidr" {
   type        = string
-  default     = "0.0.0.0/0"
-  description = "CIDR allowed to SSH (port 22) to the GitLab VM. Default open — narrow this in tfvars to your office IP. HTTPS (443) is always 0.0.0.0/0 since the booth uses it."
+  default     = ""
+  description = "CIDR allowed to SSH (port 22) to the GitLab VM. EMPTY (default) = no public SSH rule at all — operators use SSM Session Manager (the instance has the AmazonSSMManagedInstanceCore profile). Set a specific CIDR (e.g. an office IP /32) only if you need direct SSH; never 0.0.0.0/0 (Security Hub EC2.19/EC2.18). HTTPS (443) is always 0.0.0.0/0 since the booth uses it."
 }
 
 variable "keycloak_oidc_client_secret" {

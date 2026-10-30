@@ -67,13 +67,20 @@ resource "aws_security_group" "gitlab" {
     description = "HTTP - Lets Encrypt HTTP-01 challenge + initial setup"
   }
 
-  # SSH for operators. Default is wide-open; narrow in tfvars.
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.ssh_ingress_cidr]
-    description = "SSH - operator access (default open; narrow in tfvars)"
+  # SSH for operators. CLOSED BY DEFAULT (var.ssh_ingress_cidr = "") —
+  # operators use SSM Session Manager (the instance carries the
+  # AmazonSSMManagedInstanceCore profile below), so no public port 22 is
+  # needed. Set var.ssh_ingress_cidr to a specific CIDR to re-open direct SSH.
+  # Leaving it empty keeps Security Hub EC2.19 (CRITICAL) / EC2.18 (HIGH) green.
+  dynamic "ingress" {
+    for_each = var.ssh_ingress_cidr != "" ? [var.ssh_ingress_cidr] : []
+    content {
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+      description = "SSH - operator access (explicitly scoped via ssh_ingress_cidr)"
+    }
   }
 
   egress {
@@ -87,6 +94,48 @@ resource "aws_security_group" "gitlab" {
   tags = {
     Name = "${var.cluster_name}-gitlab"
   }
+}
+
+###############################################################################
+# IAM instance profile — makes the VM AWS Systems Manager managed.
+#
+# Fixes Security Hub SSM.1, and in turn:
+#   - SSM Session Manager replaces public SSH for operator access (so the
+#     security group can keep port 22 closed — EC2.19 / EC2.18).
+#   - SSM Patch Manager / Run Command can drive OS + gitlab-ce patching
+#     reproducibly (the earlier "no patching mechanism" gap).
+#   - Inspector agent-based (SSM) scanning activates for this instance.
+# AmazonSSMManagedInstanceCore is the AWS-managed least-privilege policy for
+# exactly this; the VM needs no other AWS API access.
+###############################################################################
+
+data "aws_iam_policy_document" "gitlab_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "gitlab" {
+  name               = "${var.cluster_name}-gitlab"
+  assume_role_policy = data.aws_iam_policy_document.gitlab_assume.json
+
+  tags = {
+    Name = "${var.cluster_name}-gitlab"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "gitlab_ssm" {
+  role       = aws_iam_role.gitlab.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "gitlab" {
+  name = "${var.cluster_name}-gitlab"
+  role = aws_iam_role.gitlab.name
 }
 
 ###############################################################################
@@ -122,7 +171,14 @@ resource "aws_instance" "gitlab" {
   subnet_id              = var.public_subnet_id
   vpc_security_group_ids = [aws_security_group.gitlab.id]
   key_name               = var.ssh_key_name
-  iam_instance_profile   = null # no IAM role for now; GitLab doesn't need AWS API access
+  iam_instance_profile   = aws_iam_instance_profile.gitlab.name # SSM-managed (Session Manager + Patch Manager + Inspector agent)
+
+  # Require IMDSv2 (token-backed) — blocks SSRF-style metadata theft and
+  # satisfies Security Hub EC2.8.
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
 
   # The cluster VPC's "public" subnets don't auto-assign public IPs
   # by default (map_public_ip_on_launch=false on the subnet), so set
