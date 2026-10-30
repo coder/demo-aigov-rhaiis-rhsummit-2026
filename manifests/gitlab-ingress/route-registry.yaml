@@ -1,0 +1,33 @@
+# Edge Route for the GitLab container registry. TLS terminates at the router
+# (cert-manager cert for registry.gitlab.rhsummit.coderdemo.io); the backend is
+# the SAME GitLab VM on :80 (Omnibus runs the registry as a second nginx vhost,
+# selected by Host header). Docker/podman push/pull hit https on 443 at the
+# router.
+#
+# Registry blob uploads are large and chunked, so bump the HAProxy timeout
+# well above the 30s default to avoid mid-push resets.
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: gitlab-registry
+  namespace: gitlab-ingress
+  labels:
+    app.kubernetes.io/name: gitlab-registry
+    app.kubernetes.io/part-of: coder-aigov-demo
+  annotations:
+    cert-manager.io/issuer-kind: ClusterIssuer
+    cert-manager.io/issuer-name: letsencrypt-prod
+    haproxy.router.openshift.io/timeout: 600s
+spec:
+  host: registry.gitlab.rhsummit.coderdemo.io
+  to:
+    kind: Service
+    name: gitlab-external
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

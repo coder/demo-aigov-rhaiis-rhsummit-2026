@@ -19,8 +19,13 @@ output "registry_hostname" {
 }
 
 output "gitlab_public_ip" {
-  description = "EC2 public IP. Useful for SSH troubleshooting."
+  description = "EC2 public IP — empty now that GitLab is on a private subnet (no public IP). Kept for output-contract back-compat; use gitlab_private_ip + SSM Session Manager for ops."
   value       = aws_instance.gitlab.public_ip
+}
+
+output "gitlab_private_ip" {
+  description = "EC2 private IP (pinned). This is the address the OpenShift Route's EndpointSlice targets. Reach the host for ops via: aws ssm start-session --target <gitlab_instance_id>."
+  value       = aws_instance.gitlab.private_ip
 }
 
 output "gitlab_instance_id" {

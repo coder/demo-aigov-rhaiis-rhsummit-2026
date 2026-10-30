@@ -1,0 +1,33 @@
+# Edge Route for the GitLab UI + HTTPS git. TLS terminates here using a
+# cert-manager-issued cert for gitlab.rhsummit.coderdemo.io (letsencrypt-prod
+# ClusterIssuer, DNS-01 via Route53 — same hosted zone as the cluster). The
+# backend (gitlab-external Service -> VM:80) is plain HTTP.
+#
+# Hostname is unchanged from the old public-VM setup; only the path changed
+# (now via the OpenShift router instead of the VM's public IP).
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: gitlab
+  namespace: gitlab-ingress
+  labels:
+    app.kubernetes.io/name: gitlab
+    app.kubernetes.io/part-of: coder-aigov-demo
+  annotations:
+    cert-manager.io/issuer-kind: ClusterIssuer
+    cert-manager.io/issuer-name: letsencrypt-prod
+    # Git clones/pushes over HTTPS can be slow on large repos; give them room.
+    haproxy.router.openshift.io/timeout: 300s
+spec:
+  host: gitlab.rhsummit.coderdemo.io
+  to:
+    kind: Service
+    name: gitlab-external
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

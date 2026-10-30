@@ -195,6 +195,12 @@ variable "gitlab_ssh_ingress_cidr" {
   default     = ""
 }
 
+variable "gitlab_ingress_lb_hostname" {
+  description = "OpenShift router/ingress LB DNS name. When set, Route 53 CNAMEs for gitlab.<base_domain> + registry.gitlab.<base_domain> point at it (traffic enters via the OCP edge Routes). Leave empty to let the blue/green cutover flip DNS out-of-band. Get it with: oc -n openshift-ingress get svc router-default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'."
+  type        = string
+  default     = ""
+}
+
 variable "gitlab_keycloak_oidc_client_secret" {
   description = "OIDC client secret for the `gitlab` client in the Keycloak `demo` realm. Hardcoded in manifests/keycloak/realm-demo.yaml as 'gitlab-client-secret-demo-2026' — pass the same value here so cloud-init wires the right secret into gitlab.rb's omniauth_providers config."
   type        = string

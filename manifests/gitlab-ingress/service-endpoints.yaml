@@ -1,0 +1,45 @@
+# Selector-less Service + hand-managed EndpointSlice pointing at the GitLab VM
+# on the private subnet. This lets OpenShift Routes (route-gitlab.yaml /
+# route-registry.yaml) front an EXTERNAL target (an EC2 VM, not a pod) through
+# the cluster router. GitLab serves plain HTTP on :80; TLS terminates at the
+# edge Routes.
+#
+# The target IP is the pinned private IP from the Terraform gitlab module
+# (var.private_ip, default 10.0.20.10). If you change that, change it here too.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab-external
+  namespace: gitlab-ingress
+  labels:
+    app.kubernetes.io/name: gitlab
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  type: ClusterIP
+  # No selector — endpoints are supplied manually via the EndpointSlice below.
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: gitlab-external-1
+  namespace: gitlab-ingress
+  labels:
+    # Links this EndpointSlice to the Service of the same name.
+    kubernetes.io/service-name: gitlab-external
+    app.kubernetes.io/part-of: coder-aigov-demo
+addressType: IPv4
+ports:
+  - name: http
+    port: 80
+    protocol: TCP
+endpoints:
+  - addresses:
+      - "10.0.20.10" # GitLab VM private IP (Terraform gitlab module var.private_ip)
+    conditions:
+      ready: true

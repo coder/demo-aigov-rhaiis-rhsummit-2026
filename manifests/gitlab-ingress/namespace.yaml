@@ -1,0 +1,9 @@
+# Namespace for the GitLab edge-ingress plumbing (Service + EndpointSlice +
+# Routes that front the external GitLab VM through the OpenShift router).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-ingress
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo

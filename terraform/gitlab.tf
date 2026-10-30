@@ -21,13 +21,16 @@ module "gitlab" {
   base_domain  = var.base_domain
   aws_region   = var.aws_region
   vpc_id       = module.vpc.vpc_id
-  # First public subnet — same AZ as the primary GPU node + the rest
-  # of the cluster's pre-pinned-to-1a workload.
-  public_subnet_id = module.vpc.public_subnets[0]
-  instance_type    = var.gitlab_instance_type
-  ami_id           = var.gitlab_ami_id
-  ssh_key_name     = var.gitlab_ssh_key_name
-  ssh_ingress_cidr = var.gitlab_ssh_ingress_cidr
+  vpc_cidr     = module.vpc.vpc_cidr_block
+  # GitLab lives on the PRIVATE subnet in us-east-1a (same AZ as its EBS data
+  # volume) with no public IP — reached only through the OpenShift edge Route
+  # (manifests/gitlab-ingress/) and SSM Session Manager for ops.
+  private_subnet_id   = module.vpc.private_subnets[0]
+  instance_type       = var.gitlab_instance_type
+  ami_id              = var.gitlab_ami_id
+  ssh_key_name        = var.gitlab_ssh_key_name
+  ssh_ingress_cidr    = var.gitlab_ssh_ingress_cidr
+  ingress_lb_hostname = var.gitlab_ingress_lb_hostname
 
   # OIDC client secret — must match the value in
   # manifests/keycloak/realm-demo.yaml's `gitlab` client. See the

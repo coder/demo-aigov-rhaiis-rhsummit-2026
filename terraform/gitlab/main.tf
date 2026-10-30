@@ -45,26 +45,20 @@ data "aws_route53_zone" "cluster" {
 
 resource "aws_security_group" "gitlab" {
   name        = "${var.cluster_name}-gitlab"
-  description = "GitLab CE on EC2 - HTTPS for booth/cluster, SSH for ops"
+  description = "GitLab CE on EC2 - HTTP from the in-cluster OpenShift router only; no public ingress"
   vpc_id      = var.vpc_id
 
-  # HTTPS — booth laptops + in-cluster webhook callbacks
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTPS - booth + cluster"
-  }
-
-  # HTTP — needed transiently for Let's Encrypt HTTP-01 ACME challenge.
-  # Once the cert is in place gitlab-ctl auto-redirects to HTTPS.
+  # HTTP from INSIDE THE VPC ONLY. TLS is terminated at the OpenShift edge
+  # Route (cert-manager); the router pods (running on cluster nodes in this
+  # VPC) reach GitLab's nginx over plain HTTP on :80. No public 80/443 — the
+  # VM has no public IP and is not reachable from the internet. Both the
+  # gitlab and registry vhosts are served off :80 (nginx routes by Host).
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "HTTP - Lets Encrypt HTTP-01 challenge + initial setup"
+    cidr_blocks = [var.vpc_cidr]
+    description = "HTTP - from OpenShift router (in-VPC) only; TLS terminates at the edge Route"
   }
 
   # SSH for operators. CLOSED BY DEFAULT (var.ssh_ingress_cidr = "") —
@@ -168,7 +162,8 @@ locals {
 resource "aws_instance" "gitlab" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
-  subnet_id              = var.public_subnet_id
+  subnet_id              = var.private_subnet_id
+  private_ip             = var.private_ip
   vpc_security_group_ids = [aws_security_group.gitlab.id]
   key_name               = var.ssh_key_name
   iam_instance_profile   = aws_iam_instance_profile.gitlab.name # SSM-managed (Session Manager + Patch Manager + Inspector agent)
@@ -180,11 +175,11 @@ resource "aws_instance" "gitlab" {
     http_tokens   = "required"
   }
 
-  # The cluster VPC's "public" subnets don't auto-assign public IPs
-  # by default (map_public_ip_on_launch=false on the subnet), so set
-  # it on the instance. R53 records below reference public_ip and
-  # require a non-null value at apply time.
-  associate_public_ip_address = true
+  # No public IP — the VM sits on a private subnet and is reachable only via
+  # the OpenShift edge Route (HTTPS) and SSM Session Manager (ops). Clears
+  # Security Hub EC2.9. Egress (dnf, SSM, Keycloak OIDC discovery) goes out
+  # through the VPC NAT gateway.
+  associate_public_ip_address = false
 
   # Bigger root volume than default — GitLab Omnibus + Docker images
   # + Let's Encrypt + runners all share root.
@@ -220,27 +215,31 @@ resource "aws_volume_attachment" "gitlab_data" {
 }
 
 ###############################################################################
-# Route 53 A records:
-#   - gitlab.<base_domain>          → EC2 public IP (main UI + Git)
-#   - registry.gitlab.<base_domain> → EC2 public IP (container registry)
-#
-# Both point at the same EC2 instance — Omnibus runs the registry on
-# the same VM behind its own NGINX vhost and requests a separate
-# Let's Encrypt cert for the registry hostname.
+# Route 53 -> OpenShift ingress load balancer.
+#   gitlab.<base_domain> + registry.gitlab.<base_domain> now resolve to the
+#   cluster's router/ingress LB (the GitLab VM has no public IP). TLS + host
+#   routing happen at the OpenShift edge Routes (manifests/gitlab-ingress/).
+#   Set ingress_lb_hostname to the router LB DNS name:
+#     oc -n openshift-ingress get svc router-default \
+#       -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+#   Left empty => no records managed here (lets the blue/green cutover flip DNS
+#   out-of-band, or external-dns manage it).
 ###############################################################################
 
 resource "aws_route53_record" "gitlab" {
+  count   = var.ingress_lb_hostname != "" ? 1 : 0
   zone_id = data.aws_route53_zone.cluster.zone_id
   name    = local.gitlab_hostname
-  type    = "A"
+  type    = "CNAME"
   ttl     = 60
-  records = [aws_instance.gitlab.public_ip]
+  records = [var.ingress_lb_hostname]
 }
 
 resource "aws_route53_record" "registry" {
+  count   = var.ingress_lb_hostname != "" ? 1 : 0
   zone_id = data.aws_route53_zone.cluster.zone_id
   name    = local.registry_hostname
-  type    = "A"
+  type    = "CNAME"
   ttl     = 60
-  records = [aws_instance.gitlab.public_ip]
+  records = [var.ingress_lb_hostname]
 }

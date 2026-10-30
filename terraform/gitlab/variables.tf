@@ -26,7 +26,25 @@ variable "vpc_id" {
 
 variable "public_subnet_id" {
   type        = string
-  description = "Public subnet ID in the cluster's VPC, in the same AZ as the primary GPU node. Public so booth laptops can reach GitLab directly."
+  default     = ""
+  description = "DEPRECATED (kept for back-compat). GitLab now lives on a PRIVATE subnet behind an OpenShift edge Route — see private_subnet_id. Leave empty."
+}
+
+variable "private_subnet_id" {
+  type        = string
+  description = "Private subnet ID in the cluster's VPC, in the SAME AZ as the EBS data volume (us-east-1a). GitLab has no public IP; it is reached only through the OpenShift edge Route + via SSM Session Manager for ops."
+}
+
+variable "private_ip" {
+  type        = string
+  default     = "10.0.20.10"
+  description = "Static private IP for the GitLab VM inside private_subnet_id (must be within that subnet's CIDR and free). Pinned so the OpenShift Route's EndpointSlice is stable/reproducible across instance rebuilds."
+}
+
+variable "vpc_cidr" {
+  type        = string
+  default     = "10.0.0.0/16"
+  description = "VPC CIDR — the GitLab security group allows HTTP (port 80) only from inside the VPC (the OpenShift router pods), never the public internet."
 }
 
 variable "instance_type" {
@@ -50,6 +68,12 @@ variable "data_volume_size_gb" {
 variable "ssh_key_name" {
   type        = string
   description = "EC2 KeyPair name for SSH access. Created out-of-band; referenced by name."
+}
+
+variable "ingress_lb_hostname" {
+  type        = string
+  default     = ""
+  description = "OpenShift router/ingress LB DNS name. When set, Route 53 CNAMEs for gitlab.<base_domain> and registry.gitlab.<base_domain> point here (traffic enters through the OCP edge Routes). Empty => this module manages no DNS (blue/green cutover flips it out-of-band). Get it via: oc -n openshift-ingress get svc router-default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'."
 }
 
 variable "ssh_ingress_cidr" {

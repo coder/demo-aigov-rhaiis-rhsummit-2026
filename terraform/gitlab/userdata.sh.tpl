@@ -62,14 +62,22 @@ EXTERNAL_URL="https://$${GITLAB_HOSTNAME}" dnf install -y gitlab-ce
 cat > /etc/gitlab/gitlab.rb <<EOF
 external_url 'https://$${GITLAB_HOSTNAME}'
 
-# Let's Encrypt — Omnibus handles issuance + renewal via cron.
-# Renews 30 days before expiry; uses HTTP-01 challenge (needs port 80
-# reachable from public internet, which our SG allows).
-letsencrypt['enable'] = true
-letsencrypt['contact_emails'] = ['$${LE_EMAIL}']
-letsencrypt['auto_renew'] = true
-letsencrypt['auto_renew_hour'] = 3
-letsencrypt['auto_renew_minute'] = 0
+# TLS is terminated at the OpenShift edge Route (cert-manager). GitLab runs
+# PLAIN HTTP on :80 behind the router; external_url stays https so GitLab
+# generates correct https links from the X-Forwarded-* headers the router
+# sends. No Let's Encrypt on the VM — that's why port 80 can be closed to the
+# world and the box can live on a private subnet with no public IP.
+letsencrypt['enable'] = false
+nginx['listen_port'] = 80
+nginx['listen_https'] = false
+nginx['proxy_set_headers'] = {
+  'X-Forwarded-Proto' => 'https',
+  'X-Forwarded-Ssl'   => 'on'
+}
+
+# GitLab Agent Server (KAS) is unused in this demo (no agentk in-cluster, no
+# projects with agents) — disable it to drop the grpcs surface.
+gitlab_kas['enable'] = false
 
 # ── OIDC against Keycloak ─────────────────────────────────────────
 # The `gitlab` confidential OIDC client lives in the Keycloak demo
@@ -137,7 +145,10 @@ gitlab_pages['enable'] = false
 #     against a "their company's registry" rather than a public one.
 registry_external_url 'https://$${REGISTRY_HOSTNAME}'
 registry['enable'] = true
-registry_nginx['letsencrypt_contact_emails'] = ['$${LE_EMAIL}']
+# Registry vhost also runs plain HTTP on :80 behind the edge Route (same single
+# Omnibus nginx, routed by Host header); TLS terminates at the OpenShift router.
+registry_nginx['listen_port'] = 80
+registry_nginx['listen_https'] = false
 EOF
 
 # ── 5. Reconfigure (applies gitlab.rb, triggers Let's Encrypt cert request) ─

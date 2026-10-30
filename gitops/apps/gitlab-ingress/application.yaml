@@ -1,0 +1,29 @@
+# Argo CD Application — GitLab edge-ingress (Service + EndpointSlice + Routes
+# that expose the private-subnet GitLab VM through the OpenShift router with
+# cert-manager TLS). Plain-directory source, same pattern as the bridge app.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitlab-ingress
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/coder/demo-aigov-rhaiis-rhsummit-2026.git
+    targetRevision: chore/coder-2.37.6-upgrade
+    path: manifests/gitlab-ingress
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitlab-ingress
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
