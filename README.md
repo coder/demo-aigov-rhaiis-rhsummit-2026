@@ -307,6 +307,8 @@ Subsequent booth-week rebuilds: ~50–60 min.
 - [`docs/identity-architecture.md`](docs/identity-architecture.md) — the dual-IdP design (Keycloak + GitHub) and the demo persona role bindings.
 - [`docs/demo-flow-persona-setup.md`](docs/demo-flow-persona-setup.md) — what alice (or any persona) runs end-to-end. Includes the bridge no-op matrix.
 - [`docs/maas-and-self-hosted-options.md`](docs/maas-and-self-hosted-options.md) — customer-facing reading on Red Hat's MaaS path + OSS alternatives + air-gap considerations.
+- [`docs/secrets.md`](docs/secrets.md) — AWS Secrets Manager + ESO (Keycloak realm) and Sealed Secrets (everything else).
+- [`docs/environment-change-summary.md`](docs/environment-change-summary.md) — what changed to reach the current state + remaining gaps/follow-ups.
 - [`services/bridge/README.md`](services/bridge/README.md) — bridge service reference (env vars, smoke tests, build).
 
 ---
