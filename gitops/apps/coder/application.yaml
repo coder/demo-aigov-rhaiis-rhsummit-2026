@@ -135,15 +135,19 @@ spec:
             # Keycloak OIDC — demo-user path. Issuer URL points at the
             # in-cluster RHBK demo realm; Coder fetches the OIDC discovery
             # doc and derives auth/token/userinfo endpoints automatically.
-            # Client secret is the booth-grade hardcoded value in
-            # manifests/keycloak/realm-demo.yaml; for prod, move to
-            # the coder-secrets SealedSecret with a `oidc-client-secret` key.
+            # Client secret is sourced from AWS Secrets Manager via the
+            # External Secrets Operator (ExternalSecret coder-oidc-client-secret
+            # -> Secret of the same name, key oidc-client-secret). No secret
+            # value is stored in git. See manifests/external-secrets/.
             - name: CODER_OIDC_ISSUER_URL
               value: "https://keycloak.apps.cluster.rhsummit.coderdemo.io/realms/demo"
             - name: CODER_OIDC_CLIENT_ID
               value: "coder"
             - name: CODER_OIDC_CLIENT_SECRET
-              value: "coder-client-secret-demo-2026"
+              valueFrom:
+                secretKeyRef:
+                  name: coder-oidc-client-secret
+                  key: oidc-client-secret
             - name: CODER_OIDC_SIGN_IN_TEXT
               value: "Keycloak"
             # Icon: served by our own Keycloak instance under the master

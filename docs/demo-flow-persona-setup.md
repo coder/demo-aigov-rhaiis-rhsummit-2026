@@ -15,7 +15,10 @@ the operator explicitly wipes it).
 
 Visit `https://coder.apps.cluster.rhsummit.coderdemo.io` → click
 **"Sign in with Keycloak (demo users)"** → enter alice's Keycloak
-credentials (`alice` / `Demo2026!`). On first login, Coder auto-creates
+credentials (username `alice`; password from AWS Secrets Manager —
+`aws secretsmanager get-secret-value --region us-east-1 --secret-id
+rhsummit/keycloak/demo-realm --query SecretString --output text | jq -r
+.alice_password`). On first login, Coder auto-creates
 a User row for alice and applies the OIDC role mappings (developers
 group → site `auditor` + org `developers-auditor-plus` custom role).
 

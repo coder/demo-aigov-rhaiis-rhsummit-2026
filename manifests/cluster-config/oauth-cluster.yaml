@@ -50,8 +50,9 @@ spec:
       openID:
         clientID: openshift
         clientSecret:
-          # Sealed manifest: manifests/secrets/keycloak-openshift-oidc-secret.yaml
-          # (created in the same commit as this OAuth CR change)
+          # Sourced from AWS Secrets Manager via the External Secrets Operator
+          # (ExternalSecret keycloak-openshift-oidc-secret in openshift-config;
+          # see manifests/external-secrets/). No secret value stored in git.
           name: keycloak-openshift-oidc-secret
         # OIDC issuer URL — discovery doc auto-resolves all endpoints
         # (auth, token, userinfo, jwks).

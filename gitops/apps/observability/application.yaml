@@ -150,9 +150,10 @@ spec:
 
             # Multiple env-from-secret sources:
             #   - secret-postgres: PGPASSWORD for postgres-exporter datasource
-            #   - keycloak-grafana-oidc-secret: client_secret for the
-            #     Keycloak generic_oauth provider (key `client_secret`
-            #     exposed as $GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET).
+            #   - keycloak-grafana-oidc-secret: client secret for the Keycloak
+            #     generic_oauth provider (key GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET).
+            #     Sourced from AWS Secrets Manager via the External Secrets
+            #     Operator (see manifests/external-secrets/); not stored in git.
             envFromSecrets:
               - name: secret-postgres
                 optional: false

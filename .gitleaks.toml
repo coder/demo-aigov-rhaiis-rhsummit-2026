@@ -1,0 +1,32 @@
+# gitleaks configuration for demo-aigov-rhaiis-rhsummit-2026.
+#
+# Extends the default gitleaks ruleset and adds allowlist entries for the
+# INTENTIONAL non-secrets in this repo (demo fixtures, placeholders, and the
+# sealed/encrypted material that is safe to commit).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional non-secrets and encrypted-at-rest material"
+
+# Paths that only ever contain ciphertext, placeholders, or templates.
+paths = [
+  # Bitnami SealedSecrets — ciphertext, only the in-cluster key can decrypt.
+  '''manifests/secrets/.*\.ya?ml''',
+  # Vendored Sealed Secrets Helm chart (upstream templates/CRDs/dashboards).
+  '''gitops/charts/sealed-secrets/.*''',
+  # OpenShift installer scratch output (gitignored, but belt-and-suspenders).
+  '''terraform/\.cluster/.*''',
+  # Secret-free realm template — placeholders only (__ALICE_PW__, etc.).
+  '''manifests/keycloak/realm-template-configmap\.yaml''',
+]
+
+# Specific intentional dummy values / placeholders.
+regexes = [
+  # Egress-firewall exfiltration test payload (proves the firewall blocks it).
+  '''fake-api-key-abc123''',
+  # Realm template placeholders.
+  '''__[A-Z_]+__''',
+  # GitLab root password CHANGEME placeholder default.
+  '''ChangeMeBeforeApply2026!''',
+]
