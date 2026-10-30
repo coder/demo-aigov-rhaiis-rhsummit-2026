@@ -173,15 +173,17 @@ y += bandB_h + 12
 # ---- Band C: argo app-of-apps by wave ------------------------------------
 rrect(MARGIN, y, W - 2 * MARGIN, bandC_h, 12, "#ffffff", "#dbe2ea", 1.5)
 text(MARGIN + PANEL_PAD, y + 22, "Argo CD app-of-apps  ·  gitops/apps/  —  applied in sync-wave order", 13, "#0f172a", "bold")
-# arrow hint
-text(W - MARGIN - PANEL_PAD, y + 22, "sync order  →", 11, "#2563eb", "bold", "end")
+# direction hint (left = earliest wave, right = latest)
+text(W - MARGIN - PANEL_PAD, y + 22, "applied earliest (left)  →  latest (right)", 11, "#2563eb", "bold", "end")
 cy0 = y + 34
 x = MARGIN + PANEL_PAD
-for (wlabel, apps), chh in zip(waves, col_heights):
-    # wave header
-    rrect(x, cy0, COLW, 22, 7, "#eef2f7", "#d7dee8", 1)
-    text(x + COLW / 2, cy0 + 15, wlabel, 11.5, "#334155", "bold", "middle")
-    yy = cy0 + 30
+for seq, ((wlabel, apps), chh) in enumerate(zip(waves, col_heights), start=1):
+    # wave header: left-to-right sequence badge + wave value (clear − minus sign)
+    rrect(x, cy0, COLW, 24, 7, "#eef2f7", "#d7dee8", 1)
+    add(f'<circle cx="{x + 16:.0f}" cy="{cy0 + 12:.0f}" r="8.5" fill="#334155"/>')
+    text(x + 16, cy0 + 15.5, str(seq), 10, "#ffffff", "bold", "middle")
+    text(x + 32, cy0 + 16, wlabel.replace("-", "\u2212"), 11.5, "#334155", "bold", "start")
+    yy = cy0 + 32
     for app, desc, ns, concern in apps:
         h = card(x, yy, COLW, app, desc, ns, concern)
         yy += h + 10
