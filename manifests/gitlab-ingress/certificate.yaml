@@ -1,0 +1,61 @@
+# TLS for the GitLab + registry edge Routes.
+#
+# gitlab.rhsummit.coderdemo.io / registry.gitlab.rhsummit.coderdemo.io are NOT
+# under the cluster's *.apps wildcard, so the router's default cert can't serve
+# them. We issue a dedicated SAN cert via cert-manager (letsencrypt-prod,
+# DNS-01/Route53) into the `gitlab-tls` Secret, and the Routes reference it with
+# spec.tls.externalCertificate (OCP 4.21, RouteExternalCertificate feature gate
+# enabled). cert-manager auto-renews the Secret; the router picks up changes.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gitlab-tls
+  namespace: gitlab-ingress
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo
+spec:
+  secretName: gitlab-tls
+  duration: 2160h    # 90d
+  renewBefore: 360h  # 15d
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - gitlab.rhsummit.coderdemo.io
+    - registry.gitlab.rhsummit.coderdemo.io
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# The OpenShift router service account must be allowed to read the referenced
+# secret for spec.tls.externalCertificate to work.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitlab-tls-router-reader
+  namespace: gitlab-ingress
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+    resourceNames: ["gitlab-tls"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitlab-tls-router-reader
+  namespace: gitlab-ingress
+  labels:
+    app.kubernetes.io/part-of: coder-aigov-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gitlab-tls-router-reader
+subjects:
+  - kind: ServiceAccount
+    name: router
+    namespace: openshift-ingress

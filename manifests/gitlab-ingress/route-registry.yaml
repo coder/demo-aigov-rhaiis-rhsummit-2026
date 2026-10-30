@@ -16,8 +16,6 @@ metadata:
     app.kubernetes.io/name: gitlab-registry
     app.kubernetes.io/part-of: coder-aigov-demo
   annotations:
-    cert-manager.io/issuer-kind: ClusterIssuer
-    cert-manager.io/issuer-name: letsencrypt-prod
     haproxy.router.openshift.io/timeout: 600s
 spec:
   host: registry.gitlab.rhsummit.coderdemo.io
@@ -30,4 +28,6 @@ spec:
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
+    externalCertificate:
+      name: gitlab-tls
   wildcardPolicy: None

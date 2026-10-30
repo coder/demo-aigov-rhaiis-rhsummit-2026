@@ -15,8 +15,6 @@ metadata:
     app.kubernetes.io/name: gitlab
     app.kubernetes.io/part-of: coder-aigov-demo
   annotations:
-    cert-manager.io/issuer-kind: ClusterIssuer
-    cert-manager.io/issuer-name: letsencrypt-prod
     # Git clones/pushes over HTTPS can be slow on large repos; give them room.
     haproxy.router.openshift.io/timeout: 300s
 spec:
@@ -30,4 +28,8 @@ spec:
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
+    # cert-manager-issued SAN cert (see certificate.yaml); router SA is granted
+    # read access via the RBAC in that file.
+    externalCertificate:
+      name: gitlab-tls
   wildcardPolicy: None
