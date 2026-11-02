@@ -6,11 +6,11 @@
 
 | Slot | Booth demo | Sovereign / production narrative |
 |---|---|---|
-| Cluster | OpenShift 4.21 IPI on AWS (3-node converged + 1× L40S g6e.2xlarge GPU node) | OpenShift on AWS GovCloud, Azure Gov, on-prem, or behind a sovereign software factory pattern (e.g., Big Bang / UDS Core) |
+| Cluster | OpenShift 4.21 IPI on AWS (3-node converged + 1× A10G g5.2xlarge GPU node) | OpenShift on AWS GovCloud, Azure Gov, on-prem, or behind a sovereign software factory pattern (e.g., Big Bang / UDS Core) |
 | Classification | Unclassified | Up to IL5 with Coder's Air-Gapped Deployments Bundle |
 | Scale (concurrent workspaces) | 5–25 (warm-pool of 3) | 10K reference architecture is live; 50K reference architecture is in flight |
 | Cloud-side LLM provider | AWS Bedrock via the `cluster-coder-bedrock` IRSA role + central OpenAI key (no per-user BYOK) | Bedrock, Azure OpenAI, Anthropic direct, or any OpenAI-compatible — typically routed to a sovereign provider in regulated deployments |
-| Sovereign LLM provider | RHAIIS on a single L40S GPU node serving `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` (`--tool-call-parser hermes`); Llama 3.3 70B Instruct documented as the swap target if Qwen origins come into question (decision §27) | RHAIIS on GPU nodes, optionally fronted by `llm-d` for distributed serving; FIPS-validated images, RHEL UBI base |
+| Sovereign LLM provider | RHAIIS on a single A10G (`g5.2xlarge`) serving `Qwen/Qwen2.5-7B-Instruct` (`--tool-call-parser hermes`, 16K, TP-1) via `vllm-executor`; heavier Llama-3.3-70B INT4 TP-2 on L40S is committed but scaled to 0 for cost (decisions §27/§31/§32) | RHAIIS on GPU nodes, optionally fronted by `llm-d` for distributed serving; FIPS-validated images, RHEL UBI base |
 | Pillars | Modernize-led, Multiply-centerpiece (Coder Agents beta), Migrate-substrate | Same shape; Migrate substrate becomes the dominant story in air-gap |
 
 ## High-level architecture (booth shape; same shape lands in sovereign environments)
@@ -70,7 +70,7 @@
 │   · AWS Bedrock via IRSA (no static keys; 7 subscribed Anthropic       │
 │     inference profiles — see bedrock-model-sub.md)                     │
 │   · OpenAI direct via central key in coder-secrets.openai-api-key      │
-│   · RHAIIS / vLLM serving Qwen2.5-Coder-32B-AWQ on L40S                │
+│   · RHAIIS / vLLM serving Qwen2.5-7B-Instruct on A10G                  │
 │     (OpenAI-compatible; --tool-call-parser hermes)                     │
 │   · Git host (GitHub OAuth scoped to demo-rhsummit-users org)          │
 │   · Grafana Loki (Bridge + Boundaries unified audit logs)              │
@@ -147,11 +147,11 @@ RHAIIS exposes the OpenAI-compatible API:
 | `mistral` | Mistral / Mixtral Instruct |
 | `deepseek` | DeepSeek-V3 / DeepSeek-Coder-V2.5+ |
 
-For the booth demo we use **Llama 3.3 70B Instruct INT4** (`RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16`) with the `llama3_json` parser, tensor-parallel-2 across 2× L40S on a g6e.12xlarge node, 32K context. See `manifests/rhaiis/vllm-planner-tp.yaml` for the launch flags. Decisions §31 + §32 + §33 capture how we got here:
+The cost-effective default actually running is **`Qwen/Qwen2.5-7B-Instruct`** on a single **A10G (`g5.2xlarge`)** via the `vllm-executor` Deployment — `hermes` tool-call parser, tensor-parallel-1, 16K context (`ai-providers/rhaiis.tf` registers it at `http://vllm-executor.ocp-ai.svc.cluster.local:8000/v1`). The heavier **Llama 3.3 70B Instruct INT4** (`RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16`, `llama3_json`, tensor-parallel-2, 32K on 2× L40S / `g6e.12xlarge` — see `manifests/rhaiis/vllm-planner-tp.yaml`) is committed but **scaled to 0** for cost. Decisions §31 + §32 + §33 capture how we got here:
 - §27 was the initial "Qwen 2.5 32B AWQ on L40S" decision (now scaled to 0 — `manifests/rhaiis/vllm-deployment.yaml` + `manifests/machinesets/gpu-l40s.yaml`, both `coder.com/lifecycle: deprecated`).
 - §30 documented the temporary revert to Qwen after the Llama V1-engine silent hang.
 - §31 found the V0 + `--enforce-eager` + 8K-context recipe that works on single L40S.
-- §32 extended that to tensor-parallel-2 for 32K context on g6e.12xlarge — current production.
+- §32 extended that to tensor-parallel-2 for 32K context on g6e.12xlarge — the big-model scale-up (currently scaled to 0; the live cluster runs the A10G / Qwen-7B executor).
 - §33 documented the V1 + cudagraphs retest on rhoai-2.22-cuda (still broken; staying on V0).
 
 **Always validate with `scripts/tool-call-smoke-test.sh` before going live** — wrong parser is a silent failure mode where text returns instead of structured `tool_calls`.
@@ -160,8 +160,8 @@ For the booth demo we use **Llama 3.3 70B Instruct INT4** (`RedHatAI/Llama-3.3-7
 
 The following items were tracked in the Red Hat Summit 2026 demo plan. As of 2026-05-11 the booth is live. Status updates land in this repo as they're closed.
 
-- ✅ End-to-end validation of Coder Agents against RHAIIS (Llama 70B INT4 TP-2 in chatd)
-- ✅ RHAIIS on g6e.12xlarge (4× L40S, 2 in use by production TP)
+- ✅ End-to-end validation of Coder Agents against RHAIIS (sovereign) — currently Qwen2.5-7B on the A10G; Llama-70B TP-2 was validated previously on an L40S node (now scaled to 0)
+- ✅ RHAIIS on the A10G `g5.2xlarge` (Qwen2.5-7B, cost-effective default); L40S / `g6e.12xlarge` is the optional heavy scale-up (scaled to 0)
 - ✅ Sprint trigger replaced by `bridge` service: GitLab Issues webhook → Coder workspace + chat. Triggers off `coder-hitl` / `coder-agent[:slug]` labels.
 - ⚠ Backup video of the full demo for booth-network failure (still pending — operator action)
 - ✅ IdP — Keycloak (RHBK) for demo personas, dual-IdP alongside GitHub OAuth for admins

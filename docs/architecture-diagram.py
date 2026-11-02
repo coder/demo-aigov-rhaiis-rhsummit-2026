@@ -83,7 +83,7 @@ with Diagram(
                 with Cluster("OpenShift 4.21 cluster (IPI, STS)"):
                     nodes = [
                         EC2("control/worker ×3\nm6i.4xlarge"),
-                        EC2("GPU node\ng6e.12xlarge · 4× L40S"),
+                        EC2("GPU node\ng5.2xlarge · 1× A10G"),
                     ]
 
                     with Cluster("Platform / GitOps"):
@@ -99,7 +99,7 @@ with Diagram(
                         ws = Pod("workspaces\n(agents)")
 
                     with Cluster("Sovereign LLM (GPU)"):
-                        rhaiis = Pod("RHAIIS vLLM\nLlama 3.3 70B INT4")
+                        rhaiis = Pod("RHAIIS vLLM\nQwen2.5-7B (A10G)")
 
                     with Cluster("Data / Observability"):
                         cnpg = Pod("CNPG Postgres\n(Coder + Keycloak)")

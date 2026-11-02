@@ -35,7 +35,7 @@ platform = [
     ("OAuth + Console", "GitHub + Keycloak IdPs", "identity"),
     ("Ingress router", "edge Routes (TLS)", "networking"),
     ("Control/worker ×3", "m6i.4xlarge", "platform"),
-    ("GPU node", "g6e.12xlarge · 4× L40S", "aigpu"),
+    ("GPU node", "g5.2xlarge · 1× A10G", "aigpu"),
 ]
 operators = [
     ("OpenShift GitOps", "Argo CD · latest", "operator"),
@@ -61,7 +61,7 @@ waves = [
                 ("keycloak", "RHBK · realm demo (3 personas)", "keycloak", "identity")]),
     ("wave 2", [("coder-provisioner", "external provisioner", "coder", "coder"),
                 ("coder-routing", "OCP Routes + wildcard cert", "coder", "networking"),
-                ("rhaiis", "vLLM Llama 3.3 70B INT4 (GPU)", "ocp-ai", "aigpu")]),
+                ("rhaiis", "vLLM Qwen2.5-7B (A10G)", "ocp-ai", "aigpu")]),
     ("wave 3", [("coder-observability", "Grafana / Prom / Loki / AM", "coder-observability", "observability")]),
     ("wave 5", [("coder-agents-config", "chatd providers + models + roles", "coder", "coder")]),
     ("post-sync", [("bridge", "GitLab issue → workspace", "coder", "coder"),

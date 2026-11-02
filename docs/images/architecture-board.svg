@@ -23,7 +23,7 @@
 <rect x="1379" y="100" width="323" height="46" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" />
 <rect x="1379" y="100" width="5" height="46" rx="8" fill="#059669" stroke="none" stroke-width="1" />
 <text x="1391" y="119" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#0f172a" text-anchor="start">GPU node</text>
-<text x="1391" y="135" font-family="Helvetica, Arial, sans-serif" font-size="10" font-weight="normal" fill="#64748b" text-anchor="start">g6e.12xlarge · 4× L40S</text>
+<text x="1391" y="135" font-family="Helvetica, Arial, sans-serif" font-size="10" font-weight="normal" fill="#64748b" text-anchor="start">g5.2xlarge · 1× A10G</text>
 <rect x="22" y="184" width="1696" height="104" rx="12" fill="#ffffff" stroke="#dbe2ea" stroke-width="1.5" />
 <text x="38" y="206" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="start">OLM operators  ·  gitops/operator/  (installed at bootstrap, before Argo CD apps)</text>
 <rect x="38" y="216" width="227" height="46" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" />
@@ -162,7 +162,7 @@
 <rect x="886" y="504" width="200" height="59" rx="8" fill="#ffffff" stroke="#e8edf3" stroke-width="1" />
 <rect x="886" y="504" width="5" height="59" rx="8" fill="#059669" stroke="none" stroke-width="1" />
 <text x="898" y="522" font-family="Helvetica, Arial, sans-serif" font-size="12.5" font-weight="bold" fill="#0f172a" text-anchor="start">rhaiis</text>
-<text x="898" y="536" font-family="Helvetica, Arial, sans-serif" font-size="9.8" font-weight="normal" fill="#51607a" text-anchor="start">vLLM Llama 3.3 70B INT4 (GPU)</text>
+<text x="898" y="536" font-family="Helvetica, Arial, sans-serif" font-size="9.8" font-weight="normal" fill="#51607a" text-anchor="start">vLLM Qwen2.5-7B (A10G)</text>
 <rect x="898" y="548" width="40" height="14" rx="7" fill="#05966922" stroke="#05966955" stroke-width="1" />
 <text x="918" y="558" font-family="Helvetica, Arial, sans-serif" font-size="8.5" font-weight="bold" fill="#059669" text-anchor="middle">ocp-ai</text>
 <rect x="1098" y="334" width="200" height="24" rx="7" fill="#eef2f7" stroke="#d7dee8" stroke-width="1" />

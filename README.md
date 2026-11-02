@@ -10,7 +10,7 @@ Reference architecture + deployable demo for the **Coder + Red Hat** booth at **
 ## What this demo proves
 
 1. **AI agents can be governed at enterprise scale** — every model call goes through Coder's AI Bridge (audited, policy-controlled). Every workspace egress goes through Agent Firewalls.
-2. **You can run the same architecture sovereign or cloud** — RHAIIS (Llama 3.3 70B INT4, tensor-parallel) and AWS Bedrock (Claude Sonnet/Opus) sit behind the same gateway; the workspace neither knows nor cares which one answers.
+2. **You can run the same architecture sovereign or cloud** — RHAIIS (Qwen2.5-7B-Instruct on a single A10G today; scalable to Llama-3.3-70B on L40S) and AWS Bedrock (Claude Sonnet/Opus) sit behind the same gateway; the workspace neither knows nor cares which one answers.
 3. **The whole stack lands on OpenShift with operators + GitOps** — same shape installs on Azure, vSphere, bare-metal, or air-gap.
 4. **Identity is enterprise-grade** — Keycloak (RHBK) for demo personas, GitHub OAuth for admins, dual-IdP into Coder, OpenShift Console, Grafana, and GitLab.
 5. **The "ticket → workspace → agent" loop is the whole demo** — open a GitLab issue, label it `coder-agent`, the bridge spawns a workspace and a Coder Agents chat that drives Llama (or Claude) to investigate and open an MR. Sub-1-minute from click to working agent.
@@ -21,11 +21,11 @@ Reference architecture + deployable demo for the **Coder + Red Hat** booth at **
 
 | Concern | What's deployed |
 |---|---|
-| **Cluster** | OpenShift 4.21 IPI on AWS, 3× `m6i.4xlarge` converged control-plane+worker, 1× `g6e.12xlarge` GPU node (4× L40S 48 GiB) |
+| **Cluster** | OpenShift 4.21 IPI on AWS, 3× `m6i.4xlarge` converged control-plane+worker, 1× `g5.2xlarge` GPU node (1× NVIDIA A10G 24 GiB; cost-effective default — swap in a `g6e.12xlarge`/4× L40S MachineSet for the heavy Llama-70B scale-up) |
 | **GitOps** | Red Hat OpenShift GitOps (Argo CD), app-of-apps from `gitops/apps/` |
 | **Coder** | Helm chart **2.37.6**, image `v2.37.6` |
 | **AI Bridge** | Centralized LLM proxy (AI Gateway; env vars `CODER_AI_GATEWAY_*` as of 2.37.x) at `/api/v2/aibridge/{anthropic,openai}`. Anthropic → Bedrock via IRSA. OpenAI → central org key (`ALLOW_BYOK=false`) |
-| **RHAIIS (sovereign LLM)** | vLLM 0.8.4 V0 engine on RHAIIS image `rhoai-2.20-cuda`, `RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16`, tensor-parallel-2, **32K context** — `vllm-planner-tp.ocp-ai.svc.cluster.local:8000` |
+| **RHAIIS (sovereign LLM)** | RHAIIS image `rhoai-2.20-cuda` (vLLM) serving **`Qwen/Qwen2.5-7B-Instruct`** on the single A10G — tensor-parallel-1, **16K context**, `--tool-call-parser hermes`, at `vllm-executor.ocp-ai.svc.cluster.local:8000`. Heavier `RedHatAI/Llama-3.3-70B-Instruct-quantized.w4a16` (TP-2, 32K via `vllm-planner-tp`) is committed but **scaled to 0** (needs an L40S node). |
 | **chatd** (Coder Agents) | Default model: Claude Sonnet 4 (Bedrock). Sovereign opt-in via `coder-agent:llama` label on issues |
 | **Identity** | **Dual IdP**. Keycloak (RHBK) — `demo` realm, 3 personas one per role tier: `alice` (developer/`/developers`), `bob` (PM/auditor/`/auditors`), `demoadm` (admin/`/admins`). GitHub OAuth — admin tier (gated to `demo-rhsummit-users` org). |
 | **SCM** | **Self-hosted GitLab CE** (`gitlab.rhsummit.coderdemo.io`, EC2 `m7a.2xlarge`, Omnibus + container registry at `registry.gitlab.rhsummit.coderdemo.io`). SSO-only login via Keycloak. GitHub login disabled, GitHub external_auth retained as optional secondary for workspaces. |
@@ -59,7 +59,7 @@ Deeper architectural narrative + every decision behind these choices: [`docs/arc
 │  │   Route 53 records                                                       │   │
 │  │   OpenShift 4.21 IPI install (openshift-install)                         │   │
 │  │   Operator subscriptions (GitOps, cert-manager, CNPG, NFD, NVIDIA, RHBK) │   │
-│  │   GPU MachineSets (gpu-l40s-tp.yaml → 4× L40S g6e.12xlarge)              │   │
+│  │   GPU MachineSet (g5.2xlarge A10G; L40S sets at 0 for cost)              │   │
 │  │   GitLab CE on EC2 (terraform/gitlab/ submodule)                         │   │
 │  │   Argo CD root Application                                               │   │
 │  └─────────────────────────────────────────────────────────────────────────┘   │
@@ -77,7 +77,7 @@ Deeper architectural narrative + every decision behind these choices: [`docs/arc
 │  │  │   cert-manager         ClusterIssuers (LE + R53 DNS-01)           │ │    │
 │  │  │   postgres             CNPG Cluster (3 instances, multi-AZ)       │ │    │
 │  │  │   gpu-stack            NFD + NVIDIA ClusterPolicy                 │ │    │
-│  │  │   rhaiis               vllm-planner-tp (Llama 70B INT4, TP-2)     │ │    │
+│  │  │   rhaiis               vllm-executor (Qwen2.5-7B, A10G)           │ │    │
 │  │  │   coder                Helm chart 2.37.6 — dual-IdP (GitHub OAuth │ │    │
 │  │  │                        + Keycloak OIDC), dual external_auth       │ │    │
 │  │  │                        (slot 0 gitlab, slot 1 github)             │ │    │
@@ -261,15 +261,15 @@ make register-webhook    # register bridge webhook on a GitLab project (DEMO_PRO
 | Component | Instance | Hourly | Monthly | Note |
 |---|---|---|---|---|
 | 3× converged control-plane + worker | m6i.4xlarge | $2.30 | $1,680 | multi-AZ |
-| GPU production | g6e.12xlarge (4× L40S) | $7.45 | $5,440 | hosts Llama 70B TP-2 |
+| GPU (sovereign LLM) | g5.2xlarge (1× A10G) | $1.21 | $885 | hosts Qwen2.5-7B; L40S/g6e scale-up kept at 0 |
 | GitLab self-hosted | m7a.2xlarge | $0.40 | $290 | Omnibus + registry + runner |
 | NAT gateways (3) | — | $0.14 | $98 | one per AZ |
 | EBS gp3 (~1 TiB across nodes) | — | ~$0.10 | ~$73 | |
-| **Total (always-on)** | | **~$10.40/hr** | **~$7,600/mo** | |
+| **Total (always-on)** | | **~$4.15/hr** | **~$3,030/mo** | |
 
-Per-event tear-down + rebuild cadence costs ~$870/wk (50 hrs Mon–Fri uptime).
+Per-event tear-down + rebuild cadence costs ~$210/wk (50 hrs Mon–Fri uptime).
 
-Retired (kept in git for fast-revert, scaled to 0): two single-L40S MachineSets (Qwen 32B planner + Llama experiment), `vllm-executor` (Qwen 7B on A10G). Reactivation = bump `replicas: 1` in the deprecated manifests + their MachineSets.
+Currently serving (cost-effective default): `vllm-executor` — Qwen2.5-7B-Instruct on the single A10G `g5.2xlarge`. Committed but scaled to 0 for cost: the L40S/`g6e` MachineSets + heavier vLLM planners (`vllm-planner-tp*` Llama-3.3-70B INT4 TP-2/TP-4, `vllm-planner` Qwen-32B). Scale up = provision an L40S/`g6e` MachineSet + bump the planner `replicas: 1`.
 
 ---
 
@@ -318,7 +318,7 @@ Subsequent booth-week rebuilds: ~50–60 min.
 
 **Booth-ready** ahead of Red Hat Summit 2026 (May 11). Live cluster running:
 - Coder 2.37.6, 3× replicas, dual-IdP login (Keycloak + GitHub), dual external_auth (GitLab + GitHub).
-- Llama 3.3 70B INT4 tensor-parallel-2 on the production `vllm-planner-tp` Deployment (32K context, 2× L40S).
+- Sovereign LLM: `vllm-executor` serving Qwen2.5-7B-Instruct (16K context, TP-1, `hermes`) on the single A10G `g5.2xlarge`. Heavier Llama-3.3-70B INT4 TP-2 (`vllm-planner-tp`, 32K, L40S) committed but scaled to 0 for cost.
 - chatd default = Claude Sonnet 4 (Bedrock). Sovereign opt-in via `coder-agent:llama` label.
 - Bridge service end-to-end functional: GitLab Issues webhook → Coder workspace + chat creation under the assignee's name.
 - Identity-1 through Identity-8 complete. `make reset` flow committed.

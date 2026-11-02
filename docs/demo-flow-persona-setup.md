@@ -107,7 +107,7 @@ matter.
    - `coder-agent:<slug>` → same as `coder-agent`, but pins the chat
      to a specific model. The slug is a case-insensitive substring
      of a chatd model's display name. Useful slugs in this deployment:
-     - `coder-agent:llama` → Llama 3.3 70B Instruct INT4 (RHAIIS, sovereign)
+     - `coder-agent:llama` → sovereign RHAIIS. Currently backed by `Qwen/Qwen2.5-7B-Instruct` on the A10G (`vllm-executor`); the Llama-3.3-70B backend is scaled to 0 — provision an L40S node + scale `vllm-planner-tp` to 1 for the heavy sovereign demo.
      - `coder-agent:sonnet` → Claude Sonnet 4 via Bedrock
      - `coder-agent:opus` → Claude Opus via Bedrock (latest)
    - Both `coder-hitl` and `coder-agent` labels? `coder-agent` wins.
