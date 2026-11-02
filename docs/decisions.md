@@ -165,6 +165,8 @@ If you change a decision, update this file in the same PR.
 
 **Picked:** `coder_chart_version = "2.33.1"`, image `v2.33.1`. Stable release.
 
+**Update (`chore/coder-2.37.6-upgrade`, live-verified):** upgraded to **Coder 2.37.6** (chart + image `ghcr.io/coder/coder:v2.37.6`). AI Bridge env vars moved from `CODER_AIBRIDGE_*` to `CODER_AI_GATEWAY_*`; workspace AI-CLI templates refactored to Coder Registry modules.
+
 **Considered:** Pin to an RC; track main HEAD.
 
 **Why:** Original choice was `2.33.0-rc.3` because that was the only build with Coder Agents (Early Access experiment). v2.33.1 (released after the 2.33.0 line stabilized) **removed the `agents` experiment flag and promoted Agents to beta** (PR coder/coder#24432) — the demo no longer needs `CODER_EXPERIMENTS=agents`. Stable cut > RC for booth reliability.
@@ -262,6 +264,8 @@ If you change a decision, update this file in the same PR.
 ## 19. Bitnami Sealed Secrets for in-Git secret management (not SOPS, not ESO+ASM, not Vault, not inline)
 
 **Picked:** Bitnami Sealed Secrets controller deployed via Argo CD (`gitops/apps/sealed-secrets/application.yaml`, sync wave -1). Encrypted `SealedSecret` CRs live in `manifests/secrets/` and are decrypted in-cluster by the controller. Workflow doc at [`docs/secrets.md`](secrets.md).
+
+**Update (`chore/coder-2.37.6-upgrade`, live-verified):** the Keycloak **demo-realm credentials** (3 persona passwords + 4 OIDC client secrets) were later moved OUT of git to **AWS Secrets Manager + External Secrets Operator (ESO) via IRSA** — the "ESO + ASM" option considered-and-deferred below. Driver: remove the last plaintext secrets from the repo and enable rotation. **Both patterns now coexist**: ESO/ASM for the Keycloak realm creds, Sealed Secrets for every other platform secret. See [`secrets.md`](secrets.md) and [`environment-change-summary.md`](environment-change-summary.md).
 
 **Considered:**
 - **SOPS + age/GPG + Argo CD plugin (KSOPS / argocd-vault-plugin)** — encryption keys live as files; needs an Argo plugin to decrypt at sync time, which means a custom Argo image or initContainer.

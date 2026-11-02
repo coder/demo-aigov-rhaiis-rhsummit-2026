@@ -87,7 +87,7 @@
 | AI Bridge (a.k.a. AI Gateway) | **AI Gateway** | GA in Coder v2.30. Env vars renamed to `CODER_AI_GATEWAY_*` in 2.37.x (previously `CODER_AIBRIDGE_*`); endpoints `/api/v2/aibridge/{anthropic,openai}`. Anthropic traffic routes to Bedrock via IRSA; OpenAI traffic uses the central `coder-secrets.openai-api-key` with `ALLOW_BYOK=false` (audit-trail integrity). |
 | Agent Firewalls | **Agent Firewalls** | GA in Coder v2.30. NOT currently shipped in either booth template (decision §23). |
 | AI Governance Add-On | **AI Governance Add-On** | GA in Coder v2.30 (Feb 2026) — bundles AI Gateway + Agent Firewalls + audit |
-| Coder Agents (chatd) | **Coder Agents** | **Beta** as of Coder v2.33.1 (no experiment flag required). Provider + model bootstrap is owned by the `coder-agents-config` Argo Job; the registered Anthropic models are an explicit 7-ID Bedrock allowlist (decision §25). |
+| Coder Agents (chatd) | **Coder Agents** | **Beta** as of Coder v2.33.1 (no experiment flag required); cluster now runs **v2.37.6**. Provider + model bootstrap is owned by the `coder-agents-config` Argo Job; the registered Anthropic models are an explicit 7-ID Bedrock allowlist (decision §25). |
 | Coder Tasks | **Coder Tasks** | GA |
 | Prebuilt Workspaces | **Prebuilt Workspaces** | GA |
 | Workspace template | — | OpenShift / RHEL UBI base, FIPS-validated |

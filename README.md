@@ -309,6 +309,7 @@ Subsequent booth-week rebuilds: ~50–60 min.
 - [`docs/maas-and-self-hosted-options.md`](docs/maas-and-self-hosted-options.md) — customer-facing reading on Red Hat's MaaS path + OSS alternatives + air-gap considerations.
 - [`docs/secrets.md`](docs/secrets.md) — AWS Secrets Manager + ESO (Keycloak realm) and Sealed Secrets (everything else).
 - [`docs/environment-change-summary.md`](docs/environment-change-summary.md) — what changed to reach the current state + remaining gaps/follow-ups.
+- [`docs/session-activity-summary.md`](docs/session-activity-summary.md) — quick activity summary, live-verification snapshot, and the repeatability sharp-edges/gaps.
 - [`services/bridge/README.md`](services/bridge/README.md) — bridge service reference (env vars, smoke tests, build).
 
 ---
