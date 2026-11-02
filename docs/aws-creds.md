@@ -49,7 +49,8 @@ GitHub Actions has **no AWS creds** after the GHCR migration. CI pushes use `GIT
 | IAM role | Created by | Permissions | ServiceAccount | How auth works |
 |---|---|---|---|---|
 | `<cluster>-cert-manager-route53` | `terraform/irsa.tf` | Route 53: `GetChange`, `ChangeResourceRecordSets`, `ListResourceRecordSets`, `ListHostedZonesByName` | `cert-manager:cert-manager` | Pod identity webhook injects token; cert-manager uses ambient AWS SDK credentials |
-| `<cluster>-coder-bedrock` | `terraform/irsa.tf` | Bedrock: `InvokeModel*`, `Converse*`, `List*`, `Get*` on `*` | `coder:coder` | Pod identity webhook injects token; AI Gateway uses ambient AWS SDK credentials |
+| `<cluster>-coder-bedrock` | `terraform/irsa.tf` | Bedrock: `InvokeModel*`, `Converse*`, `List*`, `Get*` on `*` | `coder:coder-server` | Pod identity webhook injects token; AI Gateway uses ambient AWS SDK credentials |
+| `<cluster>-external-secrets` | `terraform/keycloak-secrets.tf` | Secrets Manager: `GetSecretValue`, `DescribeSecret` on `rhsummit/keycloak/demo-realm` | `external-secrets:eso-aws-sm` | Pod identity webhook injects token; External Secrets Operator syncs AWS Secrets Manager → k8s Secrets |
 | Platform roles (6+) | `ccoctl aws create-all` | EC2, EBS CSI, image registry, machine API, ingress, CCO | Various `openshift-*` SAs | Same webhook mechanism |
 
 ### Trust policy structure

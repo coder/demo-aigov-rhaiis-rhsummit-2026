@@ -2,7 +2,7 @@
 
 > Architectural and operational decisions made during the demo build, with the alternatives we considered and why we picked what we picked.
 > If you're tempted to revisit one of these — read the "why" first; we may have already burned that path.
-> Last updated 2026-05-10.
+> Last updated 2026-05-12 (chore/coder-2.37.6-upgrade; docs accuracy pass 2026-11-02).
 
 ## How to use this doc
 
@@ -53,13 +53,13 @@ If you change a decision, update this file in the same PR.
 
 ## 3. CloudNativePG, in-cluster (not RDS)
 
-**Picked:** CNPG operator (community-operators, channel `stable-v1.24`), `Cluster` CR with 3 instances spread across AZs via pod-anti-affinity on `topology.kubernetes.io/zone`.
+**Picked:** CNPG operator (certified-operators, channel `stable-v1`), `Cluster` CR with 3 instances spread across AZs via pod-anti-affinity on `topology.kubernetes.io/zone`.
 
 **Considered:** AWS RDS Aurora Postgres multi-AZ (the original demo had this).
 
 **Why on-prem-portability is the dominant factor:** the audience at RH Summit is OpenShift platform engineers running OCP everywhere — AWS, Azure, vSphere, bare-metal, air-gap. If the demo bakes in RDS, the customer reads it as "this is an AWS-flavored thing, not an OpenShift thing." CNPG's Cluster CR runs unchanged on any OCP. Bonus: CNPG auto-generates the `coder-app` Secret that Coder consumes — no manual DB-URL plumbing.
 
-**Tradeoffs:** community-operators source (not Red-Hat-engineered). Documented as an operator-policy exception in the operator-policy table because RH doesn't ship a first-party in-cluster Postgres operator and CNPG is the de facto Kubernetes-native choice.
+**Tradeoffs:** certified-operators source (EDB-engineered, RH-certified — not a first-party Red Hat operator). Documented as an operator-policy exception in the operator-policy table because RH doesn't ship a first-party in-cluster Postgres operator and CNPG is the de facto Kubernetes-native choice.
 
 **Trigger to revisit:** If the customer story shifts to AWS-native production architectures (e.g., a full RDS multi-AZ + KMS encryption at rest narrative), swap back. For booth: never.
 
@@ -716,7 +716,7 @@ Each iteration plugged the observed gap. But on the fourth iteration (`da7955b8-
 
 **Why this is the right call:**
 1. **Llama-INT4 follows positive instructions, ignores negative ones.** The default's "use AS MANY TOOLS" framing wins over our "don't spawn for X" overrides. More rules made the model more confused, not less.
-2. **Sonnet and Opus handle every observed failure mode correctly without any appendix.** The booth's `coder-agent` default model is Sonnet 4.6 (decision §32 + the 2026-05-11 default-flip in chatd model-configs). Sovereign-AI demos opt into Llama via `coder-agent:llama`, with the understanding that its agentic-loop behavior is weaker than Bedrock.
+2. **Sonnet and Opus handle every observed failure mode correctly without any appendix.** The booth's `coder-agent` default model is Sonnet 4 (decision §32 + the 2026-05-11 default-flip in chatd model-configs). Sovereign-AI demos opt into Llama via `coder-agent:llama`, with the understanding that its agentic-loop behavior is weaker than Bedrock.
 3. **Tracking Coder's evolving default for free.** When chatd's `DefaultSystemPrompt` improves upstream we inherit it without merging changes into our appendix.
 
 **Cost of the reversal:** the targeted UUID-vs-string hints for `create_workspace`'s `template_id`, the no-retry-loop rule, the classification decision tree — all gone. If a specific failure mode resurfaces on Sonnet/Opus (low probability), we add a small targeted rule back. The pattern is: prove the failure on the better models BEFORE adding overrides — don't tune for INT4 weaknesses.
@@ -804,7 +804,7 @@ Each persona should map cleanly to ONE permissions tier that's enforced by group
 | `/auditors` | bob | `auditor` (read-only deployment-wide) | (none) | none | none | denied at OAuth callback | regular user |
 
 **Concrete changes (commit `<this PR>`):**
-1. `manifests/keycloak/realm-demo.yaml` — drop carol/dave; add `/auditors` group; move bob into it; demoadm now in `/admins` only (was `/developers + /admins`).
+1. `manifests/keycloak/realm-template-configmap.yaml` (originally `realm-demo.yaml`; later refactored to a secret-free template per §19) — drop carol/dave; add `/auditors` group; move bob into it; demoadm now in `/admins` only (was `/developers + /admins`).
 2. `gitops/apps/coder/application.yaml` — `CODER_OIDC_USER_ROLE_MAPPING` is now `{"admins":["owner"],"auditors":["auditor"]}` (developers intentionally not mapped at site level; their permissions come from the org-scoped custom role).
 3. `scripts/coder-agents-provider-model-config.sh` — custom org role renamed `developers-auditor-plus` → `developers-chat`. `audit_log:read` and `connection_log:read` permissions removed (those belong to bob's site-level auditor role now). OIDC role-sync mapping `{developers: [developers-chat]}` unchanged in shape (only the role name changed).
 4. `manifests/cluster-config/keycloak-demo-users-rbac.yaml` — replaced. The old `developers → cluster-reader + cluster-monitoring-view` bindings are gone (alice has no business in OCP); a new `admins → cluster-admin` binding gives demoadm a Keycloak path to cluster-admin (previously only the GitHub `admin` team had that).
@@ -946,7 +946,7 @@ These came up; we said "not for booth, document and move on":
 - **LokiStack with S3 backing** — local PVC is fine for 7-day retention
 - **Tempo / Service Mesh / multi-cluster** — out of scope
 - **Bedrock invocation logging** — see decision #17
-- **OIDC / Keycloak SSO into Coder** — superseded by GitHub OAuth (decision #20)
+- ~~OIDC / Keycloak SSO into Coder~~ — **IMPLEMENTED** (see §37): Keycloak `demo` realm is the primary Coder IdP; GitHub OAuth is the secondary admin path.
 
 ---
 

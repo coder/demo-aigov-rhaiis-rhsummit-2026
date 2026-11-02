@@ -14,13 +14,14 @@ the operator explicitly wipes it).
 ### 1. Sign in to Coder once
 
 Visit `https://coder.apps.cluster.rhsummit.coderdemo.io` → click
-**"Sign in with Keycloak (demo users)"** → enter alice's Keycloak
+**"Sign in with Keycloak"** → enter alice's Keycloak
 credentials (username `alice`; password from AWS Secrets Manager —
 `aws secretsmanager get-secret-value --region us-east-1 --secret-id
 rhsummit/keycloak/demo-realm --query SecretString --output text | jq -r
 .alice_password`). On first login, Coder auto-creates
-a User row for alice and applies the OIDC role mappings (developers
-group → site `auditor` + org `developers-auditor-plus` custom role).
+a User row for alice and applies the OIDC role mappings (`admins` → site
+`owner`, `auditors` → site `auditor`; alice's `developers` group gets no
+elevated role, so she logs in as a regular Member).
 
 If the bridge fires before this step, it returns
 `422 {"error":"coder user not found: alice"}` — by design.
@@ -90,7 +91,7 @@ assignee-add) is applied second triggers the spawn — order doesn't
 matter.
 
 1. PM (or anyone) opens a GitLab issue in `alice/sample-app`.
-2. **Assign** the issue to a Keycloak persona (alice, bob, carol, dave).
+2. **Assign** the issue to a Keycloak persona (alice, bob, demoadm).
    The assignee — not the author — owns the resulting workspace and
    chat. (Rationale: authors are typically PMs, not the people who
    do the work.)

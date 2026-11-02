@@ -188,9 +188,9 @@ Specific to Coder Agents + AI Bridge + an OSS LLM stack on OpenShift Disconnecte
 Coder's two governance layers handle this cleanly because both speak OpenAI-compat / Anthropic API.
 
 **AI Bridge (`/api/v2/aibridge/{anthropic,openai}` endpoints):**
-- Swap upstream URL via `CODER_AIBRIDGE_*` env vars to point at any OpenAI-compatible internal endpoint
+- Swap upstream URL via `CODER_AI_GATEWAY_*` env vars to point at any OpenAI-compatible internal endpoint
 - For Anthropic, the bridge uses AWS SDK to talk to Bedrock — in air-gap with no AWS, you'd need a Bedrock-API-compatible self-hosted alternative (rare; most customers point AI Bridge's anthropic provider at a vLLM-served Anthropic-format model OR migrate users to OpenAI-compat-only)
-- Central API key model: `CODER_AIBRIDGE_OPENAI_KEY` + `CODER_AIBRIDGE_ALLOW_BYOK=false` enforces audit trail integrity — works fine with internal endpoints
+- Central API key model: `CODER_AI_GATEWAY_OPENAI_KEY` + `CODER_AI_GATEWAY_ALLOW_BYOK=false` enforces audit trail integrity — works fine with internal endpoints
 
 **Coder Agents (chatd):**
 - Provider type `openai-compat` consumes any vLLM / LiteLLM / RHAIIS / llm-d-fronted endpoint

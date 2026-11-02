@@ -2,7 +2,7 @@
 
 > Audience: Coder SE/PubSec teammates joining Austen on this demo.
 > Time to first `terraform plan`: ~15 min after AWS access lands.
-> Last updated 2026-04-27.
+> Last updated 2026-11-02.
 
 This is the demo build environment for **Red Hat Summit + AnsibleFest 2026** (Atlanta GWCC, May 11–14). You'll be helping Austen test, validate, iterate, and run the booth flow on the cluster this repo provisions.
 

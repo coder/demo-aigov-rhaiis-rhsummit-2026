@@ -93,7 +93,7 @@
 | Workspace template | — | OpenShift / RHEL UBI base, FIPS-validated |
 | RHAIIS / vLLM | **Red Hat AI Inference Server** | GA |
 | Grafana Loki / Splunk / ELK | — | unified Bridge + Boundaries log format streams here |
-| Prometheus + Alertmanager | — | metrics + alerts; alert thresholds in `helm/coder/values-observability.yaml` |
+| Prometheus + Alertmanager | — | metrics + alerts; alert thresholds in `gitops/apps/observability/application.yaml` |
 
 ## Identity & access
 
@@ -111,13 +111,13 @@
 - **Wildcard access URL:** `*.coder.<demo-domain>` for workspace subdomain apps.
 - **Strict TLS** (`CODER_STRICT_TRANSPORT_SECURITY=true`).
 - **Telemetry off** (`CODER_DISABLE_NETWORK_TELEMETRY=true`, `CODER_DISABLE_USAGE_STATS=true`) — required posture for any regulated customer.
-- **Egress controls / DLP:** Agent Firewalls rules file with a domain allowlist; default-deny everywhere else. See `manifests/agent-firewalls/rules.example.yaml`.
+- **Egress controls / DLP:** Agent Firewalls rules file with a domain allowlist; default-deny everywhere else. See `coder-templates/demo-ai-gov-firewall-ocp/boundary.config.yaml.tftpl`.
 
 ## Observability & audit
 
 - **Workspace audit + Bridge + Boundaries unified log format** → Grafana Loki (or Splunk / ELK via the same shape).
 - **Prometheus metrics:** `CODER_PROMETHEUS_ENABLE=true`, with DB metrics and agent stats enabled.
-- **Alert groups:** Licenses, coderd CPU/Memory, Replicas, Workspace Build Failures, provisionerd Replicas. Thresholds in `helm/coder/values-observability.yaml`.
+- **Alert groups:** Licenses, coderd CPU/Memory, Replicas, Workspace Build Failures, provisionerd Replicas. Thresholds in `gitops/apps/observability/application.yaml`.
 - **Postgres exporter** for DB observability.
 - **Session tracking** for AI usage — pulls into the platform admin dashboard.
 
