@@ -34,16 +34,19 @@
 # Key environment variables (set on the agent):
 #   ANTHROPIC_BASE_URL / ANTHROPIC_API_BASE — AI Gateway Anthropic endpoint
 #                                             (/api/v2/ai-gateway/bedrock)
-#   OPENAI_BASE_URL                         — AI Gateway OpenAI endpoint
-#                                             (/api/v2/ai-gateway/openai-compat/v1)
+#   OPENAI_BASE_URL                         — Smart Router OpenAI endpoint
+#                                             (smart-router-semantic-router.ai-router.svc.cluster.local:8899/v1)
 #   ANTHROPIC_API_KEY                       — session token (for Claude Code CLI)
-#   OPENAI_API_KEY                          — session token (for Codex CLI)
+#   OPENAI_API_KEY                          — session token (set for Codex; the
+#                                             Smart Router ignores it upstream)
 #
 # Auth model:
-#   Both CLIs authenticate to the AI Gateway with the workspace owner's
-#   Coder session token. Claude Code reads ANTHROPIC_API_KEY; Codex reads
-#   OPENAI_API_KEY. The gateway routes by provider NAME under
-#   /api/v2/ai-gateway/<provider> and injects the real upstream creds.
+#   Claude Code authenticates to the AI Gateway with the workspace owner's
+#   Coder session token (ANTHROPIC_API_KEY); the gateway routes by provider
+#   NAME under /api/v2/ai-gateway/<provider> and injects the real upstream
+#   creds. Codex points at the Smart Router (vLLM Semantic Router) with model
+#   vllm-sr/auto; the router classifies/routes each request and needs no
+#   upstream auth.
 #
 # Agent Firewall:
 #   The `boundary` binary is installed to /usr/local/bin and configured
@@ -237,14 +240,12 @@ data "coder_parameter" "dotfiles_branch" {
 locals {
   # AI Gateway (Coder 2.37.x) routes by PROVIDER NAME under
   # /api/v2/ai-gateway/<provider>, authenticated with the Coder session
-  # token. Our configured providers are `bedrock` (Anthropic Messages API
-  # -> Claude Code) and `openai-compat` (OpenAI Chat/Responses API -> Codex).
+  # token. Claude Code uses the `bedrock` provider (Anthropic Messages API).
   # The provider *type* aliases /anthropic and /openai are NOT valid routes
-  # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway
-  # (matches the proven partner reference templates).
+  # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway.
+  # NOTE: Codex no longer uses the AI Gateway openai-compat endpoint — it
+  # routes to the Smart Router (smart_router_openai_url below).
   ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
-  ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat"
-  ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
   # Smart Router (vLLM Semantic Router) OpenAI-compatible endpoint — in-cluster
   # Service (east-west, no public ingress). Codex points here; the router
@@ -266,12 +267,13 @@ locals {
   })
 
   # Codex config.toml — written verbatim by the coder-labs/codex module
-  # (base_config_toml). Routes Codex through the AI Gateway openai-compat
-  # provider. web_search=disabled (Bedrock rejects Codex's default web_search
-  # tool, closing the stream); sandbox_mode=danger-full-access because the pod
-  # is the sandbox and Codex's bwrap sandbox conflicts with boundary's jail.
+  # (base_config_toml). Routes Codex to the Smart Router (vLLM Semantic Router),
+  # model vllm-sr/auto. web_search=disabled (the router's Bedrock-backed tiers
+  # reject Codex's default web_search tool, closing the stream);
+  # sandbox_mode=danger-full-access because the pod is the sandbox and Codex's
+  # bwrap sandbox conflicts with boundary's jail.
   codex_base_config = <<-TOML
-    model_provider = "openai-compat"
+    model_provider = "smart-router"
     model = "vllm-sr/auto"
     model_reasoning_effort = "medium"
     web_search = "disabled"
@@ -291,7 +293,7 @@ locals {
     hide_rate_limit_model_nudge = true
     hide_world_writable_warning = true
 
-    [model_providers.openai-compat]
+    [model_providers.smart-router]
     name = "Smart Router (vLLM Semantic Router)"
     base_url = "${local.smart_router_openai_url}"
     env_key = "OPENAI_API_KEY"
@@ -402,14 +404,13 @@ resource "coder_agent" "main" {
     # /home/coder/.local/bin/claude) with their own flags.
     #
     # claude: --dangerously-skip-permissions --model global.anthropic.claude-haiku-4-5-20251001-v1:0
-    # codex:  --dangerously-bypass-approvals-and-sandbox --model us.openai.gpt-5.6-luna
+    # codex:  --dangerously-bypass-approvals-and-sandbox (model from ~/.codex/config.toml)
     #
-    # Model note (RH Summit 2026 re-install): remapped from the original
-    # haiku / gpt-5.1-codex-mini to the models provisioned in this AI
-    # Gateway. Haiku 4.5 is still the weak-safety model this demo wants on
-    # the claude path. We have no weak OpenAI model routable via the bridge,
-    # so codex uses gpt-5.6-luna (strong — it may refuse obvious exfil
-    # prompts); run the firewall demo primarily via `claude`.
+    # Model note: Claude Code is pinned (via its wrapper) to Haiku 4.5 — the
+    # weak-safety model this firewall demo wants on the claude path. Codex has
+    # no wrapper model override; it uses the Smart Router (model vllm-sr/auto),
+    # whose agentic/tool tier is Qwen3-Coder-30B (strong — it may refuse obvious
+    # exfil prompts), so run the firewall demo primarily via `claude`.
     echo "Installing boundary wrappers..."
     WRAPPERS_DIR="$HOME/.local/bin/boundary-wrappers"
     mkdir -p "$WRAPPERS_DIR"
@@ -689,7 +690,7 @@ resource "coder_script" "claude_approve_key" {
 }
 
 # Codex — pinned standalone binary + config.toml from base_config_toml
-# (model: GPT-5.6 Luna). Also wrapped by boundary.
+# (model: vllm-sr/auto via the Smart Router). Also wrapped by boundary.
 module "codex" {
   count            = data.coder_workspace.me.start_count
   source           = "registry.coder.com/coder-labs/codex/coder"

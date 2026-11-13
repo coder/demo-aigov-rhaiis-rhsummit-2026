@@ -9,16 +9,20 @@
 #   Terminal CLIs:   Claude Code + Codex (Coder Registry modules),
 #                    Gemini CLI + Kiro CLI (installed in the agent startup)
 #
-# AI access — Coder AI Gateway (Coder 2.37.x):
+# AI access:
 #   Claude Code and Codex are installed and configured by their official
-#   Coder Registry modules (coder/claude-code, coder-labs/codex). Both route
-#   through the Coder AI Gateway using the workspace owner's session token:
-#     Claude Code -> provider `bedrock`        (Anthropic Messages API)
-#     Codex       -> provider `openai-compat`  (OpenAI Responses API)
-#   The gateway routes by PROVIDER NAME under /api/v2/ai-gateway/<provider>.
-#   Auth is wired via agent-wide coder_env (ANTHROPIC_* / OPENAI_*), matching
-#   the proven partner reference templates (greg-the-coder/partner-ai-dlc-gitops).
-#   Kiro authenticates independently (AWS Builder ID, etc.).
+#   Coder Registry modules (coder/claude-code, coder-labs/codex).
+#     Claude Code -> Coder AI Gateway, provider `bedrock` (Anthropic Messages
+#                    API), authenticated with the workspace owner's session token.
+#     Codex       -> Smart Router (vLLM Semantic Router), OpenAI Responses API at
+#                    http://smart-router-semantic-router.ai-router.svc.cluster.local:8899/v1
+#                    with model `vllm-sr/auto`. The router classifies each request
+#                    and routes it to the right backend (local Qwen3-Coder /
+#                    Qwen2.5-7B, a Bedrock burst tier, or the Qwen3-VL vision tier).
+#   The AI Gateway routes by PROVIDER NAME under /api/v2/ai-gateway/<provider>.
+#   Auth is wired via agent-wide coder_env: ANTHROPIC_* -> AI Gateway (Claude),
+#   OPENAI_* -> Smart Router (Codex). Kiro authenticates independently
+#   (AWS Builder ID, etc.).
 # =============================================================================
 
 terraform {
@@ -180,13 +184,12 @@ data "coder_parameter" "git_repo" {
 locals {
   # AI Gateway (Coder 2.37.x) routes by PROVIDER NAME under
   # /api/v2/ai-gateway/<provider>, authenticated with the Coder session
-  # token. Our configured providers are `bedrock` (Anthropic Messages API
-  # -> Claude Code) and `openai-compat` (OpenAI Responses API -> Codex).
+  # token. Claude Code uses the `bedrock` provider (Anthropic Messages API).
   # The provider *type* aliases /anthropic and /openai are NOT valid routes
-  # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway
-  # (matches the proven partner reference templates).
+  # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway.
+  # NOTE: Codex no longer uses the AI Gateway openai-compat endpoint — it routes
+  # to the Smart Router (smart_router_openai_url below).
   ai_gateway_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
-  ai_gateway_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
   # Smart Router (vLLM Semantic Router) OpenAI-compatible endpoint — in-cluster
   # Service. Codex points here; the router classifies each request and dispatches
@@ -194,19 +197,19 @@ locals {
   smart_router_openai_url = "http://smart-router-semantic-router.ai-router.svc.cluster.local:8899/v1"
 
   # Codex config.toml — written verbatim by the coder-labs/codex module
-  # (base_config_toml). Routes Codex through the Smart Router openai-compat
-  # provider using OPENAI_API_KEY (the Coder session token, set below; the
-  # router ignores it — no upstream auth required).
+  # (base_config_toml). Routes Codex through the Smart Router provider using
+  # OPENAI_API_KEY (the Coder session token, set below; the router ignores it
+  # — no upstream auth required).
   #   * web_search = "disabled": Codex attaches a hosted web_search tool by
-  #     default, which Amazon Bedrock's OpenAI endpoint rejects ("web search
-  #     is not supported for this request"), closing the stream mid-turn.
-  #     Disabling it lets turns complete. (Verified against this gateway.)
+  #     default, which the Smart Router's Bedrock-backed tiers reject ("web
+  #     search is not supported for this request"), closing the stream
+  #     mid-turn. Disabling it lets turns complete.
   #   * sandbox_mode = "danger-full-access": the workspace pod is already the
   #     sandbox and lacks bubblewrap, which Codex's workspace-write OS sandbox
   #     requires.
   #   * wire_api = "responses": current Codex dropped "chat".
   codex_base_config = <<-TOML
-    model_provider = "openai-compat"
+    model_provider = "smart-router"
     model = "vllm-sr/auto"
     model_reasoning_effort = "medium"
     web_search = "disabled"
@@ -216,7 +219,7 @@ locals {
     [features]
     daemon_auto_start = false
 
-    [model_providers.openai-compat]
+    [model_providers.smart-router]
     name = "Smart Router (vLLM Semantic Router)"
     base_url = "${local.smart_router_openai_url}"
     env_key = "OPENAI_API_KEY"
@@ -336,10 +339,11 @@ resource "coder_agent" "main" {
 }
 
 # -----------------------------------------------------------------------------
-# AI Gateway auth — workspace owner's Coder session token as the API key.
-# The gateway validates the token and proxies requests to the configured
-# providers (bedrock / openai-compat). ANTHROPIC_MODEL is set by the
-# coder/claude-code module (var.anthropic_model).
+# AI Gateway auth (Claude Code) — workspace owner's Coder session token as the
+# API key. The gateway validates the token and proxies to the `bedrock`
+# provider (Anthropic Messages API). ANTHROPIC_MODEL is set by the
+# coder/claude-code module (var.anthropic_model). Codex auth (OPENAI_*) points
+# at the Smart Router instead (see locals + coder_env.openai_base_url below).
 # -----------------------------------------------------------------------------
 
 resource "coder_env" "anthropic_base_url" {
