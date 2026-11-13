@@ -284,11 +284,15 @@ spec:
             - 0.0.0.0
             - --port
             - "8000"
-            # 16K context. A10G 24 GiB - 14 GiB weights - 2 GiB
-            # cudagraph = ~8 GiB free. 16K KV cache for 7B is ~3-4
-            # GiB. Comfortable. Could go to 32K if needed.
+            # 32K context. A10G 24 GiB - ~14 GiB weights - ~2 GiB
+            # cudagraph = ~8 GiB free; 32K KV cache for 7B (GQA, 4 KV
+            # heads) is ~3.6 GiB for a single sequence. Bumped 16K->32K
+            # so Coder Agents' tool harness (~20K tokens with 19 tool
+            # schemas) fits when the semantic router sends agent traffic
+            # to this local-fast tier (otherwise vLLM 400s
+            # "maximum context length is 16384").
             - --max-model-len
-            - "16384"
+            - "32768"
             - --disable-log-requests
             - --tensor-parallel-size
             - "1"
