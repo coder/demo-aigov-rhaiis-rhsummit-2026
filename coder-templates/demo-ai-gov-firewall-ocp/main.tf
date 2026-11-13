@@ -1,69 +1,32 @@
 # =============================================================================
-# Demo: AI Governance — Kubernetes Development Template
+# Demo: AI Governance + Agent Firewall (OpenShift)
 # =============================================================================
-# Demo environment for AI agent governance on Kubernetes. Ships with Coder
-# Agent Firewall (boundary) installed and preconfigured so AI agents can
-# be run inside a default-deny network jail, AI Bridge wiring so the
-# agents authenticate via session tokens (no external API keys), and
-# pre-staged demo scripts plus a prompt-injected sample repo so the
-# firewall's value is easy to exercise in a live demo.
+# A Coder workspace template that demonstrates governed AI agents on OpenShift:
 #
-# Workspace access (three buttons in the Coder dashboard):
-#     - VS Code Desktop (built-in display_app)
-#     - code-server       (module — VS Code in the browser)
-#     - Terminal          (built-in display_app — web terminal)
+#   - Coder AI Gateway: both CLIs authenticate with the workspace owner's Coder
+#     session token (no external API keys), and every request is captured in the
+#     AI Session logs. Claude Code -> `bedrock`; Codex -> `smart-router` (proxied
+#     by the gateway to the Smart Router / vLLM Semantic Router, model
+#     `vllm-sr/auto`).
+#   - Coder Agent Firewall (boundary): every AI CLI runs inside a default-deny
+#     network jail; only hosts on the allowlist are reachable. Edit the allowlist
+#     in ./boundary.config.yaml.tftpl — not this file.
 #
-# Included CLIs:
-#     - Claude Code (Anthropic, native install)
-#     - Codex       (OpenAI, npm)
+# Tools: code-server (browser VS Code), VS Code Desktop, web Terminal, Claude
+# Code CLI, Codex CLI. (Gemini/Kiro are omitted — the gateway can't front them.)
 #
-# Agent sandbox:
-#     - boundary (Coder Agent Firewall) — invoked as `boundary -- <cmd>`
+# Demo flow:
+#   1. Create the template:  coder templates push demo-ai-gov-firewall-ocp -d .
+#   2. Create a workspace from it. The sample project repo
+#      (https://gitlab.rhsummit.coderdemo.io/demoadm/memorycard.git) is cloned
+#      on start.
+#   3. Governance: run an agent task via `codex` or `claude`, then show it in
+#      the AI Session logs (/admin/ai-governance).
+#   4. Firewall: have the agent try to reach a host NOT on the allowlist (an
+#      exfiltration attempt) and show boundary blocking the connection.
 #
-# AI access:
-#   Both CLIs authenticate through Coder AI Bridge using the workspace
-#   owner's session token — no external API keys needed.
-#
-# Gemini CLI and Kiro CLI are intentionally NOT installed here: AI
-# Bridge / AI Gateway does not currently support them (Gemini: no
-# Google API support in aibridge — upstream issue coder/aibridge#27;
-# Kiro: no way to override base URL). Re-add them here when aibridge
-# supports the Google API, or move them to a separate non-firewalled
-# template where per-user auth is expected.
-#
-# Key environment variables (set on the agent):
-#   ANTHROPIC_BASE_URL / ANTHROPIC_API_BASE — AI Gateway Anthropic endpoint
-#                                             (/api/v2/ai-gateway/bedrock)
-#   OPENAI_BASE_URL                         — AI Gateway `smart-router` provider
-#                                             (/api/v2/ai-gateway/smart-router/v1)
-#   ANTHROPIC_API_KEY                       — session token (for Claude Code CLI)
-#   OPENAI_API_KEY                          — session token (for Codex CLI)
-#
-# Auth model:
-#   Both CLIs authenticate to the AI Gateway with the workspace owner's
-#   Coder session token, so all traffic is captured in the AI Session logs.
-#   Claude Code reads ANTHROPIC_API_KEY (provider `bedrock`); Codex reads
-#   OPENAI_API_KEY (provider `smart-router`, which the gateway proxies to the
-#   Smart Router / vLLM Semantic Router, model vllm-sr/auto). The gateway routes
-#   by provider NAME under /api/v2/ai-gateway/<provider>.
-#
-# Agent Firewall:
-#   The `boundary` binary is installed to /usr/local/bin and configured
-#   via the allowlist in ./boundary.config.yaml.tftpl (rendered with
-#   templatefile() at plan time) — edit that file to add/remove domains,
-#   NOT this one.
-#   Wrappers at ~/.local/bin/boundary-wrappers/<tool> force every AI CLI
-#   invocation (claude, codex) through boundary by default.
-#
-#   Backend: landjail (Linux Landlock LSM). nsjail (boundary's default)
-#   does NOT work on OCP 4.21 with OVN-Kubernetes — the pod's
-#   ip_forward sysctl is 0, so nsjail's MASQUERADE NAT rule has nowhere
-#   to forward packets to ("No route to host"). landjail bypasses the
-#   network-namespace / iptables / MASQUERADE path entirely; runs as
-#   the workspace's normal UID under restricted-v2 SCC. The
-#   coder-firewall-scc + privileged kernel-modules DaemonSet remain
-#   deployed (from when we tried nsjail first) — they're harmless
-#   leftovers; landjail doesn't need either.
+# Note: boundary uses the `landjail` backend (Linux Landlock); nsjail does not
+# work on OCP 4.21 + OVN-Kubernetes (pod ip_forward=0 breaks its NAT path).
 # =============================================================================
 
 terraform {
@@ -200,9 +163,9 @@ data "coder_parameter" "disk_size" {
 data "coder_parameter" "git_repo" {
   name         = "git_repo"
   display_name = "Git Repository"
-  description  = "Repository to clone on workspace start. Defaults to a demo repo (cool-project) whose README contains a prompt-injection payload for exercising the Agent Firewall; clear this field to skip cloning."
+  description  = "Repository to clone on workspace start. Defaults to the demo project repo; clear this field to skip cloning."
   type         = "string"
-  default      = "https://gitlab.zambruhni.com/lab/cool-project.git"
+  default      = "https://gitlab.rhsummit.coderdemo.io/demoadm/memorycard.git"
   mutable      = false
   icon         = "/icon/git.svg"
 }
@@ -226,9 +189,9 @@ data "coder_parameter" "dotfiles_uri" {
 data "coder_parameter" "dotfiles_branch" {
   name         = "dotfiles_branch"
   display_name = "Dotfiles Branch"
-  description  = "Branch of the dotfiles repo to check out. `demo` is the minimal sales-demo .bashrc; `main` has the full dev setup."
+  description  = "Branch of the dotfiles repo to check out."
   type         = "string"
-  default      = "demo"
+  default      = "main"
   mutable      = true
 }
 
@@ -513,7 +476,7 @@ resource "coder_agent" "main" {
     agent in the course of the demo itself — if an agent explores
     ~/demo/ it will short-circuit the "realistic agent interaction"
     framing. Treat ~/demo/ as operator territory, and keep the agent
-    pointed at ~/cool-project/ (or wherever your real workspace code
+    pointed at ~/memorycard/ (or wherever your real workspace code
     lives).
 
     Tail /tmp/boundary_logs/ in another terminal to watch DENY events

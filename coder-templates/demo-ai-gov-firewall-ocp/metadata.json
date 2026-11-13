@@ -1,5 +1,5 @@
 {
   "display_name": "Demo: AI Gov (with firewall)",
-  "icon": "https://gitlab.zambruhni.com/lab/coder-templates/-/raw/main/templates/demo-ai-gov-firewall/icon.svg",
+  "icon": "https://raw.githubusercontent.com/coder/demo-aigov-rhaiis-rhsummit-2026/main/coder-templates/demo-ai-gov-firewall-ocp/icon.svg",
   "slug": "demo-ai-gov-firewall"
 }

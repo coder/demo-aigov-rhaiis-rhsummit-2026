@@ -23,11 +23,11 @@ allowlist:
   - domain=${coder_host}
 
   # Our self-hosted GitLab — so agents running under boundary can clone
-  # from / push to internal repos (e.g. lab/cool-project). The initial
+  # from / push to internal repos (e.g. demoadm/memorycard). The initial
   # git-clone on workspace start runs outside boundary (agent context)
   # and doesn't depend on this entry, but an agent invoking
-  # `git clone gitlab.zambruhni.com/...` via its Bash tool does.
-  - domain=gitlab.zambruhni.com
+  # `git clone gitlab.rhsummit.coderdemo.io/...` via its Bash tool does.
+  - domain=gitlab.rhsummit.coderdemo.io
 
   # Test domains
   - method=GET domain=typicode.com

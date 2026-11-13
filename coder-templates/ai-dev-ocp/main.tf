@@ -1,28 +1,25 @@
 # =============================================================================
-# AI Dev — Kubernetes Development Template (OpenShift)
+# AI Dev Environment (OpenShift)
 # =============================================================================
-# AI-focused dev environment on OpenShift/Kubernetes.
+# A Coder workspace template for AI-assisted development on OpenShift/Kubernetes.
 #
-# Included tools:
-#   Web IDEs:        code-server (VS Code in the browser)
-#   Desktop IDEs:    Kiro IDE, Cursor IDE
-#   Terminal CLIs:   Claude Code + Codex (Coder Registry modules),
-#                    Gemini CLI + Kiro CLI (installed in the agent startup)
+# Tools: code-server (browser VS Code), VS Code Desktop, Claude Code CLI and
+# Codex CLI (Coder Registry modules), plus Gemini and Kiro CLIs.
 #
-# AI access:
-#   Claude Code and Codex are installed and configured by their official
-#   Coder Registry modules (coder/claude-code, coder-labs/codex). Both route
-#   through the Coder AI Gateway (so all traffic is captured in the AI Session
-#   logs) using the workspace owner's session token:
-#     Claude Code -> provider `bedrock`       (Anthropic Messages API)
-#     Codex       -> provider `smart-router`  (OpenAI Responses API); the gateway
-#                    proxies to the Smart Router (vLLM Semantic Router), model
-#                    `vllm-sr/auto`, which classifies each request and routes to
-#                    the right backend (local Qwen3-Coder / Qwen2.5-7B, a Bedrock
-#                    burst tier, or the Qwen3-VL vision tier).
-#   The AI Gateway routes by PROVIDER NAME under /api/v2/ai-gateway/<provider>.
-#   Auth is wired via agent-wide coder_env (ANTHROPIC_* / OPENAI_*). Kiro
-#   authenticates independently (AWS Builder ID, etc.).
+# Governed AI routing: both CLIs go through the Coder AI Gateway using the
+# workspace owner's session token, so every request is captured in the AI
+# Session logs. Claude Code -> `bedrock` provider; Codex -> `smart-router`
+# provider, which the gateway proxies to the Smart Router (model `vllm-sr/auto`)
+# to classify and route each request to the right local or burst model.
+#
+# Demo flow:
+#   1. Create the template:  coder templates push ai-dev-ocp -d .
+#   2. Create a workspace from it in the Coder dashboard.
+#   3. Open Codex (or Claude Code) and run a coding task — e.g. clone
+#      https://gitlab.rhsummit.coderdemo.io/demoadm/memorycard.git and ask the
+#      agent to extend it.
+#   4. Show the activity in the AI Session logs (/admin/ai-governance) — all
+#      agent traffic is captured and attributed to the user.
 # =============================================================================
 
 terraform {
