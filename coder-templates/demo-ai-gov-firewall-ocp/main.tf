@@ -246,6 +246,13 @@ locals {
   ai_bridge_openai_url    = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat"
   ai_bridge_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
+  # Smart Router (vLLM Semantic Router) OpenAI-compatible endpoint — in-cluster
+  # Service (east-west, no public ingress). Codex points here; the router
+  # classifies each request and routes to the right backend. The router host is
+  # on the boundary allowlist (boundary.config.yaml.tftpl) so Codex can reach it.
+  smart_router_openai_url = "http://smart-router-semantic-router.ai-router.svc.cluster.local:8899/v1"
+  smart_router_host       = "smart-router-semantic-router.ai-router.svc.cluster.local"
+
   # Coder access URL hostname — substituted into boundary.config.yaml.tftpl
   # so agents can reach AI Bridge, AgentAPI, and the workspace agent.
   coder_host = replace(replace(data.coder_workspace.me.access_url, "https://", ""), "http://", "")
@@ -254,7 +261,8 @@ locals {
   # boundary.config.yaml.tftpl file. Edit that file to change the allowlist;
   # don't inline rules here.
   boundary_config_yaml = templatefile("${path.module}/boundary.config.yaml.tftpl", {
-    coder_host = local.coder_host
+    coder_host        = local.coder_host
+    smart_router_host = local.smart_router_host
   })
 
   # Codex config.toml — written verbatim by the coder-labs/codex module
@@ -264,7 +272,7 @@ locals {
   # is the sandbox and Codex's bwrap sandbox conflicts with boundary's jail.
   codex_base_config = <<-TOML
     model_provider = "openai-compat"
-    model = "us.openai.gpt-5.6-luna"
+    model = "vllm-sr/auto"
     model_reasoning_effort = "medium"
     web_search = "disabled"
     sandbox_mode = "danger-full-access"
@@ -284,8 +292,8 @@ locals {
     hide_world_writable_warning = true
 
     [model_providers.openai-compat]
-    name = "Coder AI Gateway (Bedrock)"
-    base_url = "${local.ai_bridge_openai_v1_url}"
+    name = "Smart Router (vLLM Semantic Router)"
+    base_url = "${local.smart_router_openai_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
   TOML
@@ -544,7 +552,7 @@ resource "coder_agent" "main" {
     VISUAL              = "code"
     ANTHROPIC_BASE_URL  = local.ai_bridge_anthropic_url
     ANTHROPIC_API_BASE  = local.ai_bridge_anthropic_url
-    OPENAI_BASE_URL     = local.ai_bridge_openai_v1_url
+    OPENAI_BASE_URL     = local.smart_router_openai_url
     GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
     GITLAB_USER         = data.coder_workspace_owner.me.name
     GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"

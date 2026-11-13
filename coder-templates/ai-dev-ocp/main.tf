@@ -64,12 +64,14 @@ variable "anthropic_model" {
   default     = "global.anthropic.claude-opus-4-5-20251101-v1:0"
 }
 
-# OpenAI-compatible model Codex requests through the AI Gateway (openai-compat
-# provider). Defaults to the provisioned GPT-5.6 Sol cross-region profile.
+# Model Codex requests through the Smart Router (vLLM Semantic Router). The
+# router's virtual entrypoint `vllm-sr/auto` classifies each request and routes
+# it to the right backend (local Qwen3-Coder / Qwen2.5-7B, Bedrock burst, or
+# the Qwen3-VL vision tier).
 variable "openai_model" {
   type        = string
-  description = "Model id Codex requests through the Coder AI Gateway (openai-compat provider)."
-  default     = "us.openai.gpt-5.6-sol"
+  description = "Model id Codex requests through the Smart Router. Use vllm-sr/auto to let the router classify and route per request."
+  default     = "vllm-sr/auto"
 }
 
 
@@ -196,9 +198,15 @@ locals {
   ai_gateway_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
   ai_gateway_openai_v1_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/openai-compat/v1"
 
+  # Smart Router (vLLM Semantic Router) OpenAI-compatible endpoint — in-cluster
+  # Service. Codex points here; the router classifies each request and dispatches
+  # to the right backend. Reached over cluster DNS (east-west), no public ingress.
+  smart_router_openai_url = "http://smart-router-semantic-router.ai-router.svc.cluster.local:8899/v1"
+
   # Codex config.toml — written verbatim by the coder-labs/codex module
-  # (base_config_toml). Routes Codex through the AI Gateway openai-compat
-  # provider using OPENAI_API_KEY (the Coder session token, set below).
+  # (base_config_toml). Routes Codex through the Smart Router openai-compat
+  # provider using OPENAI_API_KEY (the Coder session token, set below; the
+  # router ignores it — no upstream auth required).
   #   * web_search = "disabled": Codex attaches a hosted web_search tool by
   #     default, which Amazon Bedrock's OpenAI endpoint rejects ("web search
   #     is not supported for this request"), closing the stream mid-turn.
@@ -219,8 +227,8 @@ locals {
     daemon_auto_start = false
 
     [model_providers.openai-compat]
-    name = "Coder AI Gateway (Bedrock)"
-    base_url = "${local.ai_gateway_openai_v1_url}"
+    name = "Smart Router (vLLM Semantic Router)"
+    base_url = "${local.smart_router_openai_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
 
@@ -359,7 +367,7 @@ resource "coder_env" "anthropic_api_key" {
 resource "coder_env" "openai_base_url" {
   agent_id = coder_agent.main.id
   name     = "OPENAI_BASE_URL"
-  value    = local.ai_gateway_openai_v1_url
+  value    = local.smart_router_openai_url
 }
 
 resource "coder_env" "openai_api_key" {

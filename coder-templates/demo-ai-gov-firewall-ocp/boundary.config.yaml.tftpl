@@ -21,6 +21,10 @@ allowlist:
   # from the workspace's access URL at plan time.
   - domain=${coder_host}
 
+  # Smart Router (vLLM Semantic Router) in-cluster Service — Codex CLI routes
+  # its OpenAI/Responses traffic here. Rendered from smart_router_host.
+  - domain=${smart_router_host}
+
   # Our self-hosted GitLab — so agents running under boundary can clone
   # from / push to internal repos (e.g. lab/cool-project). The initial
   # git-clone on workspace start runs outside boundary (agent context)
