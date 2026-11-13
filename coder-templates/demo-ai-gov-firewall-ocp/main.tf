@@ -34,19 +34,18 @@
 # Key environment variables (set on the agent):
 #   ANTHROPIC_BASE_URL / ANTHROPIC_API_BASE — AI Gateway Anthropic endpoint
 #                                             (/api/v2/ai-gateway/bedrock)
-#   OPENAI_BASE_URL                         — Smart Router OpenAI endpoint
-#                                             (smart-router-semantic-router.ai-router.svc.cluster.local:8899/v1)
+#   OPENAI_BASE_URL                         — AI Gateway `smart-router` provider
+#                                             (/api/v2/ai-gateway/smart-router/v1)
 #   ANTHROPIC_API_KEY                       — session token (for Claude Code CLI)
-#   OPENAI_API_KEY                          — session token (set for Codex; the
-#                                             Smart Router ignores it upstream)
+#   OPENAI_API_KEY                          — session token (for Codex CLI)
 #
 # Auth model:
-#   Claude Code authenticates to the AI Gateway with the workspace owner's
-#   Coder session token (ANTHROPIC_API_KEY); the gateway routes by provider
-#   NAME under /api/v2/ai-gateway/<provider> and injects the real upstream
-#   creds. Codex points at the Smart Router (vLLM Semantic Router) with model
-#   vllm-sr/auto; the router classifies/routes each request and needs no
-#   upstream auth.
+#   Both CLIs authenticate to the AI Gateway with the workspace owner's
+#   Coder session token, so all traffic is captured in the AI Session logs.
+#   Claude Code reads ANTHROPIC_API_KEY (provider `bedrock`); Codex reads
+#   OPENAI_API_KEY (provider `smart-router`, which the gateway proxies to the
+#   Smart Router / vLLM Semantic Router, model vllm-sr/auto). The gateway routes
+#   by provider NAME under /api/v2/ai-gateway/<provider>.
 #
 # Agent Firewall:
 #   The `boundary` binary is installed to /usr/local/bin and configured
@@ -243,16 +242,14 @@ locals {
   # token. Claude Code uses the `bedrock` provider (Anthropic Messages API).
   # The provider *type* aliases /anthropic and /openai are NOT valid routes
   # (404 "route not supported"). Canonical prefix is /api/v2/ai-gateway.
-  # NOTE: Codex no longer uses the AI Gateway openai-compat endpoint — it
-  # routes to the Smart Router (smart_router_openai_url below).
-  ai_bridge_anthropic_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
-
-  # Smart Router (vLLM Semantic Router) OpenAI-compatible endpoint — in-cluster
-  # Service (east-west, no public ingress). Codex points here; the router
-  # classifies each request and routes to the right backend. The router host is
-  # on the boundary allowlist (boundary.config.yaml.tftpl) so Codex can reach it.
-  smart_router_openai_url = "http://smart-router-semantic-router.ai-router.svc.cluster.local:8899/v1"
-  smart_router_host       = "smart-router-semantic-router.ai-router.svc.cluster.local"
+  # Codex uses the AI Gateway `smart-router` provider so its traffic is captured
+  # in the AI Session logs (governance); the gateway then proxies to the Smart
+  # Router. The `smart-router` AI provider (base_url = the in-cluster router
+  # Service) is registered in Coder's AI provider registry (/api/v2/ai/providers).
+  # Codex reaches the gateway at the Coder access URL (coder_host, already on the
+  # boundary allowlist) — it does NOT connect to the router directly.
+  ai_bridge_anthropic_url     = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/bedrock"
+  ai_gateway_smart_router_url = "${data.coder_workspace.me.access_url}/api/v2/ai-gateway/smart-router/v1"
 
   # Coder access URL hostname — substituted into boundary.config.yaml.tftpl
   # so agents can reach AI Bridge, AgentAPI, and the workspace agent.
@@ -262,16 +259,16 @@ locals {
   # boundary.config.yaml.tftpl file. Edit that file to change the allowlist;
   # don't inline rules here.
   boundary_config_yaml = templatefile("${path.module}/boundary.config.yaml.tftpl", {
-    coder_host        = local.coder_host
-    smart_router_host = local.smart_router_host
+    coder_host = local.coder_host
   })
 
   # Codex config.toml — written verbatim by the coder-labs/codex module
-  # (base_config_toml). Routes Codex to the Smart Router (vLLM Semantic Router),
-  # model vllm-sr/auto. web_search=disabled (the router's Bedrock-backed tiers
-  # reject Codex's default web_search tool, closing the stream);
-  # sandbox_mode=danger-full-access because the pod is the sandbox and Codex's
-  # bwrap sandbox conflicts with boundary's jail.
+  # (base_config_toml). Routes Codex through the Coder AI Gateway `smart-router`
+  # provider (so traffic lands in the AI Session logs); the gateway proxies to
+  # the Smart Router (model vllm-sr/auto). web_search=disabled (the router's
+  # Bedrock-backed tiers reject Codex's default web_search tool, closing the
+  # stream); sandbox_mode=danger-full-access because the pod is the sandbox and
+  # Codex's bwrap sandbox conflicts with boundary's jail.
   codex_base_config = <<-TOML
     model_provider = "smart-router"
     model = "vllm-sr/auto"
@@ -295,7 +292,7 @@ locals {
 
     [model_providers.smart-router]
     name = "Smart Router (vLLM Semantic Router)"
-    base_url = "${local.smart_router_openai_url}"
+    base_url = "${local.ai_gateway_smart_router_url}"
     env_key = "OPENAI_API_KEY"
     wire_api = "responses"
   TOML
@@ -553,7 +550,7 @@ resource "coder_agent" "main" {
     VISUAL              = "code"
     ANTHROPIC_BASE_URL  = local.ai_bridge_anthropic_url
     ANTHROPIC_API_BASE  = local.ai_bridge_anthropic_url
-    OPENAI_BASE_URL     = local.smart_router_openai_url
+    OPENAI_BASE_URL     = local.ai_gateway_smart_router_url
     GITLAB_TOKEN        = data.coder_external_auth.gitlab.access_token
     GITLAB_USER         = data.coder_workspace_owner.me.name
     GITLAB_HOST         = "gitlab.rhsummit.coderdemo.io"

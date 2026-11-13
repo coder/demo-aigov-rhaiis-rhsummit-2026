@@ -17,13 +17,10 @@
 # with additions for this deployment's Coder access URL and test fixtures.
 
 allowlist:
-  # This Coder deployment — AI Bridge, AgentAPI, workspace agent. Rendered
-  # from the workspace's access URL at plan time.
+  # This Coder deployment — AI Bridge / AI Gateway (incl. the `smart-router`
+  # provider that Codex uses), AgentAPI, workspace agent. Rendered from the
+  # workspace's access URL at plan time.
   - domain=${coder_host}
-
-  # Smart Router (vLLM Semantic Router) in-cluster Service — Codex CLI routes
-  # its OpenAI/Responses traffic here. Rendered from smart_router_host.
-  - domain=${smart_router_host}
 
   # Our self-hosted GitLab — so agents running under boundary can clone
   # from / push to internal repos (e.g. lab/cool-project). The initial
