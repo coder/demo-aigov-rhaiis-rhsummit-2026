@@ -43,9 +43,13 @@ spec:
 
   devicePlugin:
     enabled: true
+    # GPU time-slicing: the L40S node (labeled nvidia.com/device-plugin.config=l40s-ts2)
+    # advertises 2 nvidia.com/gpu slices so the semantic router's small Vela decision
+    # model can share the GPU with vllm-qwen3-coder (shared 48 GiB; compute time-sliced).
+    # All other GPU nodes use the "no-sharing" default (1 GPU, unchanged).
     config:
-      name: ""
-      default: ""
+      name: "time-slicing-config"
+      default: "no-sharing"
 
   gfd:
     enabled: true

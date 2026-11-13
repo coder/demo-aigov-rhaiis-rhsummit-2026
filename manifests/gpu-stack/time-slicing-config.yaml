@@ -1,0 +1,33 @@
+# GPU time-slicing profiles consumed by the NVIDIA GPU operator device plugin
+# (referenced from clusterpolicy.yaml spec.devicePlugin.config).
+#
+# - no-sharing: the cluster default — 1 nvidia.com/gpu per physical GPU (unchanged
+#   behavior for the A10G worker running vllm-executor).
+# - l40s-ts2: applied only to nodes labeled nvidia.com/device-plugin.config=l40s-ts2
+#   (the g6e.2xlarge / L40S node). Advertises 2 nvidia.com/gpu slices so the semantic
+#   router's Vela-2.0-0.8B decision model can run on the GPU alongside vllm-qwen3-coder.
+#   Time-slicing shares compute (interleaved); the 48 GiB is shared, not partitioned —
+#   qwen3-coder uses ~41 GiB, Vela ~2-3 GiB, leaving headroom.
+#
+# NOTE: the node label is applied out-of-band (oc label node <l40s> \
+#   nvidia.com/device-plugin.config=l40s-ts2). For durability across node
+#   replacement, add it to the L40S MachineSet's spec.template.spec.metadata.labels.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: time-slicing-config
+  namespace: nvidia-gpu-operator
+data:
+  no-sharing: |-
+    version: v1
+    flags:
+      migStrategy: none
+  l40s-ts2: |-
+    version: v1
+    flags:
+      migStrategy: none
+    sharing:
+      timeSlicing:
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 2
