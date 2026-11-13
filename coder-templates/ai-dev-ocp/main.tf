@@ -64,16 +64,6 @@ variable "anthropic_model" {
   default     = "global.anthropic.claude-opus-4-5-20251101-v1:0"
 }
 
-# Model Codex requests through the Smart Router (vLLM Semantic Router). The
-# router's virtual entrypoint `vllm-sr/auto` classifies each request and routes
-# it to the right backend (local Qwen3-Coder / Qwen2.5-7B, Bedrock burst, or
-# the Qwen3-VL vision tier).
-variable "openai_model" {
-  type        = string
-  description = "Model id Codex requests through the Smart Router. Use vllm-sr/auto to let the router classify and route per request."
-  default     = "vllm-sr/auto"
-}
-
 
 provider "kubernetes" {
   config_path = var.use_kubeconfig ? "~/.kube/config" : null
@@ -217,7 +207,7 @@ locals {
   #   * wire_api = "responses": current Codex dropped "chat".
   codex_base_config = <<-TOML
     model_provider = "openai-compat"
-    model = "${var.openai_model}"
+    model = "vllm-sr/auto"
     model_reasoning_effort = "medium"
     web_search = "disabled"
     sandbox_mode = "danger-full-access"
