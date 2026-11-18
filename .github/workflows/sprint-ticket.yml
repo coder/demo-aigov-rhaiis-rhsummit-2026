@@ -43,18 +43,31 @@ jobs:
       (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'sprint-ticket'))
 
     steps:
+      # Opening an issue from the sprint-ticket template adds the label automatically, so anyone
+      # can trigger this workflow. Only people with write access may provision a workspace.
+      - name: Require write access
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO:     ${{ github.repository }}
+          ACTOR:    ${{ github.event.sender.login || github.actor }}
+        run: |
+          set -euo pipefail
+          permission=$(gh api "repos/${REPO}/collaborators/${ACTOR}/permission" --jq .permission)
+          case "$permission" in
+            admin|write) echo "${ACTOR} has ${permission} access." ;;
+            *) echo "::error::${ACTOR} needs write access to provision a workspace (has ${permission})."; exit 1 ;;
+          esac
+
       - name: Resolve issue context
         id: ctx
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
-          ISSUE_TITLE:  ${{ github.event.issue.title || '' }}
         run: |
           set -euo pipefail
           # Workspace name: sprint-<issue_number>. Coder requires DNS-safe
           # names; the issue number alone is safe.
           echo "ws_name=sprint-${ISSUE_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "issue_number=${ISSUE_NUMBER}"   >> "$GITHUB_OUTPUT"
-          echo "issue_title=${ISSUE_TITLE}"     >> "$GITHUB_OUTPUT"
 
       - name: Install coder CLI
         run: |
@@ -109,7 +122,7 @@ jobs:
           echo "url=${CODER_URL}/@${USERNAME}/${WS_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Comment on issue with workspace link
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           WS_URL:    ${{ steps.url.outputs.url }}
           WS_NAME:   ${{ steps.ctx.outputs.ws_name }}
@@ -143,13 +156,15 @@ jobs:
 
       - name: Summary
         env:
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          ISSUE_TITLE:  ${{ github.event.issue.title }}
           WS_NAME:  ${{ steps.ctx.outputs.ws_name }}
           WS_URL:   ${{ steps.url.outputs.url }}
         run: |
           {
             echo "## Provisioned workspace"
             echo ""
-            echo "- Issue: #${{ steps.ctx.outputs.issue_number }} (${{ steps.ctx.outputs.issue_title }})"
+            echo "- Issue: #${ISSUE_NUMBER} (${ISSUE_TITLE})"
             echo "- Workspace: \`${WS_NAME}\`"
             echo "- URL: ${WS_URL}"
           } >> "$GITHUB_STEP_SUMMARY"
